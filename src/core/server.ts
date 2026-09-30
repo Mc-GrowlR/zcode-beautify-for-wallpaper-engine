@@ -816,8 +816,9 @@ function sanitizeRotation(raw: unknown): RotationConfig {
     if (!p || typeof p !== "object") return;
     const q = p as { id?: unknown; name?: unknown; mode?: unknown; entries?: unknown };
     const mode: RotationMode = q.mode === "random" || q.mode === "schedule" ? q.mode : "sequence";
+    // Plans without (valid) entries are kept: a freshly created plan in the
+    // panel starts empty, and dropping it here would make it vanish on save.
     const entries = validPlanEntries(mode, q.entries);
-    if (!entries.length) return;
     const id = typeof q.id === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(q.id) ? q.id : `p${Date.now().toString(36)}${i}`;
     const name = typeof q.name === "string" && q.name.trim() ? q.name.trim().slice(0, 20) : `方案 ${i + 1}`;
     plans.push({ id, name, mode, entries });

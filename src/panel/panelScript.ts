@@ -625,6 +625,31 @@ export function buildPanelScript(apiPort: number): string {
     plan.mode = schedMode();
     plan.entries = collectPlanEntries();
   }
+  function plansPayload() {
+    return schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, entries: p.entries }; });
+  }
+  /**
+   * Auto-persists plan structure edits (rename / create / delete): what the
+   * dropdown already shows must survive a reopen without requiring 保存.
+   * Keeps the current enabled state and active plan so playback is not
+   * disturbed; the editor is NOT reloaded afterwards.
+   */
+  function persistPlans() {
+    syncEditorIntoPlan();
+    var activeId = null;
+    for (var i = 0; i < schedPlans.length; i++) if (schedPlans[i].id === schedActiveId) activeId = schedActiveId;
+    post('/api/rotation', {
+      rotation: {
+        enabled: $('zb-sched-on').checked,
+        activePlanId: activeId,
+        plans: plansPayload()
+      }
+    }, function (d) {
+      if (d && d.error) { status(d.error); return; }
+      if (d && d.rotation) schedActiveId = d.rotation.activePlanId || schedActiveId;
+      renderPlanSelect();
+    });
+  }
   /** Cross-mode conversion: keeps the wallpaper refs, carries over seconds
    *  when present, spreads default times when switching to schedule. */
   function convertEntries(rawEntries, toMode) {
@@ -666,6 +691,7 @@ export function buildPanelScript(apiPort: number): string {
     schedIdx = schedPlans.length - 1;
     renderPlanSelect();
     renderPlanEditor();
+    persistPlans();
   });
   $('zb-plan-ren').addEventListener('click', function () {
     var row = document.querySelector('.zb-sched-plan');
@@ -679,10 +705,17 @@ export function buildPanelScript(apiPort: number): string {
     input.style.flex = '1';
     row.replaceChild(input, sel);
     input.focus(); input.select();
+    // One-shot guard: restoring the select unfocuses the input and fires
+    // blur, which would otherwise run done() a second time (and an Escape
+    // cancel would still commit the typed name).
+    var finished = false;
     var done = function (save) {
+      if (finished) return;
+      finished = true;
       if (save && input.value.trim()) plan.name = input.value.trim().slice(0, 20);
       row.replaceChild(sel, input);
       renderPlanSelect();
+      if (save) persistPlans();
     };
     input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') done(true);
@@ -704,6 +737,7 @@ export function buildPanelScript(apiPort: number): string {
     schedIdx = Math.min(schedIdx, schedPlans.length - 1);
     renderPlanSelect();
     renderPlanEditor();
+    persistPlans();
   });
   // Switching modes re-renders the rows in the new editor shape, keeping the
   // wallpapers and converting timing fields with sensible defaults.
