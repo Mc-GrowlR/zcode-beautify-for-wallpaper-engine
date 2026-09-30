@@ -61,12 +61,17 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-lib .zb-lib-head { opacity: .55; margin: 4px 0 2px; }',
     '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
     '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
+    '.zb-sched-mode { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; opacity: .85; font-size: 11px; }',
+    '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
+      ' outline: none; color-scheme: dark; }',
     '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }',
     '.zb-sched-row { display: flex; align-items: center; gap: 4px; }',
-    '.zb-sched-row input[type=number], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
+    '.zb-sched-row input[type=number], .zb-sched-row input[type=time], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
       ' outline: none; color-scheme: dark; }',
     '.zb-sched-row input[type=number] { width: 52px; flex: none; }',
+    '.zb-sched-row input[type=time] { width: 66px; flex: none; }',
     '.zb-sched-row select { flex: 1; min-width: 0; }',
     '.zb-sched-dur { flex: none; opacity: .7; font-size: 11px; }',
     '.zb-item { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; }',
@@ -138,13 +143,18 @@ export function buildPanelScript(apiPort: number): string {
     '    </div>' +
     '    <div class="zb-row zb-lib" id="zb-lib"></div>' +
     '    <div class="zb-row"><div class="zb-sched-head"><span>定时播放</span>' +
-    '      <label title="按顺序轮播选中的壁纸,每张播放设定的时长"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
+    '      <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
+    '      <div class="zb-sched-mode"><span>模式</span><select id="zb-sched-mode">' +
+    '        <option value="sequence">顺序轮播</option>' +
+    '        <option value="random">随机轮播</option>' +
+    '        <option value="schedule">定时切换</option>' +
+    '      </select></div>' +
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
-    '        <button class="zb-btn" id="zb-sched-add" title="添加一条:从壁纸库选择壁纸并设定播放时长">➕ 添加</button>' +
-    '        <button class="zb-btn" id="zb-sched-save" title="保存后立即从第一张开始轮播">保存并播放</button>' +
+    '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
+    '        <button class="zb-btn" id="zb-sched-save" title="保存后按所选模式生效">保存</button>' +
     '      </div>' +
-    '      <div class="zb-lib-head" style="margin:4px 0 0">每张播放设定的时长后自动切下一张,循环播放;保存即开始</div>' +
+    '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 0"></div>' +
     '    </div>' +
     '    <div class="zb-row zb-actions">' +
     '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
@@ -468,8 +478,16 @@ export function buildPanelScript(apiPort: number): string {
     return row;
   }
 
-  // --- wallpaper rotation (定时播放: duration-based playlist) ----------------
+  // --- wallpaper rotation (定时播放: sequence / random / schedule) -----------
   var schedOptions = [];
+  var SCHED_DEFAULT_TIMES = ['09:00', '12:00', '18:00', '21:00'];
+  var MODE_HINTS = {
+    sequence: '每张播放设定的时长后自动切下一张,顺序循环;保存即开始',
+    random: '随机顺序播放,同一张不会连续出现;保存即开始',
+    schedule: '每天到设定的时间点切换到对应壁纸;保存后到点生效'
+  };
+  function schedMode() { return $('zb-sched-mode').value || 'sequence'; }
+  function applyModeHint() { $('zb-sched-hint').textContent = MODE_HINTS[schedMode()] || ''; }
   function fetchScheduleOptions() {
     return fetch(API + '/api/library')
       .then(function (r) { return r.json(); })
@@ -488,6 +506,22 @@ export function buildPanelScript(apiPort: number): string {
   function schedRow(entry) {
     var row = document.createElement('div');
     row.className = 'zb-sched-row';
+    if (schedMode() === 'schedule') {
+      var t = document.createElement('input');
+      t.type = 'time';
+      t.value = entry.time || '09:00';
+      row.appendChild(t);
+    } else {
+      var d = document.createElement('input');
+      d.type = 'number';
+      d.min = '0.5'; d.step = '0.5';
+      d.value = entry.seconds ? String(Math.round((entry.seconds / 60) * 10) / 10) : '5';
+      d.title = '播放时长(分钟)';
+      row.appendChild(d);
+      var u = document.createElement('span');
+      u.className = 'zb-sched-dur'; u.textContent = '分';
+      row.appendChild(u);
+    }
     var sel = document.createElement('select');
     var val = entry.hash ? ('h:' + entry.hash) : (entry.path ? ('p:' + entry.path) : '');
     var known = false;
@@ -503,50 +537,75 @@ export function buildPanelScript(apiPort: number): string {
       sel.insertBefore(miss, sel.firstChild);
     }
     row.appendChild(sel);
-    var dur = document.createElement('input');
-    dur.type = 'number';
-    dur.min = '0.5'; dur.step = '0.5';
-    dur.value = entry.seconds ? String(Math.round((entry.seconds / 60) * 10) / 10) : '5';
-    dur.title = '播放时长(分钟)';
-    row.appendChild(dur);
-    var unit = document.createElement('span');
-    unit.className = 'zb-sched-dur'; unit.textContent = '分';
-    row.appendChild(unit);
     var del = document.createElement('button');
     del.className = 'zb-act'; del.textContent = '✕'; del.title = '删除此条';
     del.addEventListener('click', function () { row.remove(); });
     row.appendChild(del);
     return row;
   }
+  function renderSchedRows(entries) {
+    var list = $('zb-sched-list');
+    list.innerHTML = '';
+    (entries || []).forEach(function (e) { list.appendChild(schedRow(e)); });
+  }
+  /** Reads the rows back into entry objects for the current mode. */
+  function collectRotation() {
+    var entries = [];
+    var rows = document.querySelectorAll('#zb-sched-list .zb-sched-row');
+    var isSchedule = schedMode() === 'schedule';
+    for (var i = 0; i < rows.length; i++) {
+      var v = rows[i].querySelector('select').value;
+      if (!v || v.length < 3) continue;
+      var ref = v.slice(0, 2) === 'h:' ? { hash: v.slice(2) } : { path: v.slice(2) };
+      if (isSchedule) {
+        var time = rows[i].querySelector('input[type=time]').value;
+        if (!time) continue;
+        entries.push({ time: time, ref: ref });
+      } else {
+        var minutes = Number(rows[i].querySelector('input[type=number]').value);
+        if (!isFinite(minutes) || minutes <= 0) continue;
+        var seconds = Math.round(minutes * 60);
+        if (seconds < 10) seconds = 10;
+        entries.push({ seconds: seconds, ref: ref });
+      }
+    }
+    return { enabled: $('zb-sched-on').checked, mode: schedMode(), entries: entries };
+  }
+  /** Cross-mode conversion: keeps the wallpaper refs, carries over seconds
+   *  when present, spreads default times when switching to schedule. */
+  function convertEntries(rawEntries, toMode) {
+    return (rawEntries || []).map(function (e, i) {
+      var ref = e.ref || e;
+      var out = ref.hash ? { hash: ref.hash } : { path: ref.path };
+      if (toMode === 'schedule') {
+        if (e.time) out.time = e.time;
+        else out.time = SCHED_DEFAULT_TIMES[i % SCHED_DEFAULT_TIMES.length];
+      } else {
+        out.seconds = e.seconds || (ref.seconds) || 300;
+      }
+      return out;
+    });
+  }
   function loadRotation() {
     fetchScheduleOptions().then(function () {
       return fetch(API + '/api/rotation').then(function (r) { return r.json(); });
     }).then(function (d) {
-      var rot = (d && d.rotation) || { enabled: false, entries: [] };
+      var rot = (d && d.rotation) || { enabled: false, mode: 'sequence', entries: [] };
       $('zb-sched-on').checked = !!rot.enabled;
-      var list = $('zb-sched-list');
-      list.innerHTML = '';
-      (rot.entries || []).forEach(function (e) { list.appendChild(schedRow(e)); });
+      $('zb-sched-mode').value = rot.mode || 'sequence';
+      applyModeHint();
+      renderSchedRows(rot.entries || []);
     }).catch(function () { /* offline */ });
   }
-  function collectRotation() {
-    var entries = [];
-    var rows = document.querySelectorAll('#zb-sched-list .zb-sched-row');
-    for (var i = 0; i < rows.length; i++) {
-      var v = rows[i].querySelector('select').value;
-      var minutes = Number(rows[i].querySelector('input[type=number]').value);
-      if (!v || v.length < 3 || !isFinite(minutes) || minutes <= 0) continue;
-      var seconds = Math.round(minutes * 60);
-      if (seconds < 10) seconds = 10;
-      if (v.slice(0, 2) === 'h:') entries.push({ seconds: seconds, hash: v.slice(2) });
-      else entries.push({ seconds: seconds, path: v.slice(2) });
-    }
-    return { enabled: $('zb-sched-on').checked, entries: entries };
-  }
+  // Switching modes re-renders the rows in the new editor shape, keeping the
+  // wallpapers and converting timing fields with sensible defaults.
+  $('zb-sched-mode').addEventListener('change', function () {
+    applyModeHint();
+    renderSchedRows(convertEntries(collectRotation().entries, schedMode()));
+  });
   $('zb-sched-add').addEventListener('click', function () {
-    // New rows default to the wallpaper currently applied.
     var doAdd = function () {
-      var entry = { seconds: 300 };
+      var entry = schedMode() === 'schedule' ? { time: '09:00' } : { seconds: 300 };
       var key = currentWallpaperKey();
       if (key.slice(0, 2) === 'h:') entry.hash = key.slice(2);
       else if (key.length > 2) entry.path = key.slice(2);
@@ -562,9 +621,15 @@ export function buildPanelScript(apiPort: number): string {
     doAdd();
   });
   $('zb-sched-save').addEventListener('click', function () {
-    post('/api/rotation', { rotation: collectRotation() }, function (d) {
+    var payload = collectRotation();
+    // the API expects ref fields inline on each entry
+    payload.entries = payload.entries.map(function (e) {
+      var ref = e.ref || {};
+      return schedMode() === 'schedule' ? { time: e.time, hash: ref.hash, path: ref.path } : { seconds: e.seconds, hash: ref.hash, path: ref.path };
+    });
+    post('/api/rotation', { rotation: payload }, function (d) {
       if (d && d.error) { status(d.error); return; }
-      status(d && d.rotation && d.rotation.enabled ? '定时播放已保存,开始轮播' : '定时播放已保存(未启用)');
+      status(payload.enabled ? '定时播放已保存并生效' : '定时播放已保存(未启用)');
       loadRotation();
     });
   });

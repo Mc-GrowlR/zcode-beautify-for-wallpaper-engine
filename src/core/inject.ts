@@ -9,20 +9,29 @@ import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js"
 
 export type WallpaperFit = "cover" | "contain" | "smart";
 
+/**
+ * Rotation modes: "sequence" plays every entry for its duration in order and
+ * loops; "random" does the same but never repeats the current entry back to
+ * back; "schedule" switches at the entry's daily clock time.
+ */
+export type RotationMode = "sequence" | "random" | "schedule";
+
 /** One playlist item: a wallpaper reference plus how long it stays on. */
 export interface RotationEntry {
-  /** Play duration in seconds (>= 10). */
-  seconds: number;
+  /** sequence/random: play duration in seconds (>= 10). */
+  seconds?: number;
+  /** schedule: daily local clock time, "HH:MM" (24h). */
+  time?: string;
   /** Scene loop reference: cache hash (scenes/<hash>/loop.mp4). */
   hash?: string;
   /** Static image reference: absolute path inside the data dir. */
   path?: string;
 }
 
-/** Wallpaper rotation (定时播放): play each entry for its duration, in order,
- *  wrapping around — a playlist, not clock-time switching. */
+/** Wallpaper rotation (定时播放): a playlist plus the playback mode. */
 export interface RotationConfig {
   enabled: boolean;
+  mode: RotationMode;
   entries: RotationEntry[];
 }
 

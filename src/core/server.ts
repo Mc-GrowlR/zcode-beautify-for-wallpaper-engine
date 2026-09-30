@@ -599,7 +599,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // --- wallpaper rotation (定时播放: duration-based playlist) -------------
 
       if (req.method === "GET" && url.pathname === "/api/rotation") {
-        sendJson(res, 200, { rotation: runtimeConfig().rotation ?? { enabled: false, entries: [] } });
+        // Legacy stored configs predate `mode` — normalize to sequence.
+        const stored = runtimeConfig().rotation as Partial<RotationConfig> | undefined;
+        sendJson(res, 200, { rotation: { enabled: false, mode: "sequence", entries: [], ...stored } });
         return;
       }
 
@@ -649,37 +651,88 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   console.log(`serve: control API on http://127.0.0.1:${apiPort} — Ctrl+C to stop`);
   console.log(`serve: injecting into ZCode renderers on CDP port ${cdpPort}`);
 
-  // --- wallpaper rotation (定时播放: duration-based playlist) -----------------
-  // Applies each entry in order for its configured duration, then the next,
-  // wrapping around. Restarting the playlist (save or serve start) re-applies
-  // entry 0 immediately so enabling the feature shows it is working.
+  // --- wallpaper rotation (定时播放) ------------------------------------------
+  // Three modes: "sequence" plays every entry for its duration in order and
+  // loops; "random" does the same but never plays the same entry twice in a
+  // row; "schedule" switches at daily HH:MM clock times and leaves the
+  // wallpaper alone in between. Restarting a duration playlist (save or serve
+  // start) re-applies entry 0 immediately; the schedule mode only acts when
+  // one of its minutes arrives.
   let rotationTimer: NodeJS.Timeout | undefined;
+  let rotationTick: NodeJS.Timeout | undefined;
+  let lastScheduleFire = "";
+  let randomAvoid = -1;
+
   async function playRotationEntry(index: number): Promise<void> {
     const rot = runtimeConfig().rotation;
-    if (!rot?.enabled || !rot.entries.length) return;
-    const i = ((index % rot.entries.length) + rot.entries.length) % rot.entries.length;
+    if (!rot?.enabled || rot.mode === "schedule" || !rot.entries.length) return;
+    const n = rot.entries.length;
+    const i = ((index % n) + n) % n;
     const entry = rot.entries[i];
+    randomAvoid = i;
     try {
       const r = await applyRef(entry);
-      console.log(`serve: rotation ${i + 1}/${rot.entries.length} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
+      console.log(`serve: rotation [${rot.mode}] ${i + 1}/${n} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
     } catch (err) {
       console.error(`serve: rotation apply failed — ${(err as Error).message}`);
     }
     if (rotationTimer) clearTimeout(rotationTimer);
     rotationTimer = setTimeout(() => {
-      void playRotationEntry(i + 1);
-    }, Math.max(10, entry.seconds) * 1000);
+      const cur = runtimeConfig().rotation;
+      if (!cur?.enabled || cur.mode === "schedule" || !cur.entries.length) return;
+      const total = cur.entries.length;
+      let next: number;
+      if (cur.mode === "random" && total > 1) {
+        do {
+          next = Math.floor(Math.random() * total);
+        } while (next === randomAvoid);
+      } else {
+        next = (i + 1) % total;
+      }
+      void playRotationEntry(next);
+    }, Math.max(10, entry.seconds ?? 60) * 1000);
     rotationTimer.unref?.();
   }
+
+  /** Schedule-mode minute check; the "date + HH:MM" key fires each entry at
+   *  most once per day even though several ticks land inside its minute. */
+  function checkRotationSchedule(): void {
+    const rot = runtimeConfig().rotation;
+    if (!rot?.enabled || rot.mode !== "schedule" || !rot.entries.length) return;
+    const now = new Date();
+    const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const fireKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()} ${hhmm}`;
+    if (fireKey === lastScheduleFire) return;
+    const due = rot.entries.filter((e) => e.time === hhmm);
+    if (!due.length) return;
+    lastScheduleFire = fireKey;
+    const entry = due[due.length - 1];
+    void applyRef(entry)
+      .then((r) => console.log(`serve: rotation [schedule] ${hhmm} -> ${entry.hash ?? entry.path} (${r.windows} window(s))`))
+      .catch((err: Error) => console.error(`serve: rotation schedule fire failed — ${err.message}`));
+  }
+
   /** (Re)starts or stops the playlist per the current stored rotation. */
   function startRotation(): void {
     if (rotationTimer) {
       clearTimeout(rotationTimer);
       rotationTimer = undefined;
     }
+    if (rotationTick) {
+      clearInterval(rotationTick);
+      rotationTick = undefined;
+    }
+    lastScheduleFire = "";
+    randomAvoid = -1;
     const rot = runtimeConfig().rotation;
     if (!rot?.enabled || !rot.entries.length) return;
-    void playRotationEntry(0);
+    if (rot.mode === "schedule") {
+      rotationTick = setInterval(checkRotationSchedule, 20_000);
+      rotationTick.unref?.();
+      checkRotationSchedule();
+    } else {
+      void playRotationEntry(0);
+    }
   }
 
   // Initial pass, then keep polling so restarts of the app get re-injected.
@@ -693,25 +746,40 @@ export async function startServe(opts: ServeOptions): Promise<void> {
 }
 
 /**
- * Validates a rotation playlist posted by the panel: every entry needs a
- * play duration (>= 10s) and a wallpaper reference that still exists (scene
- * loop by hash or image file by path). Invalid entries are dropped, not
- * rejected, so one deleted wallpaper never blocks the whole playlist.
+ * Validates a rotation playlist posted by the panel, per mode:
+ * - sequence/random — every entry needs a duration (>= 10s) and an existing
+ *   wallpaper reference;
+ * - schedule — every entry needs a daily "HH:MM" time (one per time) and an
+ *   existing wallpaper reference.
+ * Invalid entries are dropped, not rejected, so one deleted wallpaper never
+ * blocks the whole playlist.
  */
 function sanitizeRotation(raw: unknown): RotationConfig {
-  const out: RotationConfig = { enabled: false, entries: [] };
+  const out: RotationConfig = { enabled: false, mode: "sequence", entries: [] };
   if (!raw || typeof raw !== "object") return out;
-  const r = raw as { enabled?: unknown; entries?: unknown };
+  const r = raw as { enabled?: unknown; mode?: unknown; entries?: unknown };
   if (typeof r.enabled === "boolean") out.enabled = r.enabled;
+  if (r.mode === "sequence" || r.mode === "random" || r.mode === "schedule") out.mode = r.mode;
   if (Array.isArray(r.entries)) {
+    const seenTimes = new Set<string>();
     for (const e of r.entries.slice(0, 20)) {
       if (!e || typeof e !== "object") continue;
-      const { seconds, hash, path: imgPath } = e as { seconds?: unknown; hash?: unknown; path?: unknown };
-      if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 10 || seconds > 86400) continue;
-      if (typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs.existsSync(path.join(scenesCacheRoot(), hash, "loop.mp4"))) {
-        out.entries.push({ seconds: Math.round(seconds), hash });
-      } else if (typeof imgPath === "string" && fs.existsSync(imgPath)) {
-        out.entries.push({ seconds: Math.round(seconds), path: imgPath });
+      const { seconds, time, hash, path: imgPath } = e as { seconds?: unknown; time?: unknown; hash?: unknown; path?: unknown };
+      const ref =
+        typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs.existsSync(path.join(scenesCacheRoot(), hash, "loop.mp4"))
+          ? { hash }
+          : typeof imgPath === "string" && fs.existsSync(imgPath)
+            ? { path: imgPath }
+            : undefined;
+      if (!ref) continue;
+      if (out.mode === "schedule") {
+        if (typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) continue;
+        if (seenTimes.has(time)) continue;
+        seenTimes.add(time);
+        out.entries.push({ time, ...ref });
+      } else {
+        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 10 || seconds > 86400) continue;
+        out.entries.push({ seconds: Math.round(seconds), ...ref });
       }
     }
   }
