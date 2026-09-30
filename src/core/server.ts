@@ -21,7 +21,7 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, type BeautifyConfig } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, type BeautifyConfig, type RotationConfig } from "./inject.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildPanelScript } from "../panel/panelScript.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
@@ -95,6 +95,8 @@ function publicConfig(config: BeautifyConfig) {
     cdpPort: config.port,
     mediaType: config.mediaType ?? "image",
     sceneHash: config.sceneHash,
+    /** Current wallpaper file (image mode) — lets the panel preselect it. */
+    wallpaperPath: config.mediaType === "video" ? undefined : config.wallpaperPath,
   };
 }
 
@@ -288,6 +290,41 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     port: currentConfig().port,
   });
 
+  /**
+   * Applies a library wallpaper (scene loop by hash, or image by path).
+   * Shared by the /api/apply-wallpaper endpoint and the schedule timer, so
+   * a scheduled switch behaves exactly like clicking the item in the panel.
+   */
+  const applyRef = async (ref: { hash?: string; path?: string }): Promise<{ windows: number }> => {
+    const config = runtimeConfig();
+    if (typeof ref.hash === "string") {
+      const loopPath = path.join(scenesCacheRoot(), ref.hash, "loop.mp4");
+      if (!fs.existsSync(loopPath)) throw new Error("unknown scene hash");
+      const next: BeautifyConfig = {
+        ...config,
+        mediaType: "video",
+        sceneHash: ref.hash,
+        wallpaperPath: loopPath,
+        apiPort,
+        sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${ref.hash}.mp4`,
+      };
+      saveConfig(persisted(next));
+      return { windows: await pushConfigToSessions(next).catch(() => 0) };
+    }
+    if (typeof ref.path === "string" && fs.existsSync(ref.path)) {
+      const next: BeautifyConfig = {
+        ...config,
+        wallpaperPath: ref.path,
+        mediaType: "image",
+        sceneHash: undefined,
+        sceneVideoUrl: undefined,
+      };
+      saveConfig(persisted(next));
+      return { windows: await pushConfigToSessions(next).catch(() => 0) };
+    }
+    throw new Error("provide hash or existing path");
+  };
+
   const already = await existingServePid(apiPort);
   if (already !== undefined) {
     throw new Error(
@@ -411,6 +448,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       if (req.method === "POST" && url.pathname === "/api/import-scene") {
         const body = JSON.parse(await readBody(req));
         const scenePath = typeof body?.path === "string" ? body.path.trim() : "";
+        const sceneOpts = typeof body?.maxSeconds === "number" && body.maxSeconds >= 5 && body.maxSeconds <= 60 ? { maxSeconds: body.maxSeconds } : {};
         if (!scenePath) throw new Error("path is required");
         if (importJob.running) {
           sendJson(res, 409, { error: "another import is already running", stage: importJob.stage });
@@ -421,7 +459,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         void importScene(scenePath, (stage, detail) => {
           importJob.stage = stage;
           importJob.detail = detail;
-        })
+        }, sceneOpts)
           .then(async (result: SceneImportResult) => {
             importJob = {
               running: false,
@@ -461,37 +499,12 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // Apply an item from the library: image by path, scene by cache hash.
       if (req.method === "POST" && url.pathname === "/api/apply-wallpaper") {
         const body = JSON.parse(await readBody(req));
-        const config = runtimeConfig();
-        if (typeof body?.hash === "string") {
-          const loopPath = path.join(scenesCacheRoot(), body.hash, "loop.mp4");
-          if (!fs.existsSync(loopPath)) throw new Error("unknown scene hash");
-          const next: BeautifyConfig = {
-            ...config,
-            mediaType: "video",
-            sceneHash: body.hash,
-            wallpaperPath: loopPath,
-            apiPort,
-            sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${body.hash}.mp4`,
-          };
-          saveConfig(persisted(next));
-          const windows = await pushConfigToSessions(next).catch(() => 0);
-          sendJson(res, 200, { ok: true, windows, ...publicConfig(next) });
-          return;
-        }
-        if (typeof body?.path === "string" && fs.existsSync(body.path)) {
-          const next: BeautifyConfig = {
-            ...config,
-            wallpaperPath: body.path,
-            mediaType: "image",
-            sceneHash: undefined,
-            sceneVideoUrl: undefined,
-          };
-          saveConfig(persisted(next));
-          const windows = await pushConfigToSessions(next).catch(() => 0);
-          sendJson(res, 200, { ok: true, windows, ...publicConfig(next) });
-          return;
-        }
-        throw new Error("provide hash or existing path");
+        const r = await applyRef({
+          hash: typeof body?.hash === "string" ? body.hash : undefined,
+          path: typeof body?.path === "string" ? body.path : undefined,
+        });
+        sendJson(res, 200, { ok: true, windows: r.windows, ...publicConfig(runtimeConfig()) });
+        return;
       }
 
       // Library listing for the panel: static images + cached scene loops.
@@ -583,6 +596,25 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         throw new Error("kind must be scene (with hash) or image (with path)");
       }
 
+      // --- wallpaper rotation (定时播放: duration-based playlist) -------------
+
+      if (req.method === "GET" && url.pathname === "/api/rotation") {
+        sendJson(res, 200, { rotation: runtimeConfig().rotation ?? { enabled: false, entries: [] } });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/rotation") {
+        const body = JSON.parse(await readBody(req));
+        const next = sanitizeRotation(body?.rotation);
+        const stored = persisted({ ...runtimeConfig(), rotation: next });
+        // Drop the legacy clock-time `schedule` field from the first version.
+        delete (stored as unknown as Record<string, unknown>).schedule;
+        saveConfig(stored);
+        startRotation();
+        sendJson(res, 200, { ok: true, rotation: next });
+        return;
+      }
+
       // Loop video streaming for the injected <video> layer (Range-capable).
       if (req.method === "GET" && url.pathname.startsWith("/media/scene/")) {
         const hash = /^\/media\/scene\/([a-f0-9]{8,64})\.mp4$/.exec(url.pathname)?.[1];
@@ -617,12 +649,73 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   console.log(`serve: control API on http://127.0.0.1:${apiPort} — Ctrl+C to stop`);
   console.log(`serve: injecting into ZCode renderers on CDP port ${cdpPort}`);
 
+  // --- wallpaper rotation (定时播放: duration-based playlist) -----------------
+  // Applies each entry in order for its configured duration, then the next,
+  // wrapping around. Restarting the playlist (save or serve start) re-applies
+  // entry 0 immediately so enabling the feature shows it is working.
+  let rotationTimer: NodeJS.Timeout | undefined;
+  async function playRotationEntry(index: number): Promise<void> {
+    const rot = runtimeConfig().rotation;
+    if (!rot?.enabled || !rot.entries.length) return;
+    const i = ((index % rot.entries.length) + rot.entries.length) % rot.entries.length;
+    const entry = rot.entries[i];
+    try {
+      const r = await applyRef(entry);
+      console.log(`serve: rotation ${i + 1}/${rot.entries.length} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
+    } catch (err) {
+      console.error(`serve: rotation apply failed — ${(err as Error).message}`);
+    }
+    if (rotationTimer) clearTimeout(rotationTimer);
+    rotationTimer = setTimeout(() => {
+      void playRotationEntry(i + 1);
+    }, Math.max(10, entry.seconds) * 1000);
+    rotationTimer.unref?.();
+  }
+  /** (Re)starts or stops the playlist per the current stored rotation. */
+  function startRotation(): void {
+    if (rotationTimer) {
+      clearTimeout(rotationTimer);
+      rotationTimer = undefined;
+    }
+    const rot = runtimeConfig().rotation;
+    if (!rot?.enabled || !rot.entries.length) return;
+    void playRotationEntry(0);
+  }
+
   // Initial pass, then keep polling so restarts of the app get re-injected.
   await poll(runtimeConfig(), apiPort);
+  // Resume an enabled rotation playlist (re-applies entry 0).
+  startRotation();
   for (;;) {
     await new Promise((r) => setTimeout(r, POLL_MS));
     await poll(runtimeConfig(), apiPort);
   }
+}
+
+/**
+ * Validates a rotation playlist posted by the panel: every entry needs a
+ * play duration (>= 10s) and a wallpaper reference that still exists (scene
+ * loop by hash or image file by path). Invalid entries are dropped, not
+ * rejected, so one deleted wallpaper never blocks the whole playlist.
+ */
+function sanitizeRotation(raw: unknown): RotationConfig {
+  const out: RotationConfig = { enabled: false, entries: [] };
+  if (!raw || typeof raw !== "object") return out;
+  const r = raw as { enabled?: unknown; entries?: unknown };
+  if (typeof r.enabled === "boolean") out.enabled = r.enabled;
+  if (Array.isArray(r.entries)) {
+    for (const e of r.entries.slice(0, 20)) {
+      if (!e || typeof e !== "object") continue;
+      const { seconds, hash, path: imgPath } = e as { seconds?: unknown; hash?: unknown; path?: unknown };
+      if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 10 || seconds > 86400) continue;
+      if (typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs.existsSync(path.join(scenesCacheRoot(), hash, "loop.mp4"))) {
+        out.entries.push({ seconds: Math.round(seconds), hash });
+      } else if (typeof imgPath === "string" && fs.existsSync(imgPath)) {
+        out.entries.push({ seconds: Math.round(seconds), path: imgPath });
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -634,6 +727,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
 async function pickFileViaDialog(): Promise<string> {
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true
 $d = New-Object System.Windows.Forms.OpenFileDialog

@@ -59,6 +59,16 @@ export function buildPanelScript(apiPort: number): string {
       ' line-height: 1.5; white-space: pre-wrap; user-select: text; max-height: 180px; overflow: auto; }',
     '.zb-lib { max-height: 120px; overflow: auto; font-size: 11px; }',
     '.zb-lib .zb-lib-head { opacity: .55; margin: 4px 0 2px; }',
+    '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
+    '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
+    '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }',
+    '.zb-sched-row { display: flex; align-items: center; gap: 4px; }',
+    '.zb-sched-row input[type=number], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
+      ' outline: none; color-scheme: dark; }',
+    '.zb-sched-row input[type=number] { width: 52px; flex: none; }',
+    '.zb-sched-row select { flex: 1; min-width: 0; }',
+    '.zb-sched-dur { flex: none; opacity: .7; font-size: 11px; }',
     '.zb-item { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; }',
     '.zb-item:hover { background: rgba(255,255,255,.1); }',
     '.zb-item[data-current="1"] { background: rgba(122,162,247,.25); }',
@@ -127,6 +137,15 @@ export function buildPanelScript(apiPort: number): string {
     '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
     '    </div>' +
     '    <div class="zb-row zb-lib" id="zb-lib"></div>' +
+    '    <div class="zb-row"><div class="zb-sched-head"><span>定时播放</span>' +
+    '      <label title="按顺序轮播选中的壁纸,每张播放设定的时长"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
+    '      <div id="zb-sched-list"></div>' +
+    '      <div class="zb-actions">' +
+    '        <button class="zb-btn" id="zb-sched-add" title="添加一条:从壁纸库选择壁纸并设定播放时长">➕ 添加</button>' +
+    '        <button class="zb-btn" id="zb-sched-save" title="保存后立即从第一张开始轮播">保存并播放</button>' +
+    '      </div>' +
+    '      <div class="zb-lib-head" style="margin:4px 0 0">每张播放设定的时长后自动切下一张,循环播放;保存即开始</div>' +
+    '    </div>' +
     '    <div class="zb-row zb-actions">' +
     '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
     '    </div>' +
@@ -202,11 +221,24 @@ export function buildPanelScript(apiPort: number): string {
     }
   }
 
+  // Last /api/config seen by refresh(); the add-button uses it to preselect
+  // the currently applied wallpaper in a new rotation row.
+  var lastConfig = null;
+  function currentWallpaperKey() {
+    if (lastConfig) {
+      if (lastConfig.mediaType === 'video' && lastConfig.sceneHash) return 'h:' + lastConfig.sceneHash;
+      if (lastConfig.wallpaperPath) return 'p:' + lastConfig.wallpaperPath;
+      return '';
+    }
+    try { return localStorage.getItem('zcode-beautify:current-key') || ''; } catch (e) { return ''; }
+  }
+
   function refresh() {
     fetch(API + '/api/config')
       .then(function (r) { return r.json(); })
       .then(function (c) {
         setOffline(false);
+        lastConfig = c;
         $('zb-blur').value = c.blur; $('zb-blur-val').textContent = c.blur;
         $('zb-dim').value = c.dim; $('zb-dim-val').textContent = c.dim;
         $('zb-monet').checked = !!c.monet;
@@ -436,6 +468,107 @@ export function buildPanelScript(apiPort: number): string {
     return row;
   }
 
+  // --- wallpaper rotation (定时播放: duration-based playlist) ----------------
+  var schedOptions = [];
+  function fetchScheduleOptions() {
+    return fetch(API + '/api/library')
+      .then(function (r) { return r.json(); })
+      .then(function (lib) {
+        schedOptions = [];
+        (lib.scenes || []).forEach(function (s) {
+          schedOptions.push({ value: 'h:' + s.hash, label: '▶ ' + (s.name || ('场景 ' + s.hash.slice(0, 8))) });
+        });
+        (lib.images || []).forEach(function (im) {
+          schedOptions.push({ value: 'p:' + im.path, label: '🖼 ' + im.name });
+        });
+        if (!schedOptions.length) schedOptions = [{ value: '', label: '(壁纸库为空)' }];
+      })
+      .catch(function () { /* offline */ });
+  }
+  function schedRow(entry) {
+    var row = document.createElement('div');
+    row.className = 'zb-sched-row';
+    var sel = document.createElement('select');
+    var val = entry.hash ? ('h:' + entry.hash) : (entry.path ? ('p:' + entry.path) : '');
+    var known = false;
+    schedOptions.forEach(function (o) {
+      var op = document.createElement('option');
+      op.value = o.value; op.textContent = o.label;
+      if (o.value === val) { op.selected = true; known = true; }
+      sel.appendChild(op);
+    });
+    if (val && !known) {
+      var miss = document.createElement('option');
+      miss.value = val; miss.textContent = '(壁纸已失效)'; miss.selected = true;
+      sel.insertBefore(miss, sel.firstChild);
+    }
+    row.appendChild(sel);
+    var dur = document.createElement('input');
+    dur.type = 'number';
+    dur.min = '0.5'; dur.step = '0.5';
+    dur.value = entry.seconds ? String(Math.round((entry.seconds / 60) * 10) / 10) : '5';
+    dur.title = '播放时长(分钟)';
+    row.appendChild(dur);
+    var unit = document.createElement('span');
+    unit.className = 'zb-sched-dur'; unit.textContent = '分';
+    row.appendChild(unit);
+    var del = document.createElement('button');
+    del.className = 'zb-act'; del.textContent = '✕'; del.title = '删除此条';
+    del.addEventListener('click', function () { row.remove(); });
+    row.appendChild(del);
+    return row;
+  }
+  function loadRotation() {
+    fetchScheduleOptions().then(function () {
+      return fetch(API + '/api/rotation').then(function (r) { return r.json(); });
+    }).then(function (d) {
+      var rot = (d && d.rotation) || { enabled: false, entries: [] };
+      $('zb-sched-on').checked = !!rot.enabled;
+      var list = $('zb-sched-list');
+      list.innerHTML = '';
+      (rot.entries || []).forEach(function (e) { list.appendChild(schedRow(e)); });
+    }).catch(function () { /* offline */ });
+  }
+  function collectRotation() {
+    var entries = [];
+    var rows = document.querySelectorAll('#zb-sched-list .zb-sched-row');
+    for (var i = 0; i < rows.length; i++) {
+      var v = rows[i].querySelector('select').value;
+      var minutes = Number(rows[i].querySelector('input[type=number]').value);
+      if (!v || v.length < 3 || !isFinite(minutes) || minutes <= 0) continue;
+      var seconds = Math.round(minutes * 60);
+      if (seconds < 10) seconds = 10;
+      if (v.slice(0, 2) === 'h:') entries.push({ seconds: seconds, hash: v.slice(2) });
+      else entries.push({ seconds: seconds, path: v.slice(2) });
+    }
+    return { enabled: $('zb-sched-on').checked, entries: entries };
+  }
+  $('zb-sched-add').addEventListener('click', function () {
+    // New rows default to the wallpaper currently applied.
+    var doAdd = function () {
+      var entry = { seconds: 300 };
+      var key = currentWallpaperKey();
+      if (key.slice(0, 2) === 'h:') entry.hash = key.slice(2);
+      else if (key.length > 2) entry.path = key.slice(2);
+      $('zb-sched-list').appendChild(schedRow(entry));
+    };
+    if (!schedOptions.length || schedOptions[0].value === '') {
+      fetchScheduleOptions().then(function () {
+        if (!schedOptions.length || schedOptions[0].value === '') { status('壁纸库为空,先导入或更换壁纸'); return; }
+        doAdd();
+      });
+      return;
+    }
+    doAdd();
+  });
+  $('zb-sched-save').addEventListener('click', function () {
+    post('/api/rotation', { rotation: collectRotation() }, function (d) {
+      if (d && d.error) { status(d.error); return; }
+      status(d && d.rotation && d.rotation.enabled ? '定时播放已保存,开始轮播' : '定时播放已保存(未启用)');
+      loadRotation();
+    });
+  });
+
   $('zb-reset').addEventListener('click', function () {
     var mode = this.getAttribute('data-mode') || 'reset';
     post(mode === 'restore' ? '/api/restore' : '/api/reset', {}, function () {
@@ -460,6 +593,7 @@ export function buildPanelScript(apiPort: number): string {
     if (!p.hidden) {
       refresh();
       loadLibrary();
+      loadRotation();
       beat(true);
     } else if (root.getAttribute('data-offline') !== '1') {
       beat(false);

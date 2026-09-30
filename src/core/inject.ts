@@ -9,6 +9,23 @@ import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js"
 
 export type WallpaperFit = "cover" | "contain" | "smart";
 
+/** One playlist item: a wallpaper reference plus how long it stays on. */
+export interface RotationEntry {
+  /** Play duration in seconds (>= 10). */
+  seconds: number;
+  /** Scene loop reference: cache hash (scenes/<hash>/loop.mp4). */
+  hash?: string;
+  /** Static image reference: absolute path inside the data dir. */
+  path?: string;
+}
+
+/** Wallpaper rotation (定时播放): play each entry for its duration, in order,
+ *  wrapping around — a playlist, not clock-time switching. */
+export interface RotationConfig {
+  enabled: boolean;
+  entries: RotationEntry[];
+}
+
 export interface BeautifyConfig {
   port: number;
   wallpaperPath?: string;
@@ -28,6 +45,8 @@ export interface BeautifyConfig {
   sceneHash?: string;
   /** Serve API port used to derive sceneVideoUrl (default 9223). */
   apiPort?: number;
+  /** Wallpaper rotation playlist (定时播放). */
+  rotation?: RotationConfig;
 }
 
 export const DEFAULT_CONFIG: BeautifyConfig = {

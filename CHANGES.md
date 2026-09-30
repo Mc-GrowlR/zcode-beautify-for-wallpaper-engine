@@ -3,6 +3,13 @@
 > 基于 fork 上游 0.2.1（27d8699）。所有改动均为增量，静态壁纸原有链路保持不变。
 > 0.3.0：场景壁纸 + 视频壁纸（.mp4/.webm 直接导入）+ 循环冻结看门狗 + ZCode 启动自动拉起 serve。
 
+## 0.3.2（未发布）
+
+- **定时播放（轮播）**：从壁纸库选若干壁纸、每张播放设定时长后自动切下一张、循环往复。新增 `GET/POST /api/rotation`（`rotation:{enabled, entries:[{seconds(≥10), hash|path}]}`，坏条目静默剔除、上限 20 条）；serve 端顺序计时器（保存/serve 启动即从第一张开始，环绕循环）；面板新增"定时播放"区块（启用开关 + 壁纸下拉 + 分钟时长，添加时预选当前壁纸）。
+- **修复中文路径导入失败**：面板文件选择器的 PowerShell 对话框强制 `[Console]::OutputEncoding = UTF8`，修复 ACP-936 系统上 CJK 文件名经 stdout 回传变 U+FFFD、ffmpeg 报 "No such file or directory" 的问题。
+- **导入接口支持 maxSeconds**：`POST /api/import-scene` 可选 `body.maxSeconds`(5..60)；60s/1080p60 的循环渲染需缓冲 ~10.8 GB 原始帧，低提交内存机器会 "Cannot allocate memory"，缩短循环时长可规避。
+- **/api/config 暴露 wallpaperPath**（仅 image 模式），供面板预选当前壁纸。
+
 ## 0.3.1
 
 - **快捷方式 CDP 标志自动持久化**：新增 `src/core/shortcuts.ts`，扫描桌面（含一层子文件夹、OneDrive 重定向）、用户/全局开始菜单、任务栏固定区的 `ZCode*.lnk`，自动补 `--remote-debugging-port`；接入 `launch` 命令与 MCP bootstrap（每次 ZCode 启动自愈）。上游同名提交只有文档，此为实现。
