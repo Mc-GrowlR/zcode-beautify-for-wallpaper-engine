@@ -142,6 +142,9 @@ export function buildPanelScript(apiPort: number): string {
     '      <button class="zb-btn" id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">背景填充: …</button>' +
     '    </div>' +
     '    <div class="zb-row zb-actions">' +
+    '      <button class="zb-btn" id="zb-fx" title="切换壁纸时的过渡特效">切换特效: …</button>' +
+    '    </div>' +
+    '    <div class="zb-row zb-actions">' +
     '      <label class="zb-btn" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">更换图片…</label>' +
     '      <input type="file" id="zb-file" accept="image/*" hidden>' +
     '    </div>' +
@@ -279,6 +282,7 @@ export function buildPanelScript(apiPort: number): string {
         $('zb-monet').checked = !!c.monet;
         $('zb-vis').checked = !!c.wallpaperVisible;
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
+        $('zb-fx') && applyFxLabel($('zb-fx'), c.transition || 'fade');
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
           resetBtn.textContent = '还原默认外观';
@@ -317,6 +321,19 @@ export function buildPanelScript(apiPort: number): string {
     var next = FITS[(FITS.indexOf(current) + 1) % FITS.length];
     applyFitLabel(this, next);
     post('/api/config', { fit: next }, function (d) { status(d && d.windows > 0 ? '已应用:' + FIT_LABELS[next] : '已保存(ZCode 未连接)'); });
+  });
+
+  var FXS = ['fade', 'slide', 'zoom', 'blur', 'none'];
+  var FX_LABELS = { fade: '交叉淡入', slide: '右侧滑入', zoom: '缩放浮现', blur: '模糊渐清', none: '直接切换' };
+  function applyFxLabel(btn, fx) {
+    btn.textContent = '切换特效: ' + (FX_LABELS[fx] || fx);
+    btn.setAttribute('data-fx', fx);
+  }
+  $('zb-fx').addEventListener('click', function () {
+    var current = this.getAttribute('data-fx') || 'fade';
+    var next = FXS[(FXS.indexOf(current) + 1) % FXS.length];
+    applyFxLabel(this, next);
+    post('/api/config', { transition: next }, function (d) { status(d && d.windows > 0 ? '已应用:' + FX_LABELS[next] : '已保存(ZCode 未连接)'); });
   });
 
   $('zb-file').addEventListener('change', function () {

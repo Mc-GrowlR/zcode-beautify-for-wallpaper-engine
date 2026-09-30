@@ -9,6 +9,9 @@ import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js"
 
 export type WallpaperFit = "cover" | "contain" | "smart";
 
+/** Wallpaper switching effects; compositor-friendly where possible. */
+export type WallpaperTransition = "fade" | "none" | "slide" | "zoom" | "blur";
+
 /**
  * Rotation modes: "sequence" plays every entry for its duration in order and
  * loops; "random" does the same but never repeats the current entry back to
@@ -69,6 +72,8 @@ export interface BeautifyConfig {
   apiPort?: number;
   /** Wallpaper rotation playlist (定时播放). */
   rotation?: RotationConfig;
+  /** Switching transition effect (default "fade"). */
+  transition?: WallpaperTransition;
 }
 
 export const DEFAULT_CONFIG: BeautifyConfig = {
@@ -78,6 +83,7 @@ export const DEFAULT_CONFIG: BeautifyConfig = {
   monet: true,
   wallpaperVisible: true,
   fit: "cover",
+  transition: "fade",
 };
 
 export interface BuiltPayload {
@@ -87,6 +93,8 @@ export interface BuiltPayload {
   videoSrc?: string;
   /** How the wallpaper layer is framed; "contain" adds a blurred backdrop. */
   fit: "cover" | "contain";
+  /** Switching effect the bootstrap overlay should play. */
+  transition: WallpaperTransition;
   /** Normalized focus point for background-position. */
   focusX: number;
   focusY: number;
@@ -160,6 +168,7 @@ html, body { background: transparent !important; }
     wallpaperDataUri,
     videoSrc,
     fit: config.wallpaperVisible ? resolved : "cover",
+    transition: config.transition ?? "fade",
     focusX,
     focusY,
   };
@@ -207,12 +216,12 @@ html, body { background: transparent !important; }
   }
 
   if (input.mediaType === "video") {
-    return buildBootstrapScript({ css, videoSrc: input.path, fit: input.fit ?? "cover" });
+    return buildBootstrapScript({ css, videoSrc: input.path, fit: input.fit ?? "cover", transition: "fade" });
   }
   const src = /^(data:|https?:|file:)/i.test(input.path)
     ? input.path
     : `file:///${input.path.replace(/\\/g, "/").replace(/^\/+/, "")}`;
-  return buildBootstrapScript({ css, wallpaperDataUri: src, fit: input.fit ?? "cover" });
+  return buildBootstrapScript({ css, wallpaperDataUri: src, fit: input.fit ?? "cover", transition: "fade" });
 }
 
 /** Apply config to a running ZCode instance. Returns how many windows got it. */

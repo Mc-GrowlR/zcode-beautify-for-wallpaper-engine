@@ -95,6 +95,7 @@ function publicConfig(config: BeautifyConfig) {
     cdpPort: config.port,
     mediaType: config.mediaType ?? "image",
     sceneHash: config.sceneHash,
+    transition: config.transition ?? "fade",
     /** Current wallpaper file (image mode) — lets the panel preselect it. */
     wallpaperPath: config.mediaType === "video" ? undefined : config.wallpaperPath,
   };
@@ -107,6 +108,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.monet === "boolean") out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (body?.fit === "cover" || body?.fit === "contain" || body?.fit === "smart") out.fit = body.fit;
+  if (body?.transition === "fade" || body?.transition === "none" || body?.transition === "slide" || body?.transition === "zoom" || body?.transition === "blur") out.transition = body.transition;
   return out;
 }
 
@@ -152,6 +154,7 @@ async function holdSession(
     wallpaperDataUri: payload.wallpaperDataUri,
     videoSrc: payload.videoSrc,
     fit: payload.fit,
+    transition: payload.transition,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -175,6 +178,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     wallpaperDataUri: payload.wallpaperDataUri,
     videoSrc: payload.videoSrc,
     fit: payload.fit,
+    transition: payload.transition,
   });
   let ok = 0;
   for (const [id, session] of held) {

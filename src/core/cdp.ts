@@ -122,6 +122,8 @@ export interface InjectionPayload {
   marker?: string;
   /** "contain" additionally drives a blurred backdrop layer behind the image. */
   fit?: "cover" | "contain";
+  /** Switching effect played by the transition overlay (default "fade"). */
+  transition?: string;
 }
 
 /**
@@ -169,22 +171,25 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   }
   style.textContent = ${JSON.stringify(payload.css)};
 
-  // --- wallpaper application with crossfade ---------------------------------
+  // --- wallpaper application with transition effect --------------------------
   // The OLD content stays visible while a temporary overlay carrying the NEW
-  // wallpaper fades in on top; on completion the new content is promoted into
-  // the main layer and the overlay removed. The first injection (nothing on
-  // screen yet) and every change from a blank state apply instantly. The
-  // overlay is a plain child of the wallpaper layer, so the ::after dim mask
-  // keeps painting above it during the fade.
+  // wallpaper animates in on top; on completion the new content is promoted
+  // into the main layer and the overlay removed. TRANSITION picks the effect:
+  // fade (crossfade), slide (new wallpaper sweeps in from the right), zoom
+  // (scales down while fading in), blur (sharpens while fading in), or none
+  // (instant swap). The first injection (nothing on screen yet) and every
+  // change from a blank state apply instantly. The overlay is a plain child
+  // of the wallpaper layer, so the ::after dim mask keeps painting above it.
   var wp = document.getElementById(MARKER + '-wallpaper');
   var HAS_NEW = ${JSON.stringify(Boolean(payload.wallpaperDataUri))} || VIDEO_SRC;
+  var TRANSITION = ${JSON.stringify(payload.transition ?? "fade")};
   if (HAS_NEW && !wp) {
     wp = document.createElement('div');
     wp.id = MARKER + '-wallpaper';
     document.documentElement.appendChild(wp);
   }
-  // A fade still in flight (rapid switches) is promoted immediately first so
-  // only one overlay ever exists.
+  // A transition still in flight (rapid switches) is promoted immediately
+  // first so only one overlay ever exists.
   if (window.__zcodeBeautify.finishFade) window.__zcodeBeautify.finishFade();
 
   if (!HAS_NEW) {
@@ -192,20 +197,35 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   } else {
     var oldVid = document.getElementById(MARKER + '-video');
     var oldImg = wp.style.backgroundImage && wp.style.backgroundImage !== 'none';
-    var animate = Boolean(oldVid || oldImg);
+    var animate = Boolean((oldVid || oldImg) && TRANSITION !== 'none');
 
     var holder = wp;
     if (animate) {
       holder = document.createElement('div');
       holder.id = MARKER + '-fade';
-      // A CSS animation (compositor-driven) instead of a transition started
-      // from JS: throttled/occluded renderers never fire rAF and delay timers
-      // past 1s, which would stall the fade — animations keep running.
-      holder.style.cssText = 'position:absolute;inset:0;background-size:inherit;background-position:inherit;background-repeat:inherit;opacity:0;animation:' + MARKER + '-fadein 650ms ease forwards;';
+      // CSS animations (compositor-driven for opacity/transform) instead of
+      // JS-started transitions: throttled/occluded renderers never fire rAF
+      // and delay timers past 1s — animations keep running.
+      var fxBase = 'position:absolute;inset:0;background-size:inherit;background-position:inherit;background-repeat:inherit;';
+      var fxAnim;
+      if (TRANSITION === 'slide') {
+        fxAnim = 'animation:' + MARKER + '-fx-slide 650ms cubic-bezier(.22,.61,.36,1) forwards;';
+      } else if (TRANSITION === 'zoom') {
+        fxAnim = 'opacity:0;animation:' + MARKER + '-fx-zoom 650ms ease forwards;';
+      } else if (TRANSITION === 'blur') {
+        fxAnim = 'opacity:0;animation:' + MARKER + '-fx-blur 650ms ease forwards;';
+      } else {
+        fxAnim = 'opacity:0;animation:' + MARKER + '-fx-fade 650ms ease forwards;';
+      }
+      holder.style.cssText = fxBase + fxAnim;
       if (!document.getElementById(MARKER + '-fade-style')) {
         var fs = document.createElement('style');
         fs.id = MARKER + '-fade-style';
-        fs.textContent = '@keyframes ' + MARKER + '-fadein { from { opacity: 0; } to { opacity: 1; } }';
+        fs.textContent = ''
+          + '@keyframes ' + MARKER + '-fx-fade { from { opacity: 0; } to { opacity: 1; } }'
+          + '@keyframes ' + MARKER + '-fx-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }'
+          + '@keyframes ' + MARKER + '-fx-zoom { from { opacity: 0; transform: scale(1.15); } to { opacity: 1; transform: scale(1); } }'
+          + '@keyframes ' + MARKER + '-fx-blur { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0px); } }';
         (document.head || document.documentElement).appendChild(fs);
       }
       wp.appendChild(holder);
