@@ -177,7 +177,8 @@ export function buildPanelScript(apiPort: number): string {
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
     '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
-    '        <button class="zb-btn" id="zb-sched-save" title="保存后按所选模式生效">保存</button>' +
+    '        <button class="zb-btn" id="zb-sched-save" title="保存全部方案(不改变启用状态)">保存</button>' +
+    '        <button class="zb-btn" id="zb-sched-play" title="保存并立即启用当前方案开始播放">▶ 播放</button>' +
     '      </div>' +
     '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 0"></div>' +
     '    </div>' +
@@ -740,6 +741,23 @@ export function buildPanelScript(apiPort: number): string {
     post('/api/rotation', { rotation: payload }, function (d) {
       if (d && d.error) { status(d.error); return; }
       status(payload.enabled ? '已保存,当前方案生效' : '已保存(未启用)');
+      loadRotation();
+    });
+  });
+  // 播放 = save everything AND force-enable the edited plan right now —
+  // one click from any state to visible playback.
+  $('zb-sched-play').addEventListener('click', function () {
+    syncEditorIntoPlan();
+    var plan = schedPlans[schedIdx];
+    var payload = {
+      enabled: true,
+      activePlanId: plan ? plan.id : undefined,
+      plans: schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, entries: p.entries }; })
+    };
+    post('/api/rotation', { rotation: payload }, function (d) {
+      if (d && d.error) { status(d.error); return; }
+      $('zb-sched-on').checked = true;
+      status(plan ? '开始播放:' + plan.name : '开始播放');
       loadRotation();
     });
   });
