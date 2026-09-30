@@ -28,11 +28,24 @@ export interface RotationEntry {
   path?: string;
 }
 
-/** Wallpaper rotation (定时播放): a playlist plus the playback mode. */
-export interface RotationConfig {
-  enabled: boolean;
+/** A named, self-contained playback plan: one mode plus its playlist. */
+export interface RotationPlan {
+  id: string;
+  name: string;
   mode: RotationMode;
   entries: RotationEntry[];
+}
+
+/**
+ * Wallpaper rotation (定时播放): several saved plans, one of them active.
+ * Configs written before plans existed carry a flat mode+entries pair and
+ * are normalized into a single "默认方案" on read.
+ */
+export interface RotationConfig {
+  enabled: boolean;
+  /** Which plan plays; falls back to plans[0] when unset or unknown. */
+  activePlanId?: string;
+  plans: RotationPlan[];
 }
 
 export interface BeautifyConfig {

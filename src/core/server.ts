@@ -21,7 +21,7 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, type BeautifyConfig, type RotationConfig } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildPanelScript } from "../panel/panelScript.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
@@ -599,9 +599,8 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // --- wallpaper rotation (定时播放: duration-based playlist) -------------
 
       if (req.method === "GET" && url.pathname === "/api/rotation") {
-        // Legacy stored configs predate `mode` — normalize to sequence.
-        const stored = runtimeConfig().rotation as Partial<RotationConfig> | undefined;
-        sendJson(res, 200, { rotation: { enabled: false, mode: "sequence", entries: [], ...stored } });
+        // Legacy mode+entries configs normalize into a single 默认方案.
+        sendJson(res, 200, { rotation: normalizeRotation(runtimeConfig().rotation) });
         return;
       }
 
@@ -663,26 +662,36 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   let lastScheduleFire = "";
   let randomAvoid = -1;
 
+  /** The rotation as it should play right now (normalized + active plan). */
+  function rotationNow(): { on: boolean; plan?: RotationPlan } {
+    const norm = normalizeRotation(runtimeConfig().rotation);
+    if (!norm.enabled) return { on: false };
+    const plan = norm.plans.find((p) => p.id === norm.activePlanId) ?? norm.plans[0];
+    if (!plan || !plan.entries.length) return { on: false };
+    return { on: true, plan };
+  }
+
   async function playRotationEntry(index: number): Promise<void> {
-    const rot = runtimeConfig().rotation;
-    if (!rot?.enabled || rot.mode === "schedule" || !rot.entries.length) return;
+    const s = rotationNow();
+    if (!s.on || !s.plan || s.plan.mode === "schedule") return;
+    const rot = s.plan;
     const n = rot.entries.length;
     const i = ((index % n) + n) % n;
     const entry = rot.entries[i];
     randomAvoid = i;
     try {
       const r = await applyRef(entry);
-      console.log(`serve: rotation [${rot.mode}] ${i + 1}/${n} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
+      console.log(`serve: rotation [${rot.name}/${rot.mode}] ${i + 1}/${n} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
     } catch (err) {
       console.error(`serve: rotation apply failed — ${(err as Error).message}`);
     }
     if (rotationTimer) clearTimeout(rotationTimer);
     rotationTimer = setTimeout(() => {
-      const cur = runtimeConfig().rotation;
-      if (!cur?.enabled || cur.mode === "schedule" || !cur.entries.length) return;
-      const total = cur.entries.length;
+      const cur = rotationNow();
+      if (!cur.on || !cur.plan || cur.plan.mode === "schedule" || !cur.plan.entries.length) return;
+      const total = cur.plan.entries.length;
       let next: number;
-      if (cur.mode === "random" && total > 1) {
+      if (cur.plan.mode === "random" && total > 1) {
         do {
           next = Math.floor(Math.random() * total);
         } while (next === randomAvoid);
@@ -697,18 +706,18 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   /** Schedule-mode minute check; the "date + HH:MM" key fires each entry at
    *  most once per day even though several ticks land inside its minute. */
   function checkRotationSchedule(): void {
-    const rot = runtimeConfig().rotation;
-    if (!rot?.enabled || rot.mode !== "schedule" || !rot.entries.length) return;
+    const s = rotationNow();
+    if (!s.on || !s.plan || s.plan.mode !== "schedule") return;
     const now = new Date();
     const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const fireKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()} ${hhmm}`;
     if (fireKey === lastScheduleFire) return;
-    const due = rot.entries.filter((e) => e.time === hhmm);
+    const due = s.plan.entries.filter((e) => e.time === hhmm);
     if (!due.length) return;
     lastScheduleFire = fireKey;
     const entry = due[due.length - 1];
     void applyRef(entry)
-      .then((r) => console.log(`serve: rotation [schedule] ${hhmm} -> ${entry.hash ?? entry.path} (${r.windows} window(s))`))
+      .then((r) => console.log(`serve: rotation [${s.plan!.name}/schedule] ${hhmm} -> ${entry.hash ?? entry.path} (${r.windows} window(s))`))
       .catch((err: Error) => console.error(`serve: rotation schedule fire failed — ${err.message}`));
   }
 
@@ -724,9 +733,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     }
     lastScheduleFire = "";
     randomAvoid = -1;
-    const rot = runtimeConfig().rotation;
-    if (!rot?.enabled || !rot.entries.length) return;
-    if (rot.mode === "schedule") {
+    const s = rotationNow();
+    if (!s.on || !s.plan) return;
+    if (s.plan.mode === "schedule") {
       rotationTick = setInterval(checkRotationSchedule, 20_000);
       rotationTick.unref?.();
       checkRotationSchedule();
@@ -745,45 +754,80 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   }
 }
 
-/**
- * Validates a rotation playlist posted by the panel, per mode:
- * - sequence/random — every entry needs a duration (>= 10s) and an existing
- *   wallpaper reference;
- * - schedule — every entry needs a daily "HH:MM" time (one per time) and an
- *   existing wallpaper reference.
- * Invalid entries are dropped, not rejected, so one deleted wallpaper never
- * blocks the whole playlist.
- */
-function sanitizeRotation(raw: unknown): RotationConfig {
-  const out: RotationConfig = { enabled: false, mode: "sequence", entries: [] };
-  if (!raw || typeof raw !== "object") return out;
-  const r = raw as { enabled?: unknown; mode?: unknown; entries?: unknown };
-  if (typeof r.enabled === "boolean") out.enabled = r.enabled;
-  if (r.mode === "sequence" || r.mode === "random" || r.mode === "schedule") out.mode = r.mode;
-  if (Array.isArray(r.entries)) {
-    const seenTimes = new Set<string>();
-    for (const e of r.entries.slice(0, 20)) {
-      if (!e || typeof e !== "object") continue;
-      const { seconds, time, hash, path: imgPath } = e as { seconds?: unknown; time?: unknown; hash?: unknown; path?: unknown };
-      const ref =
-        typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs.existsSync(path.join(scenesCacheRoot(), hash, "loop.mp4"))
-          ? { hash }
-          : typeof imgPath === "string" && fs.existsSync(imgPath)
-            ? { path: imgPath }
-            : undefined;
-      if (!ref) continue;
-      if (out.mode === "schedule") {
-        if (typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) continue;
-        if (seenTimes.has(time)) continue;
-        seenTimes.add(time);
-        out.entries.push({ time, ...ref });
-      } else {
-        if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 10 || seconds > 86400) continue;
-        out.entries.push({ seconds: Math.round(seconds), ...ref });
-      }
+/** Entries valid for the given mode; invalid ones are dropped silently. */
+function validPlanEntries(mode: RotationMode, raw: unknown): RotationEntry[] {
+  const out: RotationEntry[] = [];
+  if (!Array.isArray(raw)) return out;
+  const seenTimes = new Set<string>();
+  for (const e of raw.slice(0, 20)) {
+    if (!e || typeof e !== "object") continue;
+    const { seconds, time, hash, path: imgPath } = e as { seconds?: unknown; time?: unknown; hash?: unknown; path?: unknown };
+    const ref =
+      typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs.existsSync(path.join(scenesCacheRoot(), hash, "loop.mp4"))
+        ? { hash }
+        : typeof imgPath === "string" && fs.existsSync(imgPath)
+          ? { path: imgPath }
+          : undefined;
+    if (!ref) continue;
+    if (mode === "schedule") {
+      if (typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) continue;
+      if (seenTimes.has(time)) continue;
+      seenTimes.add(time);
+      out.push({ time, ...ref });
+    } else {
+      if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 10 || seconds > 86400) continue;
+      out.push({ seconds: Math.round(seconds), ...ref });
     }
   }
   return out;
+}
+
+/**
+ * Normalizes whatever is stored (pre-plans legacy shape or current shape)
+ * into the plans form; a legacy playlist becomes the single 默认方案.
+ */
+function normalizeRotation(stored: unknown): RotationConfig {
+  const legacy = stored as { enabled?: unknown; mode?: unknown; entries?: unknown } | undefined;
+  const plansShape = stored as { plans?: unknown } | undefined;
+  if (Array.isArray(plansShape?.plans) && (plansShape!.plans as unknown[]).length) {
+    return sanitizeRotation(stored);
+  }
+  const mode: RotationMode = legacy?.mode === "random" || legacy?.mode === "schedule" ? legacy.mode : "sequence";
+  return {
+    enabled: typeof legacy?.enabled === "boolean" ? legacy.enabled : false,
+    activePlanId: "default",
+    plans: [{ id: "default", name: "默认方案", mode, entries: validPlanEntries(mode, legacy?.entries) }],
+  };
+}
+
+/**
+ * Validates a rotation config posted by the panel. Accepts both the current
+ * {enabled, activePlanId, plans[]} shape and the legacy flat playlist. Plans
+ * keep their identity (id) when it looks sane; names default to 方案 N; a
+ * plan with no valid entries is dropped; at least one plan always remains.
+ */
+function sanitizeRotation(raw: unknown): RotationConfig {
+  const r = (raw ?? {}) as { enabled?: unknown; activePlanId?: unknown; plans?: unknown; mode?: unknown; entries?: unknown };
+  const plansRaw: unknown[] = Array.isArray(r.plans) && r.plans.length
+    ? r.plans.slice(0, 10)
+    : [{ mode: r.mode, entries: r.entries }];
+  const plans: RotationPlan[] = [];
+  plansRaw.forEach((p, i) => {
+    if (!p || typeof p !== "object") return;
+    const q = p as { id?: unknown; name?: unknown; mode?: unknown; entries?: unknown };
+    const mode: RotationMode = q.mode === "random" || q.mode === "schedule" ? q.mode : "sequence";
+    const entries = validPlanEntries(mode, q.entries);
+    if (!entries.length) return;
+    const id = typeof q.id === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(q.id) ? q.id : `p${Date.now().toString(36)}${i}`;
+    const name = typeof q.name === "string" && q.name.trim() ? q.name.trim().slice(0, 20) : `方案 ${i + 1}`;
+    plans.push({ id, name, mode, entries });
+  });
+  if (!plans.length) {
+    plans.push({ id: "default", name: "方案 1", mode: "sequence", entries: [] });
+  }
+  const activePlanId =
+    typeof r.activePlanId === "string" && plans.some((p) => p.id === r.activePlanId) ? r.activePlanId : plans[0].id;
+  return { enabled: r.enabled === true, activePlanId, plans };
 }
 
 /**

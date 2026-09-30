@@ -66,6 +66,11 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-lib .zb-lib-head { opacity: .55; margin: 4px 0 2px; }',
     '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
     '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
+    '.zb-sched-plan { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }',
+    '.zb-sched-plan select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
+      ' outline: none; color-scheme: dark; }',
+    '.zb-sched-plan .zb-act { font-size: 12px; }',
     '.zb-sched-mode { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; opacity: .85; font-size: 11px; }',
     '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
@@ -159,6 +164,11 @@ export function buildPanelScript(apiPort: number): string {
     '    <div id="zb-tab-sched" hidden>' +
     '    <div class="zb-row"><div class="zb-sched-head"><span>定时播放</span>' +
     '      <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
+    '      <div class="zb-sched-plan"><select id="zb-plan" title="播放方案"></select>' +
+    '        <button class="zb-act" id="zb-plan-add" title="新建播放方案">➕</button>' +
+    '        <button class="zb-act" id="zb-plan-ren" title="重命名当前方案">✎</button>' +
+    '        <button class="zb-act" id="zb-plan-del" title="删除当前方案">🗑</button>' +
+    '      </div>' +
     '      <div class="zb-sched-mode"><span>模式</span><select id="zb-sched-mode">' +
     '        <option value="sequence">顺序轮播</option>' +
     '        <option value="random">随机轮播</option>' +
@@ -491,8 +501,11 @@ export function buildPanelScript(apiPort: number): string {
     return row;
   }
 
-  // --- wallpaper rotation (定时播放: sequence / random / schedule) -----------
+  // --- wallpaper rotation (定时播放: plans, each with its own mode) ---------
   var schedOptions = [];
+  var schedPlans = [];        // plans being edited (id/name/mode/entries)
+  var schedIdx = 0;           // plan currently shown in the editor
+  var schedActiveId = null;   // which plan plays (server side)
   var SCHED_DEFAULT_TIMES = ['09:00', '12:00', '18:00', '21:00'];
   var MODE_HINTS = {
     sequence: '每张播放设定的时长后自动切下一张,顺序循环;保存即开始',
@@ -561,41 +574,62 @@ export function buildPanelScript(apiPort: number): string {
     list.innerHTML = '';
     (entries || []).forEach(function (e) { list.appendChild(schedRow(e)); });
   }
-  /** Reads the rows back into entry objects for the current mode. */
-  function collectRotation() {
+  function renderPlanSelect() {
+    var sel = $('zb-plan');
+    sel.innerHTML = '';
+    schedPlans.forEach(function (p, i) {
+      var op = document.createElement('option');
+      op.value = String(i);
+      op.textContent = p.name + (p.id === schedActiveId ? ' (生效中)' : '');
+      if (i === schedIdx) op.selected = true;
+      sel.appendChild(op);
+    });
+  }
+  function renderPlanEditor() {
+    var plan = schedPlans[schedIdx];
+    if (!plan) return;
+    $('zb-sched-mode').value = plan.mode || 'sequence';
+    applyModeHint();
+    renderSchedRows(plan.entries || []);
+  }
+  /** Reads the row editor into entry objects for the currently shown mode. */
+  function collectPlanEntries() {
     var entries = [];
     var rows = document.querySelectorAll('#zb-sched-list .zb-sched-row');
     var isSchedule = schedMode() === 'schedule';
     for (var i = 0; i < rows.length; i++) {
       var v = rows[i].querySelector('select').value;
       if (!v || v.length < 3) continue;
-      var ref = v.slice(0, 2) === 'h:' ? { hash: v.slice(2) } : { path: v.slice(2) };
+      var hash = v.slice(0, 2) === 'h:' ? v.slice(2) : undefined;
+      var imgPath = v.slice(0, 2) !== 'h:' ? v.slice(2) : undefined;
       if (isSchedule) {
         var time = rows[i].querySelector('input[type=time]').value;
         if (!time) continue;
-        entries.push({ time: time, ref: ref });
+        entries.push({ time: time, hash: hash, path: imgPath });
       } else {
         var minutes = Number(rows[i].querySelector('input[type=number]').value);
         if (!isFinite(minutes) || minutes <= 0) continue;
         var seconds = Math.round(minutes * 60);
         if (seconds < 10) seconds = 10;
-        entries.push({ seconds: seconds, ref: ref });
+        entries.push({ seconds: seconds, hash: hash, path: imgPath });
       }
     }
-    return { enabled: $('zb-sched-on').checked, mode: schedMode(), entries: entries };
+    return entries;
+  }
+  /** Writes the editor (mode + rows) back into the plan being edited. */
+  function syncEditorIntoPlan() {
+    var plan = schedPlans[schedIdx];
+    if (!plan) return;
+    plan.mode = schedMode();
+    plan.entries = collectPlanEntries();
   }
   /** Cross-mode conversion: keeps the wallpaper refs, carries over seconds
    *  when present, spreads default times when switching to schedule. */
   function convertEntries(rawEntries, toMode) {
     return (rawEntries || []).map(function (e, i) {
-      var ref = e.ref || e;
-      var out = ref.hash ? { hash: ref.hash } : { path: ref.path };
-      if (toMode === 'schedule') {
-        if (e.time) out.time = e.time;
-        else out.time = SCHED_DEFAULT_TIMES[i % SCHED_DEFAULT_TIMES.length];
-      } else {
-        out.seconds = e.seconds || (ref.seconds) || 300;
-      }
+      var out = e.hash ? { hash: e.hash } : { path: e.path };
+      if (toMode === 'schedule') out.time = e.time || SCHED_DEFAULT_TIMES[i % SCHED_DEFAULT_TIMES.length];
+      else out.seconds = e.seconds || 300;
       return out;
     });
   }
@@ -603,18 +637,81 @@ export function buildPanelScript(apiPort: number): string {
     fetchScheduleOptions().then(function () {
       return fetch(API + '/api/rotation').then(function (r) { return r.json(); });
     }).then(function (d) {
-      var rot = (d && d.rotation) || { enabled: false, mode: 'sequence', entries: [] };
+      var rot = (d && d.rotation) || {};
+      schedPlans = rot.plans && rot.plans.length
+        ? rot.plans
+        : [{ id: 'default', name: '方案 1', mode: 'sequence', entries: [] }];
+      schedActiveId = rot.activePlanId || (schedPlans[0] && schedPlans[0].id) || null;
+      var activeIdx = -1;
+      for (var i = 0; i < schedPlans.length; i++) if (schedPlans[i].id === schedActiveId) activeIdx = i;
+      schedIdx = activeIdx >= 0 ? activeIdx : 0;
       $('zb-sched-on').checked = !!rot.enabled;
-      $('zb-sched-mode').value = rot.mode || 'sequence';
-      applyModeHint();
-      renderSchedRows(rot.entries || []);
+      renderPlanSelect();
+      renderPlanEditor();
     }).catch(function () { /* offline */ });
   }
+  // Plan switching keeps the edited plan's state; the editor loads the newly
+  // selected plan from schedPlans.
+  $('zb-plan').addEventListener('change', function () {
+    syncEditorIntoPlan();
+    schedIdx = Number(this.value) || 0;
+    renderPlanSelect();
+    renderPlanEditor();
+  });
+  $('zb-plan-add').addEventListener('click', function () {
+    syncEditorIntoPlan();
+    schedPlans.push({ id: 'p' + Date.now().toString(36), name: '方案 ' + (schedPlans.length + 1), mode: 'sequence', entries: [] });
+    schedIdx = schedPlans.length - 1;
+    renderPlanSelect();
+    renderPlanEditor();
+  });
+  $('zb-plan-ren').addEventListener('click', function () {
+    var row = document.querySelector('.zb-sched-plan');
+    var sel = $('zb-plan');
+    var plan = schedPlans[schedIdx];
+    if (!plan || !row) return;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = plan.name;
+    input.className = 'zb-label-input';
+    input.style.flex = '1';
+    row.replaceChild(input, sel);
+    input.focus(); input.select();
+    var done = function (save) {
+      if (save && input.value.trim()) plan.name = input.value.trim().slice(0, 20);
+      row.replaceChild(sel, input);
+      renderPlanSelect();
+    };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') done(true);
+      if (e.key === 'Escape') done(false);
+    });
+    input.addEventListener('blur', function () { done(true); });
+  });
+  $('zb-plan-del').addEventListener('click', function () {
+    var btn = this;
+    if (schedPlans.length <= 1) { status('至少保留一个方案'); return; }
+    if (btn.getAttribute('data-armed') !== '1') {
+      btn.setAttribute('data-armed', '1'); btn.textContent = '确认?';
+      setTimeout(function () { btn.removeAttribute('data-armed'); btn.textContent = '🗑'; }, 3000);
+      return;
+    }
+    btn.removeAttribute('data-armed'); btn.textContent = '🗑';
+    var removed = schedPlans.splice(schedIdx, 1)[0];
+    if (schedActiveId === removed.id) schedActiveId = null;
+    schedIdx = Math.min(schedIdx, schedPlans.length - 1);
+    renderPlanSelect();
+    renderPlanEditor();
+  });
   // Switching modes re-renders the rows in the new editor shape, keeping the
   // wallpapers and converting timing fields with sensible defaults.
   $('zb-sched-mode').addEventListener('change', function () {
     applyModeHint();
-    renderSchedRows(convertEntries(collectRotation().entries, schedMode()));
+    var plan = schedPlans[schedIdx];
+    if (!plan) return;
+    plan.mode = schedMode();
+    plan.entries = convertEntries(collectPlanEntries(), plan.mode);
+    renderSchedRows(plan.entries);
   });
   $('zb-sched-add').addEventListener('click', function () {
     var doAdd = function () {
@@ -634,15 +731,15 @@ export function buildPanelScript(apiPort: number): string {
     doAdd();
   });
   $('zb-sched-save').addEventListener('click', function () {
-    var payload = collectRotation();
-    // the API expects ref fields inline on each entry
-    payload.entries = payload.entries.map(function (e) {
-      var ref = e.ref || {};
-      return schedMode() === 'schedule' ? { time: e.time, hash: ref.hash, path: ref.path } : { seconds: e.seconds, hash: ref.hash, path: ref.path };
-    });
+    syncEditorIntoPlan();
+    var payload = {
+      enabled: $('zb-sched-on').checked,
+      activePlanId: schedPlans[schedIdx] ? schedPlans[schedIdx].id : undefined,
+      plans: schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, entries: p.entries }; })
+    };
     post('/api/rotation', { rotation: payload }, function (d) {
       if (d && d.error) { status(d.error); return; }
-      status(payload.enabled ? '定时播放已保存并生效' : '定时播放已保存(未启用)');
+      status(payload.enabled ? '已保存,当前方案生效' : '已保存(未启用)');
       loadRotation();
     });
   });
