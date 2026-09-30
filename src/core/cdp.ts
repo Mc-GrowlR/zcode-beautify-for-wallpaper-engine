@@ -169,7 +169,13 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     style.id = MARKER + '-style';
     (document.head || document.documentElement).appendChild(style);
   }
-  style.textContent = ${JSON.stringify(payload.css)};
+  // Theme CSS (Monet palette) invalidates the WHOLE document's styles; applying
+  // it mid-animation costs a 50-80ms main-thread task that stutters the effect.
+  // When a transition plays, the swap is deferred to the promote step; instant
+  // switches apply it right away. Base wallpaper rules are identical between
+  // injections, so holding the old content for one transition is safe.
+  var CSS_TEXT = ${JSON.stringify(payload.css)};
+  var cssDeferred = false;
 
   // --- wallpaper application with transition effect --------------------------
   // The OLD content stays visible while a temporary overlay carrying the NEW
@@ -201,8 +207,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
 
     var holder = wp;
     if (animate) {
+      cssDeferred = true; // theme swap moves to promote(); see CSS_TEXT above
       holder = document.createElement('div');
       holder.id = MARKER + '-fade';
+      // Parked invisible at first; the animation css (below) is applied only
+      // once the new content has decoded, so decoder spin-up long tasks land
+      // while the screen is still static instead of stuttering the motion.
       // CSS animations (compositor-driven for opacity/transform) instead of
       // JS-started transitions: throttled/occluded renderers never fire rAF
       // and delay timers past 1s — animations keep running.
@@ -217,7 +227,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       } else {
         fxAnim = 'opacity:0;animation:' + MARKER + '-fx-fade 650ms ease forwards;';
       }
-      holder.style.cssText = fxBase + fxAnim;
+      holder.style.cssText = fxBase + 'opacity:0;';
       if (!document.getElementById(MARKER + '-fade-style')) {
         var fs = document.createElement('style');
         fs.id = MARKER + '-fade-style';
@@ -231,6 +241,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       wp.appendChild(holder);
     }
 
+    var newVid = null;
     if (VIDEO_SRC) {
       holder.style.backgroundImage = 'none';
       var nv = document.createElement('video');
@@ -244,6 +255,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       nv.load();
       holder.appendChild(nv);
       nv.play().catch(function() {});
+      newVid = nv;
     } else if (${JSON.stringify(Boolean(payload.wallpaperDataUri))}) {
       holder.style.backgroundImage = 'url(' + ${JSON.stringify(payload.wallpaperDataUri ?? "")} + ')';
     }
@@ -251,10 +263,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     if (animate) {
       var overlay = holder;
       var done = false;
+      var started = false;
       var promote = function() {
         if (done) return;
         done = true;
         window.__zcodeBeautify.finishFade = null;
+        style.textContent = CSS_TEXT; // deferred theme swap — motion is over
         var o = overlay;
         if (!o.parentNode) return;
         var prevVid = document.getElementById(MARKER + '-video');
@@ -273,13 +287,39 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         o.remove();
       };
       window.__zcodeBeautify.finishFade = promote;
-      overlay.addEventListener('animationend', promote);
-      setTimeout(promote, 780);
+      var startAnim = function() {
+        if (started || done) return;
+        started = true;
+        overlay.style.cssText = fxBase + fxAnim;
+        overlay.addEventListener('animationend', promote);
+        setTimeout(promote, 780);
+      };
+      // Warm the new content first: video waits for its first decoded frame
+      // (loadeddata), image waits for decode(); heavy media pipeline tasks
+      // then run while the old wallpaper is still shown motionlessly. A
+      // timeout keeps the switch landing even if the event never fires.
+      if (newVid) {
+        if (newVid.readyState >= 2) startAnim();
+        else {
+          newVid.addEventListener('loadeddata', startAnim);
+          setTimeout(startAnim, 600);
+        }
+      } else {
+        var im = new Image();
+        var imSrc = overlay.style.backgroundImage.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
+        var warm = function() { if (im.decode) im.decode().then(startAnim, startAnim); else startAnim(); };
+        im.onload = warm;
+        im.onerror = startAnim;
+        im.src = imSrc;
+        setTimeout(startAnim, 600);
+      }
     } else if (VIDEO_SRC) {
       var v0 = holder.querySelector('video');
       if (v0) v0.id = MARKER + '-video';
     }
   }
+
+  if (!cssDeferred) style.textContent = CSS_TEXT;
 
   var FIT = ${JSON.stringify(payload.fit ?? "cover")};
   var bp = document.getElementById(MARKER + '-backdrop');
