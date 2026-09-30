@@ -38,6 +38,11 @@ export function buildPanelScript(apiPort: number): string {
     '#zb-head { padding: 9px 12px; font-weight: 600; cursor: move; border-bottom: 1px solid rgba(255,255,255,.1);',
       ' display: flex; justify-content: space-between; align-items: center; }',
     '#zb-body { padding: 10px 12px 0; }',
+    '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
+    '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
+      ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
+    '.zb-tab:hover { background: rgba(255,255,255,.12); }',
+    '.zb-tab[data-active="1"] { background: rgba(122,162,247,.3); border-color: rgba(122,162,247,.6); }',
     '.zb-row { margin-bottom: 10px; }',
     '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 4px; opacity: .85; }',
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
@@ -114,6 +119,11 @@ export function buildPanelScript(apiPort: number): string {
     '    <button class="zb-btn" id="zb-retry">重试连接</button>' +
     '  </div>' +
     '  <div id="zb-body">' +
+    '    <div id="zb-tabs">' +
+    '      <button class="zb-tab" data-tab="main">壁纸</button>' +
+    '      <button class="zb-tab" data-tab="sched">定时播放</button>' +
+    '    </div>' +
+    '    <div id="zb-tab-main">' +
     '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
     '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
     '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
@@ -142,6 +152,11 @@ export function buildPanelScript(apiPort: number): string {
     '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
     '    </div>' +
     '    <div class="zb-row zb-lib" id="zb-lib"></div>' +
+    '    <div class="zb-row zb-actions">' +
+    '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-sched" hidden>' +
     '    <div class="zb-row"><div class="zb-sched-head"><span>定时播放</span>' +
     '      <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
     '      <div class="zb-sched-mode"><span>模式</span><select id="zb-sched-mode">' +
@@ -156,8 +171,6 @@ export function buildPanelScript(apiPort: number): string {
     '      </div>' +
     '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 0"></div>' +
     '    </div>' +
-    '    <div class="zb-row zb-actions">' +
-    '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
     '    </div>' +
     '  </div>' +
     '</div>' +
@@ -652,13 +665,33 @@ export function buildPanelScript(apiPort: number): string {
     refresh();
   });
 
+  // --- tabs (壁纸 / 定时播放) ------------------------------------------------
+  function switchTab(name) {
+    var tabs = document.querySelectorAll('.zb-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].setAttribute('data-active', tabs[i].getAttribute('data-tab') === name ? '1' : '0');
+    }
+    $('zb-tab-main').hidden = name !== 'main';
+    $('zb-tab-sched').hidden = name !== 'sched';
+    try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
+    if (name === 'sched') loadRotation();
+    else { refresh(); loadLibrary(); }
+  }
+  $('zb-tabs').addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('.zb-tab') : null;
+    if (b) switchTab(b.getAttribute('data-tab'));
+  });
+  function activateSavedTab() {
+    var saved = 'main';
+    try { saved = localStorage.getItem('zcode-beautify:tab') || 'main'; } catch (e) {}
+    switchTab(saved === 'sched' ? 'sched' : 'main');
+  }
+
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
     p.hidden = !p.hidden;
     if (!p.hidden) {
-      refresh();
-      loadLibrary();
-      loadRotation();
+      activateSavedTab();
       beat(true);
     } else if (root.getAttribute('data-offline') !== '1') {
       beat(false);
