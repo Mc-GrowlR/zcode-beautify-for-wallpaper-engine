@@ -142,9 +142,6 @@ export function buildPanelScript(apiPort: number): string {
     '      <button class="zb-btn" id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">背景填充: …</button>' +
     '    </div>' +
     '    <div class="zb-row zb-actions">' +
-    '      <button class="zb-btn" id="zb-fx" title="切换壁纸时的过渡特效">切换特效: …</button>' +
-    '    </div>' +
-    '    <div class="zb-row zb-actions">' +
     '      <label class="zb-btn" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">更换图片…</label>' +
     '      <input type="file" id="zb-file" accept="image/*" hidden>' +
     '    </div>' +
@@ -178,6 +175,9 @@ export function buildPanelScript(apiPort: number): string {
     '        <option value="random">随机轮播</option>' +
     '        <option value="schedule">定时切换</option>' +
     '      </select></div>' +
+    '      <div class="zb-actions" style="margin-bottom:6px">' +
+    '        <button class="zb-btn" id="zb-fx" title="本方案播放时的壁纸切换特效(点击切换)">切换特效: …</button>' +
+    '      </div>' +
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
     '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
@@ -282,7 +282,6 @@ export function buildPanelScript(apiPort: number): string {
         $('zb-monet').checked = !!c.monet;
         $('zb-vis').checked = !!c.wallpaperVisible;
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
-        $('zb-fx') && applyFxLabel($('zb-fx'), c.transition || 'fade');
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
           resetBtn.textContent = '还原默认外观';
@@ -329,11 +328,16 @@ export function buildPanelScript(apiPort: number): string {
     btn.textContent = '切换特效: ' + (FX_LABELS[fx] || fx);
     btn.setAttribute('data-fx', fx);
   }
+  // The effect is a per-plan setting; the button edits the plan in the editor
+  // and persists immediately (playback is not disturbed — the effect is read
+  // from the active plan on every switch).
   $('zb-fx').addEventListener('click', function () {
-    var current = this.getAttribute('data-fx') || 'fade';
-    var next = FXS[(FXS.indexOf(current) + 1) % FXS.length];
-    applyFxLabel(this, next);
-    post('/api/config', { transition: next }, function (d) { status(d && d.windows > 0 ? '已应用:' + FX_LABELS[next] : '已保存(ZCode 未连接)'); });
+    var plan = schedPlans[schedIdx];
+    if (!plan) return;
+    var current = plan.transition || 'fade';
+    plan.transition = FXS[(FXS.indexOf(current) + 1) % FXS.length];
+    applyFxLabel(this, plan.transition);
+    persistPlans();
   });
 
   $('zb-file').addEventListener('change', function () {
@@ -608,6 +612,7 @@ export function buildPanelScript(apiPort: number): string {
     var plan = schedPlans[schedIdx];
     if (!plan) return;
     $('zb-sched-mode').value = plan.mode || 'sequence';
+    $('zb-fx') && applyFxLabel($('zb-fx'), plan.transition || 'fade');
     applyModeHint();
     renderSchedRows(plan.entries || []);
   }
@@ -643,7 +648,7 @@ export function buildPanelScript(apiPort: number): string {
     plan.entries = collectPlanEntries();
   }
   function plansPayload() {
-    return schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, entries: p.entries }; });
+    return schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, transition: p.transition || 'fade', entries: p.entries }; });
   }
   /**
    * Auto-persists plan structure edits (rename / create / delete): what the
@@ -788,7 +793,7 @@ export function buildPanelScript(apiPort: number): string {
     var payload = {
       enabled: $('zb-sched-on').checked,
       activePlanId: schedPlans[schedIdx] ? schedPlans[schedIdx].id : undefined,
-      plans: schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, entries: p.entries }; })
+      plans: plansPayload()
     };
     post('/api/rotation', { rotation: payload }, function (d) {
       if (d && d.error) { status(d.error); return; }
@@ -804,7 +809,7 @@ export function buildPanelScript(apiPort: number): string {
     var payload = {
       enabled: true,
       activePlanId: plan ? plan.id : undefined,
-      plans: schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, entries: p.entries }; })
+      plans: plansPayload()
     };
     post('/api/rotation', { rotation: payload }, function (d) {
       if (d && d.error) { status(d.error); return; }

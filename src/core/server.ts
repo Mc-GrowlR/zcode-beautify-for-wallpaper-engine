@@ -95,7 +95,6 @@ function publicConfig(config: BeautifyConfig) {
     cdpPort: config.port,
     mediaType: config.mediaType ?? "image",
     sceneHash: config.sceneHash,
-    transition: config.transition ?? "fade",
     /** Current wallpaper file (image mode) — lets the panel preselect it. */
     wallpaperPath: config.mediaType === "video" ? undefined : config.wallpaperPath,
   };
@@ -108,7 +107,6 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.monet === "boolean") out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (body?.fit === "cover" || body?.fit === "contain" || body?.fit === "smart") out.fit = body.fit;
-  if (body?.transition === "fade" || body?.transition === "none" || body?.transition === "slide" || body?.transition === "zoom" || body?.transition === "blur") out.transition = body.transition;
   return out;
 }
 
@@ -614,6 +612,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         const stored = persisted({ ...runtimeConfig(), rotation: next });
         // Drop the legacy clock-time `schedule` field from the first version.
         delete (stored as unknown as Record<string, unknown>).schedule;
+        delete (stored as unknown as Record<string, unknown>).transition;
         saveConfig(stored);
         startRotation();
         sendJson(res, 200, { ok: true, rotation: next });
@@ -818,14 +817,20 @@ function sanitizeRotation(raw: unknown): RotationConfig {
   const plans: RotationPlan[] = [];
   plansRaw.forEach((p, i) => {
     if (!p || typeof p !== "object") return;
-    const q = p as { id?: unknown; name?: unknown; mode?: unknown; entries?: unknown };
+    const q = p as { id?: unknown; name?: unknown; mode?: unknown; transition?: unknown; entries?: unknown };
     const mode: RotationMode = q.mode === "random" || q.mode === "schedule" ? q.mode : "sequence";
     // Plans without (valid) entries are kept: a freshly created plan in the
     // panel starts empty, and dropping it here would make it vanish on save.
     const entries = validPlanEntries(mode, q.entries);
+    const transition =
+      q.transition === "fade" || q.transition === "none" || q.transition === "slide" || q.transition === "zoom" || q.transition === "blur"
+        ? q.transition
+        : undefined;
     const id = typeof q.id === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(q.id) ? q.id : `p${Date.now().toString(36)}${i}`;
     const name = typeof q.name === "string" && q.name.trim() ? q.name.trim().slice(0, 20) : `方案 ${i + 1}`;
-    plans.push({ id, name, mode, entries });
+    const plan: RotationPlan = { id, name, mode, entries };
+    if (transition) plan.transition = transition;
+    plans.push(plan);
   });
   if (!plans.length) {
     plans.push({ id: "default", name: "方案 1", mode: "sequence", entries: [] });

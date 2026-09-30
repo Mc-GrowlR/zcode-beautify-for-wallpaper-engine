@@ -31,11 +31,13 @@ export interface RotationEntry {
   path?: string;
 }
 
-/** A named, self-contained playback plan: one mode plus its playlist. */
+/** A named, self-contained playback plan: mode, transition effect, playlist. */
 export interface RotationPlan {
   id: string;
   name: string;
   mode: RotationMode;
+  /** Switching effect used while this plan is active (default "fade"). */
+  transition?: WallpaperTransition;
   entries: RotationEntry[];
 }
 
@@ -72,8 +74,6 @@ export interface BeautifyConfig {
   apiPort?: number;
   /** Wallpaper rotation playlist (定时播放). */
   rotation?: RotationConfig;
-  /** Switching transition effect (default "fade"). */
-  transition?: WallpaperTransition;
 }
 
 export const DEFAULT_CONFIG: BeautifyConfig = {
@@ -83,7 +83,6 @@ export const DEFAULT_CONFIG: BeautifyConfig = {
   monet: true,
   wallpaperVisible: true,
   fit: "cover",
-  transition: "fade",
 };
 
 export interface BuiltPayload {
@@ -98,6 +97,14 @@ export interface BuiltPayload {
   /** Normalized focus point for background-position. */
   focusX: number;
   focusY: number;
+}
+
+/** The switching effect comes from the active rotation plan (fallback fade). */
+function activePlanTransition(rotation: RotationConfig | undefined): WallpaperTransition {
+  const plans = rotation?.plans;
+  if (!plans?.length) return "fade";
+  const plan = plans.find((p) => p.id === rotation?.activePlanId) ?? plans[0];
+  return plan?.transition ?? "fade";
 }
 
 export function buildPayload(config: BeautifyConfig, assets?: WallpaperAssets): BuiltPayload {
@@ -168,7 +175,7 @@ html, body { background: transparent !important; }
     wallpaperDataUri,
     videoSrc,
     fit: config.wallpaperVisible ? resolved : "cover",
-    transition: config.transition ?? "fade",
+    transition: activePlanTransition(config.rotation),
     focusX,
     focusY,
   };
