@@ -155,9 +155,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var MARKER = ${JSON.stringify(marker)};
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC) return;
+  var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
+  window.__zcodeBeautify.wpImg = WP_IMG;
 
   var style = document.getElementById(MARKER + '-style');
   if (!style) {
@@ -167,39 +169,95 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   }
   style.textContent = ${JSON.stringify(payload.css)};
 
+  // --- wallpaper application with crossfade ---------------------------------
+  // The OLD content stays visible while a temporary overlay carrying the NEW
+  // wallpaper fades in on top; on completion the new content is promoted into
+  // the main layer and the overlay removed. The first injection (nothing on
+  // screen yet) and every change from a blank state apply instantly. The
+  // overlay is a plain child of the wallpaper layer, so the ::after dim mask
+  // keeps painting above it during the fade.
   var wp = document.getElementById(MARKER + '-wallpaper');
-  if (${JSON.stringify(Boolean(payload.wallpaperDataUri))} || VIDEO_SRC) {
-    if (!wp) {
-      wp = document.createElement('div');
-      wp.id = MARKER + '-wallpaper';
-      document.documentElement.appendChild(wp);
-    }
+  var HAS_NEW = ${JSON.stringify(Boolean(payload.wallpaperDataUri))} || VIDEO_SRC;
+  if (HAS_NEW && !wp) {
+    wp = document.createElement('div');
+    wp.id = MARKER + '-wallpaper';
+    document.documentElement.appendChild(wp);
   }
-  var vid = document.getElementById(MARKER + '-video');
-  if (VIDEO_SRC) {
-    wp.style.backgroundImage = 'none';
-    if (!vid) {
-      vid = document.createElement('video');
-      vid.id = MARKER + '-video';
-      vid.setAttribute('autoplay', '');
-      vid.setAttribute('loop', '');
-      vid.setAttribute('muted', '');
-      vid.setAttribute('playsinline', '');
-      vid.muted = true;
-      vid.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
-      wp.appendChild(vid);
-    }
-    if (vid.getAttribute('src') !== VIDEO_SRC) {
-      vid.setAttribute('src', VIDEO_SRC);
-      vid.load();
-    }
-    vid.play().catch(function() {});
+  // A fade still in flight (rapid switches) is promoted immediately first so
+  // only one overlay ever exists.
+  if (window.__zcodeBeautify.finishFade) window.__zcodeBeautify.finishFade();
+
+  if (!HAS_NEW) {
+    if (wp) wp.remove();
   } else {
-    if (vid) vid.remove();
-    if (${JSON.stringify(Boolean(payload.wallpaperDataUri))}) {
-      wp.style.backgroundImage = 'url(' + ${JSON.stringify(payload.wallpaperDataUri ?? "")} + ')';
-    } else if (wp) {
-      wp.remove();
+    var oldVid = document.getElementById(MARKER + '-video');
+    var oldImg = wp.style.backgroundImage && wp.style.backgroundImage !== 'none';
+    var animate = Boolean(oldVid || oldImg);
+
+    var holder = wp;
+    if (animate) {
+      holder = document.createElement('div');
+      holder.id = MARKER + '-fade';
+      // A CSS animation (compositor-driven) instead of a transition started
+      // from JS: throttled/occluded renderers never fire rAF and delay timers
+      // past 1s, which would stall the fade — animations keep running.
+      holder.style.cssText = 'position:absolute;inset:0;background-size:inherit;background-position:inherit;background-repeat:inherit;opacity:0;animation:' + MARKER + '-fadein 650ms ease forwards;';
+      if (!document.getElementById(MARKER + '-fade-style')) {
+        var fs = document.createElement('style');
+        fs.id = MARKER + '-fade-style';
+        fs.textContent = '@keyframes ' + MARKER + '-fadein { from { opacity: 0; } to { opacity: 1; } }';
+        (document.head || document.documentElement).appendChild(fs);
+      }
+      wp.appendChild(holder);
+    }
+
+    if (VIDEO_SRC) {
+      holder.style.backgroundImage = 'none';
+      var nv = document.createElement('video');
+      nv.setAttribute('autoplay', '');
+      nv.setAttribute('loop', '');
+      nv.setAttribute('muted', '');
+      nv.setAttribute('playsinline', '');
+      nv.muted = true;
+      nv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+      nv.setAttribute('src', VIDEO_SRC);
+      nv.load();
+      holder.appendChild(nv);
+      nv.play().catch(function() {});
+    } else if (${JSON.stringify(Boolean(payload.wallpaperDataUri))}) {
+      holder.style.backgroundImage = 'url(' + ${JSON.stringify(payload.wallpaperDataUri ?? "")} + ')';
+    }
+
+    if (animate) {
+      var overlay = holder;
+      var done = false;
+      var promote = function() {
+        if (done) return;
+        done = true;
+        window.__zcodeBeautify.finishFade = null;
+        var o = overlay;
+        if (!o.parentNode) return;
+        var prevVid = document.getElementById(MARKER + '-video');
+        if (prevVid) prevVid.remove();
+        if (VIDEO_SRC) {
+          var v = o.querySelector('video');
+          wp.style.backgroundImage = 'none';
+          if (v) {
+            v.id = MARKER + '-video';
+            wp.appendChild(v);
+            v.play().catch(function() {});
+          }
+        } else {
+          wp.style.backgroundImage = o.style.backgroundImage;
+        }
+        o.remove();
+      };
+      window.__zcodeBeautify.finishFade = promote;
+      overlay.addEventListener('animationend', promote);
+      setTimeout(promote, 780);
+    } else if (VIDEO_SRC) {
+      var v0 = holder.querySelector('video');
+      if (v0) v0.id = MARKER + '-video';
     }
   }
 
@@ -276,8 +334,9 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
 export function buildResetScript(marker = "zcode-beautify"): string {
   return `(function(){
   document.getElementById(${JSON.stringify(marker)} + '-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-fade-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-wallpaper')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
-  if (window.__zcodeBeautify) { window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null; }
+  if (window.__zcodeBeautify) { window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null; window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null; }
 })();`;
 }
