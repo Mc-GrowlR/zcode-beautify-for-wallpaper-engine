@@ -111,7 +111,18 @@ export async function launchZcode(port: number): Promise<LaunchResult> {
     return { started: false, reason: "running-without-cdp" };
   }
 
-  const child = spawn(exe, [`--remote-debugging-port=${port}`], {
+  // Beyond the CDP port: ZCode's transparent window gets misjudged as fully
+  // occluded by Chromium's occlusion tracker, which stops ALL renderer
+  // rendering — transition effects never play a frame and timers throttle
+  // past 1s (the same root cause behind the video-freeze watchdog). Disabling
+  // the tracker and renderer backgrounding keeps effects and timers alive in
+  // the background.
+  const child = spawn(exe, [
+    `--remote-debugging-port=${port}`,
+    "--disable-features=CalculateNativeWinOcclusion",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+  ], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
