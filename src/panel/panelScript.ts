@@ -175,9 +175,13 @@ export function buildPanelScript(apiPort: number): string {
     '        <option value="random">随机轮播</option>' +
     '        <option value="schedule">定时切换</option>' +
     '      </select></div>' +
-    '      <div class="zb-actions" style="margin-bottom:6px">' +
-    '        <button class="zb-btn" id="zb-fx" title="本方案播放时的壁纸切换特效(点击切换)">切换特效: …</button>' +
-    '      </div>' +
+    '      <div class="zb-sched-mode"><span>特效</span><select id="zb-fx" title="本方案播放时的壁纸切换特效">' +
+    '        <option value="fade">交叉淡入</option>' +
+    '        <option value="slide">右侧滑入</option>' +
+    '        <option value="zoom">缩放浮现</option>' +
+    '        <option value="blur">模糊渐清</option>' +
+    '        <option value="none">直接切换</option>' +
+    '      </select></div>' +
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
     '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
@@ -324,19 +328,16 @@ export function buildPanelScript(apiPort: number): string {
 
   var FXS = ['fade', 'slide', 'zoom', 'blur', 'none'];
   var FX_LABELS = { fade: '交叉淡入', slide: '右侧滑入', zoom: '缩放浮现', blur: '模糊渐清', none: '直接切换' };
-  function applyFxLabel(btn, fx) {
-    btn.textContent = '切换特效: ' + (FX_LABELS[fx] || fx);
-    btn.setAttribute('data-fx', fx);
+  function applyFxLabel(sel, fx) {
+    sel.value = FX_LABELS[fx] ? fx : 'fade';
   }
-  // The effect is a per-plan setting; the button edits the plan in the editor
-  // and persists immediately (playback is not disturbed — the effect is read
-  // from the active plan on every switch).
-  $('zb-fx').addEventListener('click', function () {
+  // The effect is a per-plan setting; the dropdown edits the plan in the
+  // editor and persists immediately (playback is not disturbed — the effect
+  // is read from the active plan on every switch).
+  $('zb-fx').addEventListener('change', function () {
     var plan = schedPlans[schedIdx];
     if (!plan) return;
-    var current = plan.transition || 'fade';
-    plan.transition = FXS[(FXS.indexOf(current) + 1) % FXS.length];
-    applyFxLabel(this, plan.transition);
+    plan.transition = this.value;
     persistPlans();
   });
 
