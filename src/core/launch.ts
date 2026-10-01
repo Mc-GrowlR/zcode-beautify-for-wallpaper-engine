@@ -38,7 +38,13 @@ export function loadConfig(): StoredConfig {
 
 export function saveConfig(config: StoredConfig): void {
   fs.mkdirSync(dataDir(), { recursive: true });
-  fs.writeFileSync(configFile(), JSON.stringify(config, null, 2));
+  // Write-then-rename: a full disk (ENOSPC) or crash mid-write must never
+  // leave a truncated config.json behind — a corrupt file silently resets
+  // every setting, which is exactly how rotation plans were lost once.
+  const file = configFile();
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+  fs.renameSync(tmp, file);
 }
 
 const ZCODE_EXE_CANDIDATES =
