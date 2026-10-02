@@ -640,6 +640,20 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       if (req.method === "POST" && url.pathname === "/api/library-delete") {
         const body = JSON.parse(await readBody(req));
         const config = runtimeConfig();
+        /** Also drops the deleted wallpaper from every rotation plan so the
+         *  playlist does not error on a dead reference until the next save. */
+        const dropFromPlans = (match: (e: RotationEntry) => boolean): void => {
+          const rot = normalizeRotation(runtimeConfig().rotation);
+          let touched = false;
+          for (const plan of rot.plans) {
+            const kept = plan.entries.filter((e) => !match(e));
+            if (kept.length !== plan.entries.length) {
+              plan.entries = kept;
+              touched = true;
+            }
+          }
+          if (touched) saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
+        };
         if (body?.kind === "scene" && typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
           if (config.sceneHash === body.hash) {
             throw new Error("该壁纸正在使用中 — 先切换到其他壁纸再删除");
@@ -647,18 +661,25 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           const dir = path.join(scenesCacheRoot(), body.hash);
           if (!fs.existsSync(dir)) throw new Error("unknown scene hash");
           fs.rmSync(dir, { recursive: true, force: true });
+          dropFromPlans((e) => e.hash === body.hash);
           sendJson(res, 200, { ok: true });
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
           const target = path.resolve(body.path);
-          if (config.wallpaperPath === target) {
+          // Normalize both sides: a config applied with forward slashes must
+          // still count as "in use" (this guard once missed and an active
+          // wallpaper got deleted).
+          if (config.wallpaperPath && path.resolve(config.wallpaperPath) === target) {
             throw new Error("该壁纸正在使用中 — 先切换到其他壁纸再删除");
           }
           if (!isInsideDataDir(target) || !/\.(jpe?g|png|webp|bmp)$/i.test(target)) {
             throw new Error("only plugin-managed wallpapers can be deleted here");
           }
           fs.rmSync(target, { force: true });
+          const thumb = path.join(thumbDir(), path.basename(target) + ".jpg");
+          if (isInsideDataDir(thumb)) fs.rmSync(thumb, { force: true });
+          dropFromPlans((e) => Boolean(e.path && path.resolve(e.path) === target));
           sendJson(res, 200, { ok: true });
           return;
         }

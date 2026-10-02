@@ -542,7 +542,8 @@ export function buildPanelScript(apiPort: number): string {
     del.addEventListener('click', function () {
       if (del.getAttribute('data-armed') !== '1') {
         del.setAttribute('data-armed', '1'); del.textContent = '确认删除?';
-        disarm = setTimeout(function () { del.removeAttribute('data-armed'); del.textContent = '🗑'; }, 3000);
+        status('再点一次确认删除 ' + label);
+        disarm = setTimeout(function () { del.removeAttribute('data-armed'); del.textContent = '🗑'; }, 5000);
         return;
       }
       clearTimeout(disarm);
