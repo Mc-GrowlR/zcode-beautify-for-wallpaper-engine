@@ -206,6 +206,20 @@ async function poll(config: BeautifyConfig, apiPort: number): Promise<void> {
   try {
     const targets = pickRendererTargets(await listTargets(config.port));
     const current = new Set(targets.map((t) => t.id));
+    // Liveness check: a renderer reload can leave a half-open socket whose
+    // sends "succeed" while nothing lands — the push counts a window that
+    // never renders (zombie session). Ping each held session with a timeout
+    // and drop the ones that do not answer.
+    for (const [id, session] of [...held]) {
+      const alive = await Promise.race([
+        session.conn.send("Runtime.evaluate", { expression: "1" }).then(() => true, () => false),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 1500)),
+      ]);
+      if (!alive) {
+        session.conn.close();
+        held.delete(id);
+      }
+    }
     for (const t of targets) {
       if (!held.has(t.id)) {
         try {

@@ -39,6 +39,10 @@ export function buildPanelScript(apiPort: number): string {
       ' display: flex; justify-content: space-between; align-items: center; }',
     '#zb-body { padding: 10px 12px 0; }',
     '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
+    '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);',
+      ' border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }',
+    '.zb-card-title { font-size: 11px; opacity: .6; margin-bottom: 7px; }',
+    '.zb-card .zb-row:last-child, .zb-card .zb-actions:last-child { margin-bottom: 0; }',
     '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
     '.zb-tab:hover { background: rgba(255,255,255,.12); }',
@@ -63,8 +67,9 @@ export function buildPanelScript(apiPort: number): string {
     '#zb-progress span { position: relative; }',
     '#zb-guide { padding: 8px 10px; background: rgba(120,53,15,.55); border-radius: 8px; font-size: 11px;',
       ' line-height: 1.5; white-space: pre-wrap; user-select: text; max-height: 180px; overflow: auto; }',
-    '.zb-lib { max-height: 120px; overflow: auto; font-size: 11px; }',
+    '.zb-lib { font-size: 11px; }',
     '.zb-lib .zb-lib-head { opacity: .55; margin: 4px 0 2px; }',
+    '.zb-lib-list { max-height: 110px; overflow: auto; }',
     '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
     '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
     '.zb-sched-plan { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }',
@@ -100,6 +105,7 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-item { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; }',
     '.zb-item:hover { background: rgba(255,255,255,.1); }',
     '.zb-item[data-current="1"] { background: rgba(122,162,247,.25); }',
+    '.zb-item .zb-item-img { width: 44px; height: 25px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
     '.zb-item .zb-label { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
     '.zb-item .zb-label-input { flex: 1; min-width: 0; padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(122,162,247,.6);',
       ' background: rgba(0,0,0,.35); color: inherit; font-size: 11px; outline: none; }',
@@ -142,6 +148,7 @@ export function buildPanelScript(apiPort: number): string {
     '      <button class="zb-tab" data-tab="sched">定时播放</button>' +
     '    </div>' +
     '    <div id="zb-tab-main">' +
+    '    <div class="zb-card"><div class="zb-card-title">显示调节</div>' +
     '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
     '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
     '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
@@ -150,15 +157,14 @@ export function buildPanelScript(apiPort: number): string {
     '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
     '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
     '    </div>' +
-    '    <div class="zb-row zb-actions">' +
-    '      <button class="zb-btn" id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">背景填充: …</button>' +
+    '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">' +
+    '      <option value="cover">填满裁剪</option>' +
+    '      <option value="contain">完整显示</option>' +
+    '      <option value="smart">智能适配</option>' +
+    '    </select></div>' +
     '    </div>' +
-    '    <div class="zb-row zb-actions">' +
-    '      <label class="zb-btn" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">更换图片…</label>' +
-    '      <input type="file" id="zb-file" accept="image/*" hidden>' +
-    '    </div>' +
-    '    <div class="zb-row"><label style="opacity:.85"><span>动态壁纸 (场景 / 视频)</span></label>' +
-    '      <div class="zb-actions" style="margin:2px 0 6px">' +
+    '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 动态</div>' +
+    '      <div class="zb-actions" style="margin:0 0 6px">' +
     '        <button class="zb-btn" id="zb-pick" title="打开文件选择器:选 .pkg(场景)或 .mp4(视频),或壁纸目录内任意文件(会自动定位),选完自动开始导入">选择并导入…</button>' +
     '      </div>' +
     '      <input type="text" id="zb-scene-path" placeholder="或粘贴 .pkg / .mp4 / 壁纸目录完整路径…" spellcheck="false">' +
@@ -168,20 +174,30 @@ export function buildPanelScript(apiPort: number): string {
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>…</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
     '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
+    '      <div class="zb-lib-list" id="zb-lib-scenes"></div>' +
     '    </div>' +
-    '    <div class="zb-row zb-lib" id="zb-lib"></div>' +
+    '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 图片</div>' +
+    '      <div class="zb-actions" style="margin:0 0 6px">' +
+    '        <label class="zb-btn" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">更换图片…</label>' +
+    '        <input type="file" id="zb-file" accept="image/*" hidden>' +
+    '      </div>' +
+    '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
+    '    </div>' +
     '    <div class="zb-row zb-actions">' +
     '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
-    '    <div class="zb-row"><div class="zb-sched-head"><span>定时播放</span>' +
-    '      <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
+    '    <div class="zb-card"><div class="zb-card-title">方案</div>' +
+    '      <div class="zb-sched-head" style="margin-bottom:6px"><span>当前</span>' +
+    '        <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
     '      <div class="zb-sched-plan"><select id="zb-plan" title="播放方案"></select>' +
     '        <button class="zb-act" id="zb-plan-add" title="新建播放方案">➕</button>' +
     '        <button class="zb-act" id="zb-plan-ren" title="重命名当前方案">✎</button>' +
     '        <button class="zb-act" id="zb-plan-del" title="删除当前方案">🗑</button>' +
     '      </div>' +
+    '    </div>' +
+    '    <div class="zb-card"><div class="zb-card-title">播放设置</div>' +
     '      <div class="zb-sched-mode"><span>模式</span><select id="zb-sched-mode">' +
     '        <option value="sequence">顺序轮播</option>' +
     '        <option value="random">随机轮播</option>' +
@@ -194,6 +210,8 @@ export function buildPanelScript(apiPort: number): string {
     '        <option value="blur">模糊渐清</option>' +
     '        <option value="none">直接切换</option>' +
     '      </select></div>' +
+    '    </div>' +
+    '    <div class="zb-card"><div class="zb-card-title">播放列表</div>' +
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
     '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
@@ -266,8 +284,7 @@ export function buildPanelScript(apiPort: number): string {
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
-      $('zb-fit').textContent = '背景填充: 未知';
-      $('zb-fit').removeAttribute('data-fit');
+      $('zb-fit').value = 'cover';
       $('zb-reset').textContent = '还原默认外观';
       $('zb-reset').setAttribute('data-mode', 'reset');
       beat(true);
@@ -328,14 +345,11 @@ export function buildPanelScript(apiPort: number): string {
 
   var FITS = ['cover', 'contain', 'smart'];
   var FIT_LABELS = { cover: '填满裁剪', contain: '完整显示', smart: '智能适配' };
-  function applyFitLabel(btn, fit) {
-    btn.textContent = '背景填充: ' + (FIT_LABELS[fit] || fit);
-    btn.setAttribute('data-fit', fit);
+  function applyFitLabel(sel, fit) {
+    sel.value = FIT_LABELS[fit] ? fit : 'cover';
   }
-  $('zb-fit').addEventListener('click', function () {
-    var current = this.getAttribute('data-fit') || 'cover';
-    var next = FITS[(FITS.indexOf(current) + 1) % FITS.length];
-    applyFitLabel(this, next);
+  $('zb-fit').addEventListener('change', function () {
+    var next = this.value;
     post('/api/config', { fit: next }, function (d) { status(d && d.windows > 0 ? '已应用:' + FIT_LABELS[next] : '已保存(ZCode 未连接)'); });
   });
 
@@ -440,37 +454,44 @@ export function buildPanelScript(apiPort: number): string {
     $('zb-import').click();
   });
 
-  // --- library (static images + imported scene loops) ------------------------
+  // --- library (dynamic + images, each with its import entry up front) -----
   function loadLibrary() {
     fetch(API + '/api/library')
       .then(function (r) { return r.json(); })
       .then(function (lib) {
-        var el = $('zb-lib');
-        el.innerHTML = '';
-        var head1 = document.createElement('div');
-        head1.className = 'zb-lib-head'; head1.textContent = '壁纸库 — 动态';
-        el.appendChild(head1);
+        var scenes = $('zb-lib-scenes');
+        var images = $('zb-lib-images');
+        scenes.innerHTML = '';
+        images.innerHTML = '';
         (lib.scenes || []).forEach(function (s) {
-          el.appendChild(libItem(s.name || ('场景 ' + s.hash.slice(0, 8)), { hash: s.hash }, s.hash, 'scene', s.hash));
+          scenes.appendChild(libItem(s.name || ('场景 ' + s.hash.slice(0, 8)), { hash: s.hash }, s.hash, 'scene', s.hash, API + '/media/poster/' + s.hash + '.jpg'));
         });
-        var head2 = document.createElement('div');
-        head2.className = 'zb-lib-head'; head2.textContent = '壁纸库 — 图片';
-        el.appendChild(head2);
+        if (!(lib.scenes || []).length) {
+          scenes.innerHTML = '<div class="zb-lib-head">暂无动态壁纸 — 用上方导入</div>';
+        }
         (lib.images || []).forEach(function (im) {
-          el.appendChild(libItem(im.name, { path: im.path }, im.path, 'image', im.path));
+          images.appendChild(libItem(im.name, { path: im.path }, im.path, 'image', im.path, API + '/media/lib/' + encodeURIComponent(im.name)));
         });
-        if (!(lib.scenes || []).length && !(lib.images || []).length) {
-          el.innerHTML = '<div class="zb-lib-head">壁纸库为空 — 导入或更换壁纸后出现在这里</div>';
+        if (!(lib.images || []).length) {
+          images.innerHTML = '<div class="zb-lib-head">暂无图片壁纸 — 用上方更换图片</div>';
         }
       })
       .catch(function () { /* offline */ });
   }
   /** One library row: click-to-apply label + rename (inline) + two-step delete. */
-  function libItem(label, applyBody, key, kind, ref) {
+  function libItem(label, applyBody, key, kind, ref, thumbUrl) {
     var row = document.createElement('div');
     row.className = 'zb-item';
     var cur = localStorage.getItem('zcode-beautify:current-key');
     if (cur === key) row.setAttribute('data-current', '1');
+
+    if (thumbUrl) {
+      var thumb = document.createElement('img');
+      thumb.className = 'zb-item-img';
+      thumb.src = thumbUrl;
+      thumb.loading = 'lazy';
+      row.appendChild(thumb);
+    }
 
     var labelEl = document.createElement('span');
     labelEl.className = 'zb-label';
