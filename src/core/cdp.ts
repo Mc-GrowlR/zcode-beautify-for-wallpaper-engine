@@ -155,10 +155,15 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
+  var runBootstrap = function() {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG) return;
+  // State alone is not proof the DOM work succeeded: an earlier run may have
+  // died halfway (e.g. aborted mid-transition) leaving state set but no style
+  // element — without the element check every later injection would silently
+  // no-op and the page would never heal.
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -198,6 +203,27 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // first so only one overlay ever exists.
   if (window.__zcodeBeautify.finishFade) window.__zcodeBeautify.finishFade();
 
+  // Retiring a video pauses and hides it but leaves the element in the DOM:
+  // detaching a video's compositor surface mid-transition makes Windows flash
+  // a black rectangle on screen (invisible to CDP captures, very visible to
+  // the user). The retired element is swept at the START of the next switch,
+  // when the fresh transition masks any surface churn.
+  var retireVideo = function(v) {
+    if (!v) return;
+    v.removeAttribute('id');
+    try { v.pause(); } catch (e) {}
+    v.style.opacity = '0';
+    v.style.pointerEvents = 'none';
+    v.dataset.zbRetired = '1';
+  };
+  if (wp) {
+    var strays = wp.querySelectorAll('video');
+    for (var si = 0; si < strays.length; si++) {
+      var sv = strays[si];
+      if (sv.id !== MARKER + '-video' || sv.dataset.zbRetired) sv.remove();
+    }
+  }
+
   if (!HAS_NEW) {
     if (wp) wp.remove();
   } else {
@@ -205,29 +231,39 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     var oldImg = wp.style.backgroundImage && wp.style.backgroundImage !== 'none';
     var animate = Boolean((oldVid || oldImg) && TRANSITION !== 'none');
 
-    var holder = wp;
+    // The image transition runs on a temporary overlay div. Videos NEVER live
+    // in that overlay: promote would have to reparent the <video> into the
+    // wallpaper layer, and reparenting (or removing) a playing video rebuilds
+    // its compositor surface — the black flash this whole block exists to
+    // avoid. A transition video is born inside the wallpaper layer, parked at
+    // opacity 0, and the effect animation runs on the element itself.
+    var holder = null;
+    var vidBase = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+    var vidFx = '';
     if (animate) {
       cssDeferred = true; // theme swap moves to promote(); see CSS_TEXT above
-      holder = document.createElement('div');
-      holder.id = MARKER + '-fade';
-      // Parked invisible at first; the animation css (below) is applied only
-      // once the new content has decoded, so decoder spin-up long tasks land
-      // while the screen is still static instead of stuttering the motion.
-      // CSS animations (compositor-driven for opacity/transform) instead of
-      // JS-started transitions: throttled/occluded renderers never fire rAF
-      // and delay timers past 1s — animations keep running.
-      var fxBase = 'position:absolute;inset:0;background-size:inherit;background-position:inherit;background-repeat:inherit;';
-      var fxAnim;
       if (TRANSITION === 'slide') {
-        fxAnim = 'animation:' + MARKER + '-fx-slide 650ms cubic-bezier(.22,.61,.36,1) forwards;';
+        vidFx = 'animation:' + MARKER + '-fx-slide 650ms cubic-bezier(.22,.61,.36,1) forwards;';
       } else if (TRANSITION === 'zoom') {
-        fxAnim = 'opacity:0;animation:' + MARKER + '-fx-zoom 650ms ease forwards;';
+        vidFx = 'opacity:0;animation:' + MARKER + '-fx-zoom 650ms ease forwards;';
       } else if (TRANSITION === 'blur') {
-        fxAnim = 'opacity:0;animation:' + MARKER + '-fx-blur 650ms ease forwards;';
+        vidFx = 'opacity:0;animation:' + MARKER + '-fx-blur 650ms ease forwards;';
       } else {
-        fxAnim = 'opacity:0;animation:' + MARKER + '-fx-fade 650ms ease forwards;';
+        vidFx = 'opacity:0;animation:' + MARKER + '-fx-fade 650ms ease forwards;';
       }
-      holder.style.cssText = fxBase + 'opacity:0;';
+      if (!VIDEO_SRC) {
+        holder = document.createElement('div');
+        holder.id = MARKER + '-fade';
+        // Parked invisible at first; the animation css (below) is applied only
+        // once the new content has decoded, so decoder spin-up long tasks land
+        // while the screen is still static instead of stuttering the motion.
+        // CSS animations (compositor-driven for opacity/transform) instead of
+        // JS-started transitions: throttled/occluded renderers never fire rAF
+        // and delay timers past 1s — animations keep running.
+        var fxBase = 'position:absolute;inset:0;background-size:inherit;background-position:inherit;background-repeat:inherit;';
+        var fxAnim = vidFx;
+        holder.style.cssText = fxBase + 'opacity:0;';
+      }
       if (!document.getElementById(MARKER + '-fade-style')) {
         var fs = document.createElement('style');
         fs.id = MARKER + '-fade-style';
@@ -238,30 +274,37 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           + '@keyframes ' + MARKER + '-fx-blur { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0px); } }';
         (document.head || document.documentElement).appendChild(fs);
       }
-      wp.appendChild(holder);
+      if (holder) wp.appendChild(holder);
     }
 
     var newVid = null;
     if (VIDEO_SRC) {
-      holder.style.backgroundImage = 'none';
       var nv = document.createElement('video');
       nv.setAttribute('autoplay', '');
       nv.setAttribute('loop', '');
       nv.setAttribute('muted', '');
       nv.setAttribute('playsinline', '');
       nv.muted = true;
-      nv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+      // Born in the wallpaper layer — its final home. An instant switch takes
+      // the official id right away; an animated one stays anonymous and
+      // parked at opacity 0 until promote hands the id over.
+      nv.style.cssText = vidBase + (animate ? 'opacity:0;' : '');
       nv.setAttribute('src', VIDEO_SRC);
       nv.load();
-      holder.appendChild(nv);
+      wp.appendChild(nv);
       nv.play().catch(function() {});
       newVid = nv;
+      if (!animate) {
+        retireVideo(document.getElementById(MARKER + '-video'));
+        nv.id = MARKER + '-video';
+      }
     } else if (${JSON.stringify(Boolean(payload.wallpaperDataUri))}) {
+      if (!holder) holder = wp; // instant image switch paints the main layer directly
       holder.style.backgroundImage = 'url(' + ${JSON.stringify(payload.wallpaperDataUri ?? "")} + ')';
     }
 
     if (animate) {
-      var overlay = holder;
+      var overlay = holder; // null for video switches: the video animates itself
       var done = false;
       var started = false;
       var promote = function() {
@@ -269,47 +312,57 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         done = true;
         window.__zcodeBeautify.finishFade = null;
         style.textContent = CSS_TEXT; // deferred theme swap — motion is over
-        var o = overlay;
-        if (!o.parentNode) return;
-        var prevVid = document.getElementById(MARKER + '-video');
-        if (prevVid) prevVid.remove();
+        // The outgoing video is retired, not removed — see retireVideo.
+        retireVideo(document.getElementById(MARKER + '-video'));
         if (VIDEO_SRC) {
-          var v = o.querySelector('video');
           wp.style.backgroundImage = 'none';
-          if (v) {
-            v.id = MARKER + '-video';
-            wp.appendChild(v);
-            v.play().catch(function() {});
+          if (newVid) {
+            newVid.id = MARKER + '-video';
+            // Settle in place (opacity 1, animation styles dropped). No DOM
+            // move: reparenting would rebuild the video surface.
+            newVid.style.cssText = vidBase;
+            newVid.play().catch(function() {});
           }
-        } else {
-          wp.style.backgroundImage = o.style.backgroundImage;
+        } else if (overlay && overlay.parentNode) {
+          wp.style.backgroundImage = overlay.style.backgroundImage;
+          overlay.remove();
         }
-        o.remove();
       };
       window.__zcodeBeautify.finishFade = promote;
       var startAnim = function() {
         if (started || done) return;
         started = true;
-        // cssText is replaced wholesale to arm the animation — the parked
-        // background image (set before parking) must survive that swap, or
-        // the effect animates an empty layer and promote clears the wallpaper
-        // (every other image click failed exactly this way).
-        var parkedBg = overlay.style.backgroundImage;
-        overlay.style.cssText = fxBase + fxAnim;
-        overlay.style.backgroundImage = parkedBg;
-        overlay.addEventListener('animationend', promote);
+        if (overlay) {
+          // cssText is replaced wholesale to arm the animation — the parked
+          // background image (set before parking) must survive that swap, or
+          // the effect animates an empty layer and promote clears the wallpaper
+          // (every other image click failed exactly this way).
+          var parkedBg = overlay.style.backgroundImage;
+          overlay.style.cssText = fxBase + fxAnim;
+          overlay.style.backgroundImage = parkedBg;
+          overlay.addEventListener('animationend', promote);
+        } else if (newVid) {
+          newVid.style.cssText = vidBase + vidFx;
+          newVid.addEventListener('animationend', promote);
+        }
         setTimeout(promote, 780);
       };
       // Warm the new content first: video waits for its first decoded frame
-      // (loadeddata), image waits for decode(); heavy media pipeline tasks
-      // then run while the old wallpaper is still shown motionlessly. A
-      // timeout keeps the switch landing even if the event never fires.
+      // (loadeddata) AND one presented frame (requestVideoFrameCallback) —
+      // the compositor must already hold the first frame before the animation
+      // exposes the layer, or the effect fades in a black video surface.
+      // Images wait for decode(). A timeout keeps the switch landing even if
+      // an event never fires (throttled renderers stall rvfc too).
       if (newVid) {
-        if (newVid.readyState >= 2) startAnim();
-        else {
-          newVid.addEventListener('loadeddata', startAnim);
-          setTimeout(startAnim, 600);
-        }
+        var budget = setTimeout(startAnim, 900);
+        var onFrame = function() { clearTimeout(budget); startAnim(); };
+        var onReady = function() {
+          if (typeof newVid.requestVideoFrameCallback === 'function') {
+            newVid.requestVideoFrameCallback(function() { onFrame(); });
+          } else onFrame();
+        };
+        if (newVid.readyState >= 2) onReady();
+        else newVid.addEventListener('loadeddata', onReady);
       } else {
         var im = new Image();
         var imSrc = overlay.style.backgroundImage.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');
@@ -319,9 +372,6 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         im.src = imSrc;
         setTimeout(startAnim, 600);
       }
-    } else if (VIDEO_SRC) {
-      var v0 = holder.querySelector('video');
-      if (v0) v0.id = MARKER + '-video';
     }
   }
 
@@ -393,6 +443,19 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     localStorage.setItem(MARKER + ':css', ${JSON.stringify(payload.css)});
     localStorage.setItem(MARKER + ':wallpaper', ${JSON.stringify(payload.wallpaperDataUri ?? "")});
   } catch (e) {}
+  };
+  // The addScriptToEvaluateOnNewDocument registration replays at document
+  // creation, where documentElement is still null — appending the style or
+  // wallpaper there throws and kills the run before anything mounts. Wait
+  // for the parser to produce a root element (a few ms at most).
+  if (document.documentElement) runBootstrap();
+  else {
+    var zbWaitMount = function() {
+      if (document.documentElement) runBootstrap();
+      else setTimeout(zbWaitMount, 10);
+    };
+    zbWaitMount();
+  }
 })();`;
 }
 

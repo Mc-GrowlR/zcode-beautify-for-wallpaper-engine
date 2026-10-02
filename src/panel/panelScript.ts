@@ -16,6 +16,7 @@ export function buildPanelScript(apiPort: number): string {
   return `(function(){
   var API = ${JSON.stringify(api)};
   var ROOT_ID = ${JSON.stringify(PANEL_ROOT_ID)};
+  var runPanel = function() {
   // Always rebuild: an older panel left in the DOM would otherwise shadow the
   // current script version forever (the old build skipped installation).
   var stale = document.getElementById(ROOT_ID);
@@ -482,10 +483,21 @@ export function buildPanelScript(apiPort: number): string {
       })
       .catch(function () { /* offline */ });
   }
+  /** Flip the data-current highlight in place. Rebuilding the whole list on
+   *  every apply (loadLibrary) destroys and re-decodes every thumbnail <img>,
+   *  which reads as the whole library flickering on each wallpaper switch. */
+  function markCurrent(key) {
+    var rows = document.querySelectorAll('#' + ROOT_ID + ' .zb-item[data-key]');
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute('data-key') === key) rows[i].setAttribute('data-current', '1');
+      else rows[i].removeAttribute('data-current');
+    }
+  }
   /** One library row: click-to-apply label + rename (inline) + two-step delete. */
   function libItem(label, applyBody, key, kind, ref, thumbUrl) {
     var row = document.createElement('div');
     row.className = 'zb-item';
+    row.setAttribute('data-key', key);
     var cur = localStorage.getItem('zcode-beautify:current-key');
     if (cur === key) row.setAttribute('data-current', '1');
 
@@ -506,7 +518,7 @@ export function buildPanelScript(apiPort: number): string {
         if (r && r.error) { status(r.error); return; }
         try { localStorage.setItem('zcode-beautify:current-key', key); } catch (e) {}
         status('已应用 applied');
-        loadLibrary();
+        markCurrent(key);
       });
     });
     row.appendChild(labelEl);
@@ -1024,6 +1036,18 @@ export function buildPanelScript(apiPort: number): string {
         w.style.backgroundImage = 'url(' + savedWp + ')';
       }
     }
+  }
+  };
+  // The registration replays at document creation where <body> does not exist
+  // yet — document.body.appendChild would throw and the panel would never
+  // come back after a reload. Wait for the parser (a few ms at most).
+  if (document.body) runPanel();
+  else {
+    var zbPanelWait = function() {
+      if (document.body) runPanel();
+      else setTimeout(zbPanelWait, 20);
+    };
+    zbPanelWait();
   }
 })();`;
 }
