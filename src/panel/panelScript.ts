@@ -375,7 +375,11 @@ export function buildPanelScript(apiPort: number): string {
     if (f.size > 20 * 1024 * 1024) { status('图片过大,上限 20 MB'); return; }
     var fr = new FileReader();
     fr.onload = function () {
-      post('/api/wallpaper', { dataUri: fr.result, name: f.name }, function () { status('壁纸已更新 updated'); });
+      post('/api/wallpaper', { dataUri: fr.result, name: f.name }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        status('已添加并应用:' + f.name);
+        loadLibrary();
+      });
     };
     fr.readAsDataURL(f);
   });

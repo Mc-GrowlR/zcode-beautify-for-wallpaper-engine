@@ -446,7 +446,19 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         }
         const config = runtimeConfig();
         fs.mkdirSync(dataDir(), { recursive: true });
-        const dest = path.join(dataDir(), "wallpaper" + IMAGE_EXT[m[1]]);
+        // Save under the ORIGINAL filename (sanitized): the old fixed
+        // "wallpaper.<ext>" destination silently overwrote the previous
+        // upload, so the library never gained an entry and a new pick looked
+        // like "nothing was added". Collisions get a numeric suffix.
+        const ext = IMAGE_EXT[m[1]];
+        const safeBase = (typeof body?.name === "string" ? path.basename(body.name) : "wallpaper")
+          .replace(/[\\/:*?"<>|]/g, "_")
+          .replace(new RegExp("\\" + ext + "$", "i"), "")
+          .trim() || "wallpaper";
+        let dest = path.join(dataDir(), safeBase + ext);
+        for (let i = 2; fs.existsSync(dest); i++) {
+          dest = path.join(dataDir(), `${safeBase}(${i})${ext}`);
+        }
         fs.writeFileSync(dest, bytes);
         const themeSrc = await themeThumbFor(dest);
         rememberAssets(themeSrc, fs.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
