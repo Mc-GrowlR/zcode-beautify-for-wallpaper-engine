@@ -36,7 +36,12 @@ const MAX_WIDTH = 2560;
 const JPEG_QUALITY = 82;
 
 export async function loadWallpaper(imagePath: string, maxDimension = MAX_WIDTH): Promise<WallpaperAssets> {
-  const image = await Jimp.read(imagePath);
+  // Raise the decoder memory caps: modern wallpapers (phone shots, 4K PNGs)
+  // blow past the defaults, and the failure mode was nasty — a 4s wait,
+  // then a throw that silently dropped the wallpaper entirely.
+  const image = await Jimp.read(imagePath, {
+    "image/jpeg": { maxMemoryUsageInMB: 1024 },
+  });
 
   // Downscale so the embedded data URI and the quantizer stay fast.
   const { width, height } = image.bitmap;

@@ -27,7 +27,8 @@ import { buildPanelScript } from "../panel/panelScript.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
-import { getInstallGuide } from "./dependencyCheck.js";
+import { getInstallGuide, checkFfmpeg } from "./dependencyCheck.js";
+import { execFileP } from "./exec.js";
 import { scenesCacheRoot } from "./cacheManager.js";
 
 const MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
@@ -44,27 +45,73 @@ interface HeldSession {
   themeScriptId?: string;
 }
 
-// One decoded image + extracted theme, reused across slider updates so the
-// panel feels instant. Invalidated whenever the wallpaper file changes.
-let cachedAssets: { file: string; mtimeMs: number; assets: WallpaperAssets } | undefined;
+// Decoded image + extracted theme, reused across slider updates so the panel
+// feels instant. A small LRU (not a single slot): rotation and library clicks
+// alternate between several wallpapers and a single slot re-decoded on every
+// switch.
+const assetsCache = new Map<string, { mtimeMs: number; assets: WallpaperAssets }>();
+
+function rememberAssets(file: string, mtimeMs: number, assets: WallpaperAssets): void {
+  assetsCache.set(file, { mtimeMs, assets });
+  if (assetsCache.size > 6) {
+    assetsCache.delete(assetsCache.keys().next().value as string);
+  }
+}
+
+// --- palette thumbs -----------------------------------------------------------
+// jimp is a pure-JS decoder: an 8K wallpaper takes ~4s and blows its decode
+// memory cap (the switch then silently loses the theme — or worse). ffmpeg
+// downscales to a tiny thumb once; jimp only ever decodes that.
+let ffmpegPathCache: string | undefined;
+async function ffmpegPath(): Promise<string | undefined> {
+  if (ffmpegPathCache !== undefined) return ffmpegPathCache || undefined;
+  const st = await checkFfmpeg();
+  ffmpegPathCache = st.ok && st.path ? st.path : "";
+  return ffmpegPathCache || undefined;
+}
+
+function thumbDir(): string {
+  return path.join(dataDir(), "thumbs");
+}
+
+/** The file Monet should sample: a generated thumb when possible, else the original. */
+async function themeThumbFor(source: string): Promise<string> {
+  if (!isInsideDataDir(source)) return source;
+  const thumb = path.join(thumbDir(), path.basename(source) + ".jpg");
+  try {
+    if (!fs.existsSync(thumb)) {
+      const exe = await ffmpegPath();
+      if (!exe) return source;
+      fs.mkdirSync(thumbDir(), { recursive: true });
+      await execFileP(exe, ["-y", "-hide_banner", "-loglevel", "error", "-i", source, "-vf", "scale=160:-2", "-frames:v", "1", "-q:v", "4", thumb], { timeout: 20_000 });
+    }
+    return fs.existsSync(thumb) ? thumb : source;
+  } catch {
+    return source; // no ffmpeg / decode trouble: fall back to the original
+  }
+}
 
 async function getAssets(config: BeautifyConfig): Promise<WallpaperAssets | undefined> {
   const wallpaperPath = config.wallpaperPath;
   if (!wallpaperPath || !fs.existsSync(wallpaperPath)) return undefined;
   // Scene wallpaper: wallpaperPath is the loop VIDEO — jimp can't decode it.
   // The poster frame next to the loop carries the Monet source colors.
+  // Library images sample a small ffmpeg-generated thumb instead.
   const sourcePath =
     config.mediaType === "video"
       ? path.join(path.dirname(wallpaperPath), "poster.jpg")
-      : wallpaperPath;
+      : await themeThumbFor(wallpaperPath);
   if (!fs.existsSync(sourcePath)) return undefined;
   const mtimeMs = fs.statSync(sourcePath).mtimeMs;
-  if (cachedAssets?.file === sourcePath && cachedAssets.mtimeMs === mtimeMs) {
-    return cachedAssets.assets;
+  const cached = assetsCache.get(sourcePath);
+  if (cached?.mtimeMs === mtimeMs) {
+    assetsCache.delete(sourcePath);
+    assetsCache.set(sourcePath, cached); // refresh LRU position
+    return cached.assets;
   }
   try {
     const assets = await loadWallpaper(sourcePath);
-    cachedAssets = { file: sourcePath, mtimeMs, assets };
+    rememberAssets(sourcePath, mtimeMs, assets);
     return assets;
   } catch {
     return undefined; // undecodable wallpaper: inject without Monet rather than not at all
@@ -401,7 +448,8 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         fs.mkdirSync(dataDir(), { recursive: true });
         const dest = path.join(dataDir(), "wallpaper" + IMAGE_EXT[m[1]]);
         fs.writeFileSync(dest, bytes);
-        cachedAssets = { file: dest, mtimeMs: fs.statSync(dest).mtimeMs, assets: await loadWallpaper(dest) };
+        const themeSrc = await themeThumbFor(dest);
+        rememberAssets(themeSrc, fs.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
         saveConfig(persisted({ ...config, wallpaperPath: dest }));
         const windows = await pushConfigToSessions({ ...config, wallpaperPath: dest }).catch(() => 0);
         sendJson(res, 200, { ok: true, windows, ...publicConfig({ ...config, wallpaperPath: dest }) });
@@ -431,7 +479,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           }
         }
         saveConfig({ ...stored, wallpaperPath: undefined, mediaType: undefined, sceneHash: undefined, sceneVideoUrl: undefined });
-        cachedAssets = undefined;
+        assetsCache.clear();
         sendJson(res, 200, { ok: true, hasBackup: true });
         return;
       }
@@ -675,7 +723,8 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // Library image thumbnails: only plain image files inside the data dir.
       if (req.method === "GET" && url.pathname.startsWith("/media/lib/")) {
         const name = decodeURIComponent(url.pathname.slice("/media/lib/".length));
-        if (!/^[\w .-]+\.(jpe?g|png|webp|bmp)$/i.test(name) || name.includes("..")) {
+        // Allow any single filename component (incl. CJK); block traversal.
+        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp)$/i.test(name)) {
           sendJson(res, 400, { error: "bad library media path" });
           return;
         }

@@ -6,6 +6,8 @@
 import { CdpConnection, injectIntoTarget, listTargets, pickRendererTargets, buildBootstrapScript, buildResetScript } from "./cdp.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
+import { dataDir } from "./launch.js";
+import path from "node:path";
 
 export type WallpaperFit = "cover" | "contain" | "smart";
 
@@ -166,8 +168,21 @@ html, body { background: transparent !important; }
       parts.push(buildTransparencyOverrides({ dim: config.dim }));
     }
   }
-  const wallpaperDataUri =
-    config.sceneVideoUrl || !config.wallpaperVisible ? undefined : assets?.dataUri;
+  // Library images stream over the serve media endpoint instead of a base64
+  // data URI: a multi-MB payload means a huge CDP evaluate + a second decode
+  // in the renderer, while the browser caches by URL — switching is far
+  // faster. Wallpapers outside the data dir keep the inline fallback.
+  let wallpaperDataUri: string | undefined;
+  if (!config.sceneVideoUrl && config.wallpaperVisible) {
+    // Normalize separators/case so forward-slash paths match too.
+    const p = path.resolve(config.wallpaperPath ?? "").toLowerCase();
+    const dir = path.resolve(dataDir()).toLowerCase();
+    if (p.startsWith(dir + path.sep) && /\.(jpe?g|png|webp|bmp)$/i.test(p)) {
+      wallpaperDataUri = `http://127.0.0.1:${config.apiPort ?? 9223}/media/lib/${encodeURIComponent(path.basename(config.wallpaperPath!))}`;
+    } else {
+      wallpaperDataUri = assets?.dataUri;
+    }
+  }
   const videoSrc = config.wallpaperVisible ? config.sceneVideoUrl : undefined;
 
   return {
