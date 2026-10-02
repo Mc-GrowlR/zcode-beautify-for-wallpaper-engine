@@ -59,7 +59,13 @@ export function buildPanelScript(apiPort: number): string {
       ' white-space: nowrap; flex: 0 1 auto; }',
     '.zb-btn:hover { background: rgba(255,255,255,.16); }',
     '#zb-status { min-height: 14px; padding: 2px 12px 0; opacity: .6; font-size: 11px; }',
-    '#zb-scene-path { width: 100%; padding: 5px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);',
+    // Import row: picker + paste field + action on ONE line (the old stacked
+    // button/input/button block ate three rows for two functions).
+    '.zb-import-row { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }',
+    '.zb-import-row .zb-btn { padding: 4px 9px; font-size: 11px; flex: none; }',
+    '.zb-import-row .zb-icon-btn { padding: 4px 7px; line-height: 1; }',
+    '.zb-import-row .zb-grow { flex: 1; min-width: 0; }',
+    '#zb-scene-path { flex: 1; min-width: 0; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);',
       ' background: rgba(0,0,0,.3); color: inherit; font-size: 11px; outline: none; }',
     '#zb-scene-path:focus { border-color: rgba(122,162,247,.6); }',
     '#zb-progress { position: relative; height: 14px; border-radius: 7px; overflow: hidden;',
@@ -165,12 +171,10 @@ export function buildPanelScript(apiPort: number): string {
     '    </select></div>' +
     '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 动态</div>' +
-    '      <div class="zb-actions" style="margin:0 0 6px">' +
-    '        <button class="zb-btn" id="zb-pick" title="打开文件选择器:选 .pkg(场景)或 .mp4(视频),或壁纸目录内任意文件(会自动定位),选完自动开始导入">选择并导入…</button>' +
-    '      </div>' +
-    '      <input type="text" id="zb-scene-path" placeholder="或粘贴 .pkg / .mp4 / 壁纸目录完整路径…" spellcheck="false">' +
-    '      <div class="zb-actions" style="margin-top:6px">' +
-    '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入粘贴的路径</button>' +
+    '      <div class="zb-import-row">' +
+    '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="打开文件选择器:选 .pkg(场景)或 .mp4(视频),或壁纸目录内任意文件(会自动定位),选完自动开始导入">📁</button>' +
+    '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
+    '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入</button>' +
     '      </div>' +
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>…</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
@@ -178,8 +182,8 @@ export function buildPanelScript(apiPort: number): string {
     '      <div class="zb-lib-list" id="zb-lib-scenes"></div>' +
     '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 图片</div>' +
-    '      <div class="zb-actions" style="margin:0 0 6px">' +
-    '        <label class="zb-btn" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">更换图片…</label>' +
+    '      <div class="zb-import-row">' +
+    '        <label class="zb-btn zb-grow" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">🖼 更换图片…</label>' +
     '        <input type="file" id="zb-file" accept="image/*" hidden>' +
     '      </div>' +
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
@@ -412,16 +416,19 @@ export function buildPanelScript(apiPort: number): string {
   }
   $('zb-pick').addEventListener('click', function () {
     var btn = this;
-    btn.textContent = '打开选择器…';
+    btn.textContent = '…';
     fetch(API + '/api/pick-scene', { method: 'POST' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        btn.textContent = '选择并导入…';
+        btn.textContent = '📁';
         if (!d || !d.ok || !d.path) return; // user cancelled the dialog
         $('zb-scene-path').value = d.path;
         $('zb-import').click();
       })
-      .catch(function () { btn.textContent = '选择并导入…'; status('无法连接美化服务 service unreachable'); });
+      .catch(function () { btn.textContent = '📁'; status('无法连接美化服务 service unreachable'); });
+  });
+  $('zb-scene-path').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('zb-import').click();
   });
 
   $('zb-import').addEventListener('click', function () {
