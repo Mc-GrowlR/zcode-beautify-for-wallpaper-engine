@@ -48,7 +48,7 @@ export function buildPanelScript(apiPort: number): string {
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
     '.zb-toggles { display: flex; justify-content: center; gap: 16px; }',
     '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
-    '.zb-actions { display: flex; justify-content: center; gap: 8px; }',
+    '.zb-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
       ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); color: inherit; font-size: 12px;',
       ' white-space: nowrap; flex: 0 1 auto; }',
@@ -85,6 +85,18 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-sched-row input[type=time] { width: 66px; flex: none; }',
     '.zb-sched-row select { flex: 1; min-width: 0; }',
     '.zb-sched-dur { flex: none; opacity: .7; font-size: 11px; }',
+    '.zb-wp-picker { position: relative; flex: 1; min-width: 0; }',
+    '.zb-wp-btn { display: flex; align-items: center; gap: 5px; width: 100%; padding: 2px 5px; border-radius: 6px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px; cursor: pointer; }',
+    '.zb-wp-btn img { width: 42px; height: 24px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
+    '.zb-wp-btn span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }',
+    '.zb-wp-pop { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 30; max-height: 160px;',
+      ' overflow: auto; background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
+    '.zb-wp-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-size: 11px; }',
+    '.zb-wp-item:hover { background: rgba(255,255,255,.12); }',
+    '.zb-wp-item[data-cur="1"] { background: rgba(122,162,247,.28); }',
+    '.zb-wp-item img { width: 46px; height: 26px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
+    '.zb-wp-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
     '.zb-item { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; }',
     '.zb-item:hover { background: rgba(255,255,255,.1); }',
     '.zb-item[data-current="1"] { background: rgba(122,162,247,.25); }',
@@ -187,6 +199,7 @@ export function buildPanelScript(apiPort: number): string {
     '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
     '        <button class="zb-btn" id="zb-sched-save" title="保存全部方案(不改变启用状态)">💾 保存</button>' +
     '        <button class="zb-btn" id="zb-sched-play" title="保存并立即启用当前方案开始播放">▶ 播放</button>' +
+    '        <button class="zb-btn" id="zb-sched-next" title="跳过当前时长,立即切换到下一张壁纸">⏭ 立即切换</button>' +
     '      </div>' +
     '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 0"></div>' +
     '    </div>' +
@@ -544,14 +557,87 @@ export function buildPanelScript(apiPort: number): string {
       .then(function (lib) {
         schedOptions = [];
         (lib.scenes || []).forEach(function (s) {
-          schedOptions.push({ value: 'h:' + s.hash, label: '▶ ' + (s.name || ('场景 ' + s.hash.slice(0, 8))) });
+          schedOptions.push({
+            value: 'h:' + s.hash,
+            label: '▶ ' + (s.name || ('场景 ' + s.hash.slice(0, 8))),
+            thumb: API + '/media/poster/' + s.hash + '.jpg'
+          });
         });
         (lib.images || []).forEach(function (im) {
-          schedOptions.push({ value: 'p:' + im.path, label: '🖼 ' + im.name });
+          schedOptions.push({
+            value: 'p:' + im.path,
+            label: '🖼 ' + im.name,
+            thumb: API + '/media/lib/' + encodeURIComponent(im.name)
+          });
         });
         if (!schedOptions.length) schedOptions = [{ value: '', label: '(壁纸库为空)' }];
       })
       .catch(function () { /* offline */ });
+  }
+  /**
+   * Wallpaper picker with thumbnail previews (native <option> elements cannot
+   * show images). The row keeps its current value in a data-wp attribute; the
+   * button shows the selected wallpaper's poster, clicking opens a popup list
+   * where every option carries a preview image.
+   */
+  function wallpaperPicker(row, val) {
+    var wrap = document.createElement('div');
+    wrap.className = 'zb-wp-picker';
+    var cur = null;
+    for (var i = 0; i < schedOptions.length; i++) if (schedOptions[i].value === val) cur = schedOptions[i];
+    var hasLib = schedOptions.length && schedOptions[0].value !== '';
+    if (!cur) {
+      if (!val && hasLib) { cur = schedOptions[0]; val = cur.value; }
+      else cur = { value: val, label: val ? '(壁纸已失效)' : '(壁纸库为空)', thumb: null };
+    }
+    row.setAttribute('data-wp', val);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'zb-wp-btn';
+    var img = document.createElement('img');
+    if (cur.thumb) img.src = cur.thumb; else img.style.visibility = 'hidden';
+    var span = document.createElement('span');
+    span.textContent = cur.label;
+    btn.appendChild(img); btn.appendChild(span);
+    var pop = null;
+    function closePop() {
+      if (!pop) return;
+      pop.remove(); pop = null;
+      document.removeEventListener('mousedown', onDoc, true);
+    }
+    function onDoc(e) {
+      if (pop && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop();
+    }
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (pop) { closePop(); return; }
+      if (!hasLib) return;
+      pop = document.createElement('div');
+      pop.className = 'zb-wp-pop';
+      schedOptions.forEach(function (o) {
+        var it = document.createElement('div');
+        it.className = 'zb-wp-item';
+        if (o.value === row.getAttribute('data-wp')) it.setAttribute('data-cur', '1');
+        var t = document.createElement('img');
+        if (o.thumb) t.src = o.thumb; else t.style.visibility = 'hidden';
+        var s = document.createElement('span');
+        s.textContent = o.label;
+        it.appendChild(t); it.appendChild(s);
+        it.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          row.setAttribute('data-wp', o.value);
+          if (o.thumb) { img.src = o.thumb; img.style.visibility = 'visible'; }
+          else img.style.visibility = 'hidden';
+          span.textContent = o.label;
+          closePop();
+        });
+        pop.appendChild(it);
+      });
+      wrap.appendChild(pop);
+      document.addEventListener('mousedown', onDoc, true);
+    });
+    wrap.appendChild(btn);
+    return wrap;
   }
   function schedRow(entry) {
     var row = document.createElement('div');
@@ -572,21 +658,8 @@ export function buildPanelScript(apiPort: number): string {
       u.className = 'zb-sched-dur'; u.textContent = '分';
       row.appendChild(u);
     }
-    var sel = document.createElement('select');
     var val = entry.hash ? ('h:' + entry.hash) : (entry.path ? ('p:' + entry.path) : '');
-    var known = false;
-    schedOptions.forEach(function (o) {
-      var op = document.createElement('option');
-      op.value = o.value; op.textContent = o.label;
-      if (o.value === val) { op.selected = true; known = true; }
-      sel.appendChild(op);
-    });
-    if (val && !known) {
-      var miss = document.createElement('option');
-      miss.value = val; miss.textContent = '(壁纸已失效)'; miss.selected = true;
-      sel.insertBefore(miss, sel.firstChild);
-    }
-    row.appendChild(sel);
+    row.appendChild(wallpaperPicker(row, val));
     var del = document.createElement('button');
     del.className = 'zb-act'; del.textContent = '✕'; del.title = '删除此条';
     del.addEventListener('click', function () { row.remove(); });
@@ -623,7 +696,7 @@ export function buildPanelScript(apiPort: number): string {
     var rows = document.querySelectorAll('#zb-sched-list .zb-sched-row');
     var isSchedule = schedMode() === 'schedule';
     for (var i = 0; i < rows.length; i++) {
-      var v = rows[i].querySelector('select').value;
+      var v = rows[i].getAttribute('data-wp') || '';
       if (!v || v.length < 3) continue;
       var hash = v.slice(0, 2) === 'h:' ? v.slice(2) : undefined;
       var imgPath = v.slice(0, 2) !== 'h:' ? v.slice(2) : undefined;
@@ -817,6 +890,13 @@ export function buildPanelScript(apiPort: number): string {
       $('zb-sched-on').checked = true;
       status(plan ? '开始播放:' + plan.name : '开始播放');
       loadRotation();
+    });
+  });
+  // 立即切换: skip the current entry's remaining duration, next wallpaper now.
+  $('zb-sched-next').addEventListener('click', function () {
+    post('/api/rotation-next', {}, function (d) {
+      if (d && d.error) { status(d.error); return; }
+      status('已切换到下一张');
     });
   });
 

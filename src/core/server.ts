@@ -162,7 +162,12 @@ async function holdSession(
 
   const panelScript = buildPanelScript(apiPort);
   await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
-  await conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true });
+  // Runtime.evaluate does NOT reject when the script itself throws — surface
+  // exceptionDetails or a broken panel fails silently ("injected" in the log).
+  const panelEval = await conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true });
+  if (panelEval?.exceptionDetails) {
+    console.error(`serve: panel script threw — ${JSON.stringify(panelEval.exceptionDetails).slice(0, 400)}`);
+  }
 
   held.set(target.id, session);
 }
@@ -619,6 +624,12 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         return;
       }
 
+      // 立即切换: skip ahead to the next playlist entry right now.
+      if (req.method === "POST" && url.pathname === "/api/rotation-next") {
+        sendJson(res, 200, skipRotation());
+        return;
+      }
+
       // Loop video streaming for the injected <video> layer (Range-capable).
       if (req.method === "GET" && url.pathname.startsWith("/media/scene/")) {
         const hash = /^\/media\/scene\/([a-f0-9]{8,64})\.mp4$/.exec(url.pathname)?.[1];
@@ -629,6 +640,34 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         const file = path.join(scenesCacheRoot(), hash, "loop.mp4");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "scene media not found" });
+        }
+        return;
+      }
+
+      // Poster thumbnails (panel wallpaper previews).
+      if (req.method === "GET" && url.pathname.startsWith("/media/poster/")) {
+        const hash = /^\/media\/poster\/([a-f0-9]{8,64})\.jpg$/.exec(url.pathname)?.[1];
+        if (!hash) {
+          sendJson(res, 400, { error: "bad poster path" });
+          return;
+        }
+        const file = path.join(scenesCacheRoot(), hash, "poster.jpg");
+        if (!sendMediaFile(req, res, file)) {
+          sendJson(res, 404, { error: "poster not found" });
+        }
+        return;
+      }
+
+      // Library image thumbnails: only plain image files inside the data dir.
+      if (req.method === "GET" && url.pathname.startsWith("/media/lib/")) {
+        const name = decodeURIComponent(url.pathname.slice("/media/lib/".length));
+        if (!/^[\w .-]+\.(jpe?g|png|webp|bmp)$/i.test(name) || name.includes("..")) {
+          sendJson(res, 400, { error: "bad library media path" });
+          return;
+        }
+        const file = path.join(dataDir(), name);
+        if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
+          sendJson(res, 404, { error: "library media not found" });
         }
         return;
       }
@@ -664,6 +703,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   let rotationTick: NodeJS.Timeout | undefined;
   let lastScheduleFire = "";
   let randomAvoid = -1;
+  let rotationIndex = 0;
 
   /** The rotation as it should play right now (normalized + active plan). */
   function rotationNow(): { on: boolean; plan?: RotationPlan } {
@@ -682,6 +722,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     const i = ((index % n) + n) % n;
     const entry = rot.entries[i];
     randomAvoid = i;
+    rotationIndex = i;
     try {
       const r = await applyRef(entry);
       console.log(`serve: rotation [${rot.name}/${rot.mode}] ${i + 1}/${n} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
@@ -722,6 +763,28 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     void applyRef(entry)
       .then((r) => console.log(`serve: rotation [${s.plan!.name}/schedule] ${hhmm} -> ${entry.hash ?? entry.path} (${r.windows} window(s))`))
       .catch((err: Error) => console.error(`serve: rotation schedule fire failed — ${err.message}`));
+  }
+
+  /**
+   * 立即切换: skip the rest of the current entry's duration and jump to the
+   * next wallpaper right now (same next-pick logic as the timer callback).
+   */
+  function skipRotation(): { ok: boolean; error?: string } {
+    const s = rotationNow();
+    if (!s.on || !s.plan) return { ok: false, error: "定时播放未启用或方案为空" };
+    if (s.plan.mode === "schedule") return { ok: false, error: "定时切换模式按时间点播放,无下一张" };
+    if (rotationTimer) clearTimeout(rotationTimer);
+    const total = s.plan.entries.length;
+    let next: number;
+    if (s.plan.mode === "random" && total > 1) {
+      do {
+        next = Math.floor(Math.random() * total);
+      } while (next === rotationIndex);
+    } else {
+      next = rotationIndex + 1;
+    }
+    void playRotationEntry(next);
+    return { ok: true };
   }
 
   /** (Re)starts or stops the playlist per the current stored rotation. */
