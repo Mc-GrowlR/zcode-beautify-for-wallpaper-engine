@@ -290,7 +290,13 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       var startAnim = function() {
         if (started || done) return;
         started = true;
+        // cssText is replaced wholesale to arm the animation — the parked
+        // background image (set before parking) must survive that swap, or
+        // the effect animates an empty layer and promote clears the wallpaper
+        // (every other image click failed exactly this way).
+        var parkedBg = overlay.style.backgroundImage;
         overlay.style.cssText = fxBase + fxAnim;
+        overlay.style.backgroundImage = parkedBg;
         overlay.addEventListener('animationend', promote);
         setTimeout(promote, 780);
       };
