@@ -944,6 +944,12 @@ export function buildPanelScript(apiPort: number): string {
     var p = $('zb-panel');
     p.hidden = !p.hidden;
     if (!p.hidden) {
+      // A previously dragged panel can sit (partially) outside the viewport,
+      // which reads as "the panel did not open". Pull it back in.
+      var r = p.getBoundingClientRect();
+      if (r.width && (r.right < 40 || r.bottom < 40 || r.left > window.innerWidth - 40 || r.top > window.innerHeight - 40)) {
+        p.style.left = ''; p.style.top = ''; p.style.right = ''; p.style.bottom = '';
+      }
       activateSavedTab();
       beat(true);
     } else if (root.getAttribute('data-offline') !== '1') {
