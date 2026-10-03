@@ -112,7 +112,9 @@ export function buildPanelScript(apiPort: number): string {
     // The popup is position:fixed on <body>: an absolutely positioned popup
     // inside the scrolling playlist gets clipped by the list's overflow window
     // (and the browser scrolls the list to reveal it, cutting off row 1).
-    '.zb-wp-pop { position: fixed; z-index: 2147483645; max-height: 200px;',
+    // z-index ties with the panel root (2147483647 is the ceiling) — the popup
+    // is appended later, so DOM order paints it ABOVE the panel card.
+    '.zb-wp-pop { position: fixed; z-index: 2147483647; max-height: 200px;',
       ' overflow: auto; background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
     '.zb-wp-group { padding: 4px 6px 2px; font-size: 10px; opacity: .55; }',
     '.zb-wp-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-size: 11px; }',
