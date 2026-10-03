@@ -27,9 +27,29 @@ export interface RecordOptions {
   /** Output size; defaults to 1920x1080. */
   outWidth?: number;
   outHeight?: number;
+  /** AbortSignal: aborting kills the running ffmpeg (import cancellation). */
+  signal?: AbortSignal;
 }
 
 export class RecordError extends Error {}
+
+/** Virtual-screen bounds of every display, in ddagrab enumeration order
+ *  (EnumDisplayDevices ordinal). Empty on any failure → primary-only fallback. */
+async function displayLayout(): Promise<Array<{ x: number; y: number; w: number; h: number }>> {
+  const script = `Add-Type -AssemblyName System.Windows.Forms
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$screens = [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { '{0},{1},{2},{3}' -f $_.Bounds.X, $_.Bounds.Y, $_.Bounds.Width, $_.Bounds.Height }
+$screens -join ';'`;
+  try {
+    const { stdout } = await exec("powershell", ["-NoProfile", "-Command", script], { timeout: 15_000 });
+    return stdout.trim().split(";").filter(Boolean).map((s) => {
+      const [x, y, w, h] = s.split(",").map(Number);
+      return { x, y, w, h };
+    });
+  } catch {
+    return [];
+  }
+}
 
 export async function recordSceneWindow(
   handle: SceneWindowHandle,
@@ -46,7 +66,22 @@ export async function recordSceneWindow(
   // rect right before capturing (the window is topmost at this point) instead
   // of trusting the rect from open time.
   const client = await measureClientRect(handle.hwnd, handle.title);
-  const { x, y, width, height } = client;
+  let { x, y } = client;
+  const { width, height } = client;
+  // ddagrab captures ONE output; the crop coordinates must be relative to
+  // that output. A window on a secondary monitor needs its output_idx and
+  // the origin subtracted, or the crop rect falls outside the captured frame.
+  const displays = await displayLayout();
+  let outputIdx = 0;
+  for (let i = 0; i < displays.length; i++) {
+    const d = displays[i];
+    if (x >= d.x && x < d.x + d.w && y >= d.y && y < d.y + d.h) {
+      outputIdx = i;
+      x -= d.x;
+      y -= d.y;
+      break;
+    }
+  }
   const outW = opts.outWidth ?? 1920;
   const outH = opts.outHeight ?? 1080;
   const args = [
@@ -54,7 +89,7 @@ export async function recordSceneWindow(
     "-hide_banner",
     "-loglevel", "warning",
     "-f", "lavfi",
-    "-i", `ddagrab=output_idx=0:framerate=${opts.fps}:draw_mouse=0`,
+    "-i", `ddagrab=output_idx=${outputIdx}:framerate=${opts.fps}:draw_mouse=0`,
     "-t", String(opts.duration),
     "-vf", `hwdownload,format=bgra,crop=${width}:${height}:${x}:${y},scale=${outW}:${outH}`,
     "-c:v", "libx264",
@@ -66,7 +101,7 @@ export async function recordSceneWindow(
 
   await setTopmost(handle.hwnd, true);
   try {
-    await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024 });
+    await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024, signal: opts.signal });
   } catch (err) {
     throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
   } finally {
@@ -107,7 +142,8 @@ export async function analyzeBlackness(file: string, ffmpegPath?: string): Promi
   const durationSec = Number(/Duration: (\d+):(\d+):([\d.]+)/.exec(stderr)?.slice(1).reduce((acc, v) => acc * 60 + Number(v), 0) ?? 0);
   const blackRanges = [...stderr.matchAll(/black_start:[\d.]+ black_end:([\d.]+) black_duration:([\d.]+)/g)];
   const blackSec = blackRanges.reduce((sum, m) => sum + Number(m[2]), 0);
-  const blackFraction = durationSec > 0 ? blackSec / durationSec : 1;
+  // Unparsable duration (probe failure) must read "unknown", not "100% black".
+  const blackFraction = durationSec > 0 ? blackSec / durationSec : -1;
 
   const meanLuma = await meanLumaOf(file, ffmpeg);
   return { blackFraction, meanLuma, durationSec };

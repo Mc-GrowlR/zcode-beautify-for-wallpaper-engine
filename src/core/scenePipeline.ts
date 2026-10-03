@@ -110,8 +110,13 @@ export async function importScene(
   onProgress: (stage: string, detail?: string) => void = () => undefined,
   options: SceneImportOptions = {},
   ffmpegPath?: string,
+  signal?: AbortSignal
 ): Promise<SceneImportResult> {
   const opts = { ...DEFAULT_SCENE_OPTIONS, ...options };
+  /** Cancellation checkpoint between stages; ffmpeg runs also get the signal. */
+  const checkCancel = (): void => {
+    if (signal?.aborted) throw new SceneImportError("导入已取消");
+  };
 
   onProgress("detect", pkgPath);
   let type = detectWallpaperType(pkgPath);
@@ -145,8 +150,8 @@ export async function importScene(
   if (missing.length > 0) throw new MissingDependencyError(missing);
 
   const hash = isVideo
-    ? computeHash(pkgPath, { kind: "video", maxWidth: 1920, maxSeconds: opts.maxSeconds, fadeSec: opts.fadeSec })
-    : computeHash(pkgPath, {
+    ? await computeHash(pkgPath, { kind: "video", maxWidth: 1920, maxSeconds: opts.maxSeconds, fadeSec: opts.fadeSec })
+    : await computeHash(pkgPath, {
         width: opts.width,
         height: opts.height,
         fps: opts.fps,
@@ -155,6 +160,9 @@ export async function importScene(
       });
   const loopPath = getCachePath(hash);
   const posterPath = path.join(path.dirname(loopPath), "poster.jpg");
+  // Unique temp name: two concurrent imports of the same wallpaper used to
+  // interleave writes into one fixed .tmp.mp4 and publish a truncated loop.
+  const tmpLoop = `${loopPath}.tmp-${process.pid}-${Date.now().toString(36)}.mp4`;
 
   if (hasCache(hash)) {
     onProgress("cache-hit", hash);
@@ -166,6 +174,7 @@ export async function importScene(
   if (isVideo) {
     // Direct video wallpaper: no WE window, no recording — the source IS the
     // footage. Normalize (truncate long clips, cap width), loop, poster, cache.
+    checkCancel();
     onProgress("analyzing", pkgPath);
     const sourceDuration = await probeDuration(pkgPath, ffmpegPath ?? (await checkFfmpeg()).path!);
     const trim =
@@ -174,20 +183,28 @@ export async function importScene(
         : undefined;
     if (trim) onProgress("truncating", `${sourceDuration.toFixed(1)}s -> ${opts.maxSeconds}s`);
 
+    checkCancel();
     onProgress("processing", `crossfade ${opts.fadeSec}s`);
-    const tmpLoop = `${loopPath}.tmp.mp4`;
-    await makeSeamless(pkgPath, tmpLoop, opts.fadeSec, ffmpegPath, {
-      startAt: trim?.startAt,
-      seconds: trim?.seconds,
-      maxWidth: 1920,
-    });
+    try {
+      await makeSeamless(pkgPath, tmpLoop, opts.fadeSec, ffmpegPath, {
+        startAt: trim?.startAt,
+        seconds: trim?.seconds,
+        maxWidth: 1920,
+        signal,
+      });
 
-    onProgress("poster");
-    await extractPoster(tmpLoop, posterPath, ffmpegPath);
+      checkCancel();
+      onProgress("poster");
+      await extractPoster(tmpLoop, posterPath, ffmpegPath);
 
-    onProgress("saving", hash);
-    fs.mkdirSync(path.dirname(loopPath), { recursive: true });
-    fs.renameSync(tmpLoop, loopPath);
+      onProgress("saving", hash);
+      fs.mkdirSync(path.dirname(loopPath), { recursive: true });
+      fs.renameSync(tmpLoop, loopPath);
+    } finally {
+      // A failure (or cancel) must not leave tens of MB of temp behind —
+      // stale temps inflate dirSize and skew the LRU eviction order.
+      try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
+    }
 
     const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
@@ -196,26 +213,30 @@ export async function importScene(
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   }
 
+  checkCancel();
   onProgress("opening", `window "${opts.title}"`);
   const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
+  let rawPath = "";
   try {
     onProgress("render-ready", JSON.stringify(handle.client));
     await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
 
+    checkCancel();
     onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
-    const rawPath = path.join(path.dirname(loopPath), `raw-${Date.now()}.mp4`);
+    rawPath = path.join(path.dirname(loopPath), `raw-${Date.now().toString(36)}-${process.pid}.mp4`);
     fs.mkdirSync(path.dirname(rawPath), { recursive: true });
     try {
-      await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height }, ffmpegPath);
+      await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height, signal }, ffmpegPath);
     } finally {
       onProgress("closing");
       await closeSceneWindow(handle).catch(() => undefined);
     }
 
+    checkCancel();
     onProgress("processing", `crossfade ${opts.fadeSec}s`);
-    const tmpLoop = `${loopPath}.tmp.mp4`;
-    await makeSeamless(rawPath, tmpLoop, opts.fadeSec, ffmpegPath);
+    await makeSeamless(rawPath, tmpLoop, opts.fadeSec, ffmpegPath, { signal });
 
+    checkCancel();
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
 
@@ -223,6 +244,7 @@ export async function importScene(
     fs.mkdirSync(path.dirname(loopPath), { recursive: true });
     fs.renameSync(tmpLoop, loopPath);
     fs.rmSync(rawPath, { force: true });
+    rawPath = "";
 
     const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
@@ -230,7 +252,10 @@ export async function importScene(
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   } finally {
-    // If anything above threw, make sure the WE window never lingers.
+    // If anything above threw (or cancelled), make sure neither the WE window
+    // nor the temp captures linger.
+    if (rawPath) { try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ } }
+    try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
     await closeSceneWindow(handle).catch(() => undefined);
   }
 }

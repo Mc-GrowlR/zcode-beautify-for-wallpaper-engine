@@ -37,9 +37,9 @@ export function hasCache(hash: string): boolean {
  * are fingerprinted via a stable manifest (relative path + size of every
  * file), which stays cheap even for multi-hundred-MB published scenes.
  */
-export function computeHash(pkgPath: string, opts: Record<string, unknown>): string {
+export async function computeHash(pkgPath: string, opts: Record<string, unknown>): Promise<string> {
   const md5 = crypto.createHash("md5");
-  md5.update(fingerprint(pkgPath));
+  md5.update(await fingerprint(pkgPath));
   md5.update(JSON.stringify(normalizeOpts(opts)));
   return md5.digest("hex");
 }
@@ -98,6 +98,16 @@ export function enforceLimit(maxBytes: number): number {
 
 // --- helpers ----------------------------------------------------------------
 
+function hashFileChunks(p: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("md5");
+    const stream = fs.createReadStream(p, { highWaterMark: 4 * 1024 * 1024 });
+    stream.on("data", (c) => hash.update(c));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+
 function normalizeOpts(opts: Record<string, unknown>): Record<string, unknown> {
   const sorted: Record<string, unknown> = {};
   for (const key of Object.keys(opts).sort()) {
@@ -106,18 +116,27 @@ function normalizeOpts(opts: Record<string, unknown>): Record<string, unknown> {
   return sorted;
 }
 
-function fingerprint(p: string): string {
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(p);
-  } catch {
-    return `missing:${p}`;
+async function fingerprint(p: string): Promise<string> {
+  let stat: fs.Stats | undefined;
+  // A transient stat failure (antivirus lock, OneDrive placeholder) must not
+  // change the hash: retry once before degrading to "missing".
+  for (let attempt = 0; attempt < 2 && !stat; attempt++) {
+    try {
+      stat = fs.statSync(p);
+    } catch {
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 150));
+    }
   }
+  if (!stat) return `missing:${p}`;
   if (stat.isFile()) {
-    // Hash file bytes in chunks; pkg files are typically < 200 MB.
-    const buf = crypto.createHash("md5");
-    buf.update(fs.readFileSync(p));
-    return `file:${stat.size}:${buf.digest("hex")}`;
+    // Stream-hash in chunks: a multi-GB video input read into one Buffer
+    // would spike the daemon's memory past its cap. An unreadable file falls
+    // back to a size-only fingerprint (stable, no phantom cache misses).
+    try {
+      return `file:${stat.size}:${await hashFileChunks(p)}`;
+    } catch {
+      return `stat:${stat.size}`;
+    }
   }
   if (stat.isDirectory()) {
     const manifest: string[] = [];

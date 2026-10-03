@@ -31,20 +31,64 @@ export function configFile(): string {
 export function loadConfig(): StoredConfig {
   try {
     return JSON.parse(fs.readFileSync(configFile(), "utf8")) as StoredConfig;
-  } catch {
+  } catch (err) {
+    // A PARSE error (not "file missing") means the stored config is corrupt:
+    // quarantine it so the next save does not silently cement the wipe, and
+    // the user's settings stay recoverable.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      try {
+        fs.copyFileSync(configFile(), configFile() + `.corrupt-${Date.now().toString(36)}`);
+      } catch {
+        /* best effort */
+      }
+    }
     return {};
+  }
+}
+
+/**
+ * Cross-process serialized write. The serve daemon and MCP tool calls run in
+ * different processes, both doing load→mutate→save on the same file; a bare
+ * write can interleave and silently drop the other's settings. A lock file
+ * (O_EXCL + retry) serializes writers; saveConfig is sync-friendly, so the
+ * lock is acquired with a bounded busy-wait.
+ */
+function withConfigLock<T>(fn: () => T): T {
+  const lock = configFile() + ".lock";
+  fs.mkdirSync(dataDir(), { recursive: true });
+  const deadline = Date.now() + 3000;
+  let fd: number | null = null;
+  for (;;) {
+    try {
+      fd = fs.openSync(lock, "wx");
+      break;
+    } catch {
+      if (Date.now() > deadline) return fn(); // stale lock: proceed unlocked
+      const waitMs = Date.now();
+      while (Date.now() - waitMs < 25) {
+        /* brief spin */
+      }
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try { fs.closeSync(fd!); } catch { /* closed */ }
+    try { fs.rmSync(lock, { force: true }); } catch { /* locked */ }
   }
 }
 
 export function saveConfig(config: StoredConfig): void {
   fs.mkdirSync(dataDir(), { recursive: true });
-  // Write-then-rename: a full disk (ENOSPC) or crash mid-write must never
-  // leave a truncated config.json behind — a corrupt file silently resets
-  // every setting, which is exactly how rotation plans were lost once.
-  const file = configFile();
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
-  fs.renameSync(tmp, file);
+  withConfigLock(() => {
+    // Write-then-rename: a full disk (ENOSPC) or crash mid-write must never
+    // leave a truncated config.json behind — a corrupt file silently resets
+    // every setting, which is exactly how rotation plans were lost once.
+    const file = configFile();
+    const tmp = file + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+    fs.renameSync(tmp, file);
+  });
 }
 
 const ZCODE_EXE_CANDIDATES =
@@ -148,6 +192,13 @@ export async function launchZcode(port: number): Promise<LaunchResult> {
     }
   }
   if (!up) {
+    // Never leave the orphan we spawned: without the port it is unusable to
+    // us, and its single-instance lock blocks every later launch attempt.
+    try {
+      child.kill();
+    } catch {
+      /* already gone */
+    }
     throw new Error(
       "ZCode was started but no CDP endpoint appeared. Another instance may already be running without the debug port — quit ZCode completely and run `zcode-beautify launch` again."
     );

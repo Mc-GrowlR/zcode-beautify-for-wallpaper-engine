@@ -190,7 +190,13 @@ export function parseVdfPaths(vdf: string): string[] {
   return paths;
 }
 
+// Cached after the first probe: synchronously touching every drive letter
+// costs seconds when unreachable mapped network drives are in the mix, and
+// the set of local drives does not change within a process lifetime.
+let driveRootsCache: string[] | undefined;
+
 function driveRoots(): string[] {
+  if (driveRootsCache) return driveRootsCache;
   const roots: string[] = [];
   for (let i = 67; i <= 90; i++) {
     // C..Z
@@ -202,6 +208,7 @@ function driveRoots(): string[] {
       /* drive absent */
     }
   }
+  driveRootsCache = roots;
   return roots;
 }
 
