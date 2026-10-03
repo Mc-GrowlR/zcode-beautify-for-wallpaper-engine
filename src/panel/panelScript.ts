@@ -114,8 +114,11 @@ export function buildPanelScript(apiPort: number): string {
     // (and the browser scrolls the list to reveal it, cutting off row 1).
     // z-index ties with the panel root (2147483647 is the ceiling) — the popup
     // is appended later, so DOM order paints it ABOVE the panel card.
-    '.zb-wp-pop { position: fixed; z-index: 2147483647; max-height: 200px; color: #e8e8ea;',
-      ' overflow: auto; overscroll-behavior: contain; background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
+    '.zb-wp-pop { position: fixed; z-index: 2147483647; color: #e8e8ea;',
+      ' background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
+    // Each group scrolls independently (its own scrollbar), capped at five
+    // visible rows — measured .zb-wp-item height is 32px: 5x32 = 160px.
+    '.zb-wp-group-list { max-height: 160px; overflow-y: auto; overscroll-behavior: contain; }',
     '.zb-wp-group { padding: 4px 6px 2px; font-size: 10px; opacity: .55; }',
     '.zb-wp-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-size: 11px; }',
     '.zb-wp-item:hover { background: rgba(255,255,255,.12); }',
@@ -726,8 +729,10 @@ export function buildPanelScript(apiPort: number): string {
       if (!hasLib) return;
       pop = document.createElement('div');
       pop.className = 'zb-wp-pop';
-      // Grouped: 动态壁纸 first, then 图片壁纸 (skips empty groups).
+      // Grouped: 动态壁纸 first, then 图片壁纸 (skips empty groups); each
+      // group lives in its own scroll window with its own scrollbar.
       var groups = [{ key: 'scene', label: '动态壁纸' }, { key: 'image', label: '图片壁纸' }];
+      var groupLists = [];
       groups.forEach(function (g) {
         var items = schedOptions.filter(function (o) { return (o.group || '') === g.key; });
         if (!items.length) return;
@@ -735,6 +740,8 @@ export function buildPanelScript(apiPort: number): string {
         head.className = 'zb-wp-group';
         head.textContent = g.label;
         pop.appendChild(head);
+        var glist = document.createElement('div');
+        glist.className = 'zb-wp-group-list';
         items.forEach(function (o) {
           var it = document.createElement('div');
           it.className = 'zb-wp-item';
@@ -752,24 +759,32 @@ export function buildPanelScript(apiPort: number): string {
             span.textContent = o.label;
             closePop();
           });
-          pop.appendChild(it);
+          glist.appendChild(it);
         });
+        pop.appendChild(glist);
+        groupLists.push(glist);
       });
       document.body.appendChild(pop);
-      // Fixed placement anchored to the button: opens above it, falling back
-      // below (height-capped) when the button sits too close to the top.
+      // Fixed placement anchored to the button: opens above it when the full
+      // two-column list fits; below otherwise, shrinking the group windows
+      // proportionally when the viewport runs out of room.
       var r = btn.getBoundingClientRect();
       var w = Math.max(r.width, 200);
       pop.style.width = w + 'px';
       pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
-      if (r.top > 180) {
+      var needed = pop.offsetHeight + 4;
+      if (r.top >= needed + 8) {
         pop.style.top = 'auto';
         pop.style.bottom = (window.innerHeight - r.top + 4) + 'px';
       } else {
         pop.style.bottom = 'auto';
         pop.style.top = (r.bottom + 4) + 'px';
-        var spaceBelow = window.innerHeight - r.bottom - 12;
-        if (spaceBelow < 200) pop.style.maxHeight = Math.max(120, spaceBelow) + 'px';
+        var space = window.innerHeight - r.bottom - 12;
+        if (space < needed && groupLists.length) {
+          var chromeH = needed - groupLists.reduce(function (a, el) { return a + el.offsetHeight; }, 0);
+          var per = Math.max(64, Math.floor((space - chromeH) / groupLists.length));
+          groupLists.forEach(function (el) { el.style.maxHeight = per + 'px'; });
+        }
       }
       document.addEventListener('mousedown', onDoc, true);
       window.addEventListener('scroll', onScrollClose, true);
