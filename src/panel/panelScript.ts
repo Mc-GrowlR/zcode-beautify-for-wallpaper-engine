@@ -61,7 +61,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-collapse-wrap > .zb-collapse-inner { overflow: hidden; min-height: 0; }',
     '.zb-collapsed .zb-collapse-wrap { grid-template-rows: 0fr; }',
     '.zb-collapsed .zb-card-title { padding-bottom: 0; }',
-    '.zb-fold { opacity: .55; font-size: 9px; transition: transform .15s ease; }',
+    '.zb-fold { width: 20px; height: 16px; border-radius: 5px; background: rgba(255,255,255,.09);',
+      ' border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center;',
+      ' font-size: 9px; line-height: 1; color: inherit; flex: none;',
+      ' transition: transform .15s ease, background .15s ease; }',
+    '.zb-collapsible .zb-card-title:hover .zb-fold { background: rgba(122,162,247,.35); border-color: rgba(122,162,247,.6); }',
     '.zb-collapsed .zb-fold { transform: rotate(-90deg); }',
     '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
@@ -190,7 +194,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <button class="zb-tab" data-tab="sched">定时播放</button>' +
     '    </div>' +
     '    <div id="zb-tab-main">' +
-    '    <div class="zb-card"><div class="zb-card-title">显示调节</div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-display"><div class="zb-card-title">显示调节 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
     '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
     '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
@@ -207,9 +212,12 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <option value="contain">完整显示</option>' +
     '      <option value="smart">智能适配</option>' +
     '    </select></div>' +
+    '      </div></div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">最近使用</div>' +
-    '      <div class="zb-lib-list" id="zb-history" style="max-height:64px"></div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title">最近使用 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '      <div class="zb-lib-list" id="zb-history" style="max-height:192px"></div>' +
+    '      </div></div>' +
     '    </div>' +
     '    <div class="zb-card zb-collapsible" id="zb-card-scenes"><div class="zb-card-title">壁纸库 · 动态 <span class="zb-fold">▾</span></div>' +
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
@@ -616,6 +624,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       hideHoverPreview(); // thumbnails vanish under the fold
     });
   }
+  bindFold('zb-card-display', 'zcode-beautify:fold-display');
+  bindFold('zb-card-history', 'zcode-beautify:fold-history');
   bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
   bindFold('zb-card-images', 'zcode-beautify:fold-images');
 
