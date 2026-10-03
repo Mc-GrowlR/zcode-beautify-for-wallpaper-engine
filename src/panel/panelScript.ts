@@ -95,7 +95,7 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
       ' outline: none; color-scheme: dark; }',
-    '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 200px; overflow-y: auto; padding-right: 2px; }',
+    '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 200px; overflow-y: auto; overflow-anchor: none; padding-right: 2px; }',
     '.zb-sched-row { display: flex; align-items: center; gap: 4px; }',
     '.zb-sched-row input[type=number], .zb-sched-row input[type=time], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
@@ -109,8 +109,12 @@ export function buildPanelScript(apiPort: number): string {
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px; cursor: pointer; }',
     '.zb-wp-btn img { width: 42px; height: 24px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
     '.zb-wp-btn span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }',
-    '.zb-wp-pop { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 30; max-height: 160px;',
+    // The popup is position:fixed on <body>: an absolutely positioned popup
+    // inside the scrolling playlist gets clipped by the list's overflow window
+    // (and the browser scrolls the list to reveal it, cutting off row 1).
+    '.zb-wp-pop { position: fixed; z-index: 2147483645; max-height: 200px;',
       ' overflow: auto; background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
+    '.zb-wp-group { padding: 4px 6px 2px; font-size: 10px; opacity: .55; }',
     '.zb-wp-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-size: 11px; }',
     '.zb-wp-item:hover { background: rgba(255,255,255,.12); }',
     '.zb-wp-item[data-cur="1"] { background: rgba(122,162,247,.28); }',
@@ -654,15 +658,17 @@ export function buildPanelScript(apiPort: number): string {
         (lib.scenes || []).forEach(function (s) {
           schedOptions.push({
             value: 'h:' + s.hash,
-            label: '▶ ' + (s.name || ('场景 ' + s.hash.slice(0, 8))),
-            thumb: API + '/media/poster/' + s.hash + '.jpg'
+            label: s.name || ('场景 ' + s.hash.slice(0, 8)),
+            thumb: API + '/media/poster/' + s.hash + '.jpg',
+            group: 'scene'
           });
         });
         (lib.images || []).forEach(function (im) {
           schedOptions.push({
             value: 'p:' + im.path,
-            label: '🖼 ' + im.name,
-            thumb: API + '/media/lib/' + encodeURIComponent(im.name)
+            label: im.name,
+            thumb: API + '/media/lib/' + encodeURIComponent(im.name),
+            group: 'image'
           });
         });
         if (!schedOptions.length) schedOptions = [{ value: '', label: '(壁纸库为空)' }];
@@ -700,37 +706,66 @@ export function buildPanelScript(apiPort: number): string {
       pop.remove(); pop = null;
       hideHoverPreview();
       document.removeEventListener('mousedown', onDoc, true);
+      window.removeEventListener('scroll', onScrollClose, true);
     }
     function onDoc(e) {
       if (pop && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop();
     }
+    // A fixed popup does not follow scrolling — any scroll closes it.
+    function onScrollClose() { closePop(); }
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       if (pop) { closePop(); return; }
       if (!hasLib) return;
       pop = document.createElement('div');
       pop.className = 'zb-wp-pop';
-      schedOptions.forEach(function (o) {
-        var it = document.createElement('div');
-        it.className = 'zb-wp-item';
-        if (o.value === row.getAttribute('data-wp')) it.setAttribute('data-cur', '1');
-        var t = document.createElement('img');
-        if (o.thumb) t.src = o.thumb; else t.style.visibility = 'hidden';
-        var s = document.createElement('span');
-        s.textContent = o.label;
-        it.appendChild(t); it.appendChild(s);
-        it.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          row.setAttribute('data-wp', o.value);
-          if (o.thumb) { img.src = o.thumb; img.style.visibility = 'visible'; }
-          else img.style.visibility = 'hidden';
-          span.textContent = o.label;
-          closePop();
+      // Grouped: 动态壁纸 first, then 图片壁纸 (skips empty groups).
+      var groups = [{ key: 'scene', label: '动态壁纸' }, { key: 'image', label: '图片壁纸' }];
+      groups.forEach(function (g) {
+        var items = schedOptions.filter(function (o) { return (o.group || '') === g.key; });
+        if (!items.length) return;
+        var head = document.createElement('div');
+        head.className = 'zb-wp-group';
+        head.textContent = g.label;
+        pop.appendChild(head);
+        items.forEach(function (o) {
+          var it = document.createElement('div');
+          it.className = 'zb-wp-item';
+          if (o.value === row.getAttribute('data-wp')) it.setAttribute('data-cur', '1');
+          var t = document.createElement('img');
+          if (o.thumb) t.src = o.thumb; else t.style.visibility = 'hidden';
+          var s = document.createElement('span');
+          s.textContent = o.label;
+          it.appendChild(t); it.appendChild(s);
+          it.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            row.setAttribute('data-wp', o.value);
+            if (o.thumb) { img.src = o.thumb; img.style.visibility = 'visible'; }
+            else img.style.visibility = 'hidden';
+            span.textContent = o.label;
+            closePop();
+          });
+          pop.appendChild(it);
         });
-        pop.appendChild(it);
       });
-      wrap.appendChild(pop);
+      document.body.appendChild(pop);
+      // Fixed placement anchored to the button: opens above it, falling back
+      // below (height-capped) when the button sits too close to the top.
+      var r = btn.getBoundingClientRect();
+      var w = Math.max(r.width, 200);
+      pop.style.width = w + 'px';
+      pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+      if (r.top > 180) {
+        pop.style.top = 'auto';
+        pop.style.bottom = (window.innerHeight - r.top + 4) + 'px';
+      } else {
+        pop.style.bottom = 'auto';
+        pop.style.top = (r.bottom + 4) + 'px';
+        var spaceBelow = window.innerHeight - r.bottom - 12;
+        if (spaceBelow < 200) pop.style.maxHeight = Math.max(120, spaceBelow) + 'px';
+      }
       document.addEventListener('mousedown', onDoc, true);
+      window.addEventListener('scroll', onScrollClose, true);
     });
     wrap.appendChild(btn);
     return wrap;
@@ -766,6 +801,9 @@ export function buildPanelScript(apiPort: number): string {
     var list = $('zb-sched-list');
     list.innerHTML = '';
     (entries || []).forEach(function (e) { list.appendChild(schedRow(e)); });
+    // A rebuilt list must start at the top — a stale scrollTop (left by scroll
+    // anchoring or a clipped popup) cut off row 1's upper half.
+    list.scrollTop = 0;
   }
   function renderPlanSelect() {
     var sel = $('zb-plan');
