@@ -586,8 +586,21 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         }
         // Without this the next rotation tick re-applied a playlist wallpaper
         // seconds after the reset — "restore default appearance" read broken.
+        // enabled is cleared too: a later library delete / cache purge /
+        // config import routes through startRotation and would silently
+        // resume playback over the restored-default look.
         stopRotationTimers();
-        saveConfig({ ...stored, wallpaperPath: undefined, mediaType: undefined, sceneHash: undefined, sceneVideoUrl: undefined });
+        const storedRot = stored.rotation ? normalizeRotation(stored.rotation) : undefined;
+        const cleared = storedRot ? { ...storedRot, enabled: false } : undefined;
+        const resetCfg = {
+          ...stored,
+          wallpaperPath: undefined,
+          mediaType: undefined,
+          sceneHash: undefined,
+          sceneVideoUrl: undefined,
+          ...(cleared ? { rotation: cleared } : {}),
+        };
+        saveConfig(resetCfg);
         assetsCache.clear();
         sendJson(res, 200, { ok: true, hasBackup: true });
         return;
@@ -964,6 +977,12 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           withWp.wallpaperPath = incoming.wallpaperPath;
           withWp.mediaType = incoming.mediaType === "video" ? "video" : "image";
           withWp.sceneHash = typeof incoming.sceneHash === "string" ? incoming.sceneHash : undefined;
+          // A foreign/hand-edited export may carry a bogus scene hash: gate it
+          // like every other hash path or the wallpaper 404s to black.
+          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs.existsSync(path.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
+            withWp.sceneHash = undefined;
+            withWp.mediaType = "image";
+          }
           withWp.sceneVideoUrl = withWp.mediaType === "video" && withWp.sceneHash
             ? `http://127.0.0.1:${apiPort}/media/scene/${withWp.sceneHash}.mp4`
             : undefined;
@@ -1140,7 +1159,11 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       if (!cur.on || !cur.plan || cur.plan.mode === "schedule" || !cur.plan.entries.length) return;
       const total = cur.plan.entries.length;
       let next: number;
-      if (cur.plan.mode === "random" && total > 1) {
+      if (cur.plan.id !== rot.id) {
+        // The plan changed under this timer (window opened/closed): seed from
+        // the NEW plan's saved position, not the old plan's index.
+        next = (resumeIndex.get(cur.plan.id) ?? -1) + 1;
+      } else if (cur.plan.mode === "random" && total > 1) {
         do {
           next = Math.floor(Math.random() * total);
         } while (next === randomAvoid);
@@ -1171,14 +1194,27 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   }
 
   /** 20s watchdog for duration plans: switches to a plan whose window just
-   *  opened (F5). Fires only on CHANGES — entry timing stays with the timers. */
+   *  opened (F5). Fires only on CHANGES — entry timing stays with the timers.
+   *  When no window is active, windowPlanId must be re-anchored to the
+   *  fallback plan or the next day's window-open would look like "no change"
+   *  and never fire again. */
   function rotationWatch(): void {
     const norm = normalizeRotation(runtimeConfig().rotation);
     if (!norm.enabled) return;
     const hhmm = hhmmNow();
     const windowed = norm.plans.find((p) => inWindow(p.window, hhmm) && p.entries.length);
-    if (windowed && windowed.id !== windowPlanId) {
-      console.log(`serve: rotation window -> plan "${windowed.name}" (${hhmm})`);
+    if (windowed) {
+      if (windowed.id !== windowPlanId) {
+        console.log(`serve: rotation window -> plan "${windowed.name}" (${hhmm})`);
+        startRotation(true);
+      }
+      return;
+    }
+    const fallback = norm.plans.find((p) => p.id === norm.activePlanId) ?? norm.plans[0];
+    if (fallback && fallback.id !== windowPlanId) {
+      // A window just CLOSED: fall back to the active plan (rotationNow
+      // already picks it; the next timer tick or this restart makes it so).
+      console.log(`serve: rotation window closed -> plan "${fallback.name}" (${hhmm})`);
       startRotation(true);
     }
   }
@@ -1365,9 +1401,14 @@ function renameLibraryImage(oldPath: string, name: string): string {
   const ext = path.extname(oldPath);
   const safe = name.replace(/[\/:*?"<>|]/g, "").trim() || "wallpaper";
   let newPath = path.join(path.dirname(oldPath), safe + ext);
-  if (newPath.toLowerCase() !== path.resolve(oldPath).toLowerCase()) {
-    for (let i = 2; fs.existsSync(newPath); i++) {
-      newPath = path.join(path.dirname(oldPath), `${safe}(${i})${ext}`);
+  // Case-insensitive comparison catches plain renames AND case-only renames
+  // (Windows permits the latter — the rename must still happen, so "same
+  // file" skips only when the path is byte-identical).
+  if (path.resolve(newPath) !== path.resolve(oldPath)) {
+    if (newPath.toLowerCase() !== path.resolve(oldPath).toLowerCase()) {
+      for (let i = 2; fs.existsSync(newPath); i++) {
+        newPath = path.join(path.dirname(oldPath), `${safe}(${i})${ext}`);
+      }
     }
     fs.renameSync(oldPath, newPath);
   }

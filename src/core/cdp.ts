@@ -164,11 +164,14 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // State alone is not proof the DOM work succeeded: an earlier run may have
   // died halfway (e.g. aborted mid-transition) leaving state set but no style
   // element — without the element check every later injection would silently
-  // no-op and the page would never heal.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && document.getElementById(MARKER + '-style')) return;
+  // no-op and the page would never heal. kb participates too: toggling Ken
+  // Burns alone changes no CSS, and without it the toggle would early-return
+  // before applyKb ever runs.
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
+  window.__zcodeBeautify.kb = ${JSON.stringify(Boolean(payload.kenBurns))};
 
   var style = document.getElementById(MARKER + '-style');
   if (!style) {
@@ -255,6 +258,19 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     // its compositor surface — the black flash this whole block exists to
     // avoid. A transition video is born inside the wallpaper layer, parked at
     // opacity 0, and the effect animation runs on the element itself.
+    // Keyframes live OUTSIDE the animate branch: applyKb at the tail needs
+    // -kb on instant switches too (first apply, transition "none").
+    if (!document.getElementById(MARKER + '-fade-style')) {
+      var fs = document.createElement('style');
+      fs.id = MARKER + '-fade-style';
+      fs.textContent = ''
+        + '@keyframes ' + MARKER + '-fx-fade { from { opacity: 0; } to { opacity: 1; } }'
+        + '@keyframes ' + MARKER + '-fx-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }'
+        + '@keyframes ' + MARKER + '-fx-zoom { from { opacity: 0; transform: scale(1.15); } to { opacity: 1; transform: scale(1); } }'
+        + '@keyframes ' + MARKER + '-fx-blur { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0px); } }'
+        + '@keyframes ' + MARKER + '-kb { from { transform: scale(1) translate(0%, 0%); } to { transform: scale(1.08) translate(-1.6%, -1.1%); } }';
+      (document.head || document.documentElement).appendChild(fs);
+    }
     var holder = null;
     var vidBase = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
     var vidFx = '';
@@ -281,19 +297,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         var fxBase = 'position:absolute;inset:0;background-size:inherit;background-position:inherit;background-repeat:inherit;';
         var fxAnim = vidFx;
         holder.style.cssText = fxBase + 'opacity:0;';
+        wp.appendChild(holder);
       }
-      if (!document.getElementById(MARKER + '-fade-style')) {
-        var fs = document.createElement('style');
-        fs.id = MARKER + '-fade-style';
-        fs.textContent = ''
-          + '@keyframes ' + MARKER + '-fx-fade { from { opacity: 0; } to { opacity: 1; } }'
-          + '@keyframes ' + MARKER + '-fx-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }'
-          + '@keyframes ' + MARKER + '-fx-zoom { from { opacity: 0; transform: scale(1.15); } to { opacity: 1; transform: scale(1); } }'
-          + '@keyframes ' + MARKER + '-fx-blur { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0px); } }'
-          + '@keyframes ' + MARKER + '-kb { from { transform: scale(1) translate(0%, 0%); } to { transform: scale(1.08) translate(-1.6%, -1.1%); } }';
-        (document.head || document.documentElement).appendChild(fs);
-      }
-      if (holder) wp.appendChild(holder);
     }
 
     var newVid = null;

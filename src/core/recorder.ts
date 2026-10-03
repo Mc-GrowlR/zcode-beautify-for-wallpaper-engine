@@ -66,8 +66,7 @@ export async function recordSceneWindow(
   // rect right before capturing (the window is topmost at this point) instead
   // of trusting the rect from open time.
   const client = await measureClientRect(handle.hwnd, handle.title);
-  let { x, y } = client;
-  const { width, height } = client;
+  let { x, y, width, height } = client;
   // ddagrab captures ONE output; the crop coordinates must be relative to
   // that output. A window on a secondary monitor needs its output_idx and
   // the origin subtracted, or the crop rect falls outside the captured frame.
@@ -82,8 +81,19 @@ export async function recordSceneWindow(
       break;
     }
   }
+  // Clamp the crop to the chosen display: .NET screen ordinals and ddagrab's
+  // DXGI output ordinals can disagree on hybrid-GPU systems, and a window
+  // straddling two monitors produces an out-of-frame rect — a garbage or
+  // failed capture. Clamped-but-partial beats entirely wrong output.
   const outW = opts.outWidth ?? 1920;
   const outH = opts.outHeight ?? 1080;
+  const picked = displays[outputIdx];
+  if (picked) {
+    if (x + width > picked.w) width = Math.max(16, picked.w - x);
+    if (y + height > picked.h) height = Math.max(16, picked.h - y);
+    if (x < 0) { width = Math.max(16, width + x); x = 0; }
+    if (y < 0) { height = Math.max(16, height + y); y = 0; }
+  }
   const args = [
     "-y",
     "-hide_banner",

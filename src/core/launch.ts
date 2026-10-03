@@ -56,16 +56,28 @@ export function loadConfig(): StoredConfig {
 function withConfigLock<T>(fn: () => T): T {
   const lock = configFile() + ".lock";
   fs.mkdirSync(dataDir(), { recursive: true });
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + 1500;
   let fd: number | null = null;
   for (;;) {
     try {
       fd = fs.openSync(lock, "wx");
       break;
     } catch {
-      if (Date.now() > deadline) return fn(); // stale lock: proceed unlocked
+      // A crash between open and the finally leaves the lock behind forever.
+      // Break locks older than 5s (writes never take that long) instead of
+      // spinning to the deadline — a hot 3s spin would freeze the event loop.
+      try {
+        const age = Date.now() - fs.statSync(lock).mtimeMs;
+        if (age > 5000) {
+          fs.rmSync(lock, { force: true });
+          continue;
+        }
+      } catch {
+        /* lock vanished — retry immediately */
+      }
+      if (Date.now() > deadline) return fn(); // contended: proceed unlocked
       const waitMs = Date.now();
-      while (Date.now() - waitMs < 25) {
+      while (Date.now() - waitMs < 20) {
         /* brief spin */
       }
     }

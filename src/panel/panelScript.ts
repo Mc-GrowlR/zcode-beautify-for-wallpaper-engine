@@ -299,7 +299,12 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (r) { return r.json(); })
       .then(function (d) { if (cb) cb(d); })
-      .catch(function () { status('无法连接美化服务 service unreachable'); });
+      .catch(function () {
+        status('无法连接美化服务 service unreachable');
+        // Callers count completions inside cb (batch delete); an unreachable
+        // request must still drain the counter or the UI sticks mid-action.
+        if (cb) cb(undefined);
+      });
   }
 
   // --- hover peek: resting the cursor on a wallpaper thumbnail (library rows,
@@ -649,10 +654,12 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     if (!batchMode) { enterBatchMode(true); status('勾选要删除的图片,再点"删所选"'); return; }
     var checked = document.querySelectorAll('#zb-lib-images .zb-batch-cb:checked');
     if (!checked.length) { enterBatchMode(false); status('未勾选任何条目'); return; }
+    // Image rows carry their raw absolute path in data-key (scene rows hold a
+    // hex hash and never get checkboxes) — anything non-hex is a path.
     var paths = [];
     for (var i = 0; i < checked.length; i++) {
       var k = checked[i].getAttribute('data-key') || '';
-      if (k.slice(0, 2) === 'p:') paths.push(k.slice(2));
+      if (k && !/^[a-f0-9]{8,64}$/.test(k)) paths.push(k);
     }
     if (!paths.length) { enterBatchMode(false); return; }
     var self = this;
