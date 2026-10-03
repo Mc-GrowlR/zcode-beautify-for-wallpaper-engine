@@ -53,6 +53,16 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }',
     '.zb-card-title { font-size: 11px; opacity: .6; margin-bottom: 7px; }',
     '.zb-card .zb-row:last-child, .zb-card .zb-actions:last-child { margin-bottom: 0; }',
+    // Collapsible cards (壁纸库): clicking the title folds the body. The
+    // grid-rows 1fr→0fr trick animates to any content height smoothly.
+    '.zb-collapsible .zb-card-title { display: flex; justify-content: space-between; align-items: center;',
+      ' cursor: pointer; user-select: none; margin-bottom: 0; padding-bottom: 7px; }',
+    '.zb-collapse-wrap { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .18s ease; }',
+    '.zb-collapse-wrap > .zb-collapse-inner { overflow: hidden; min-height: 0; }',
+    '.zb-collapsed .zb-collapse-wrap { grid-template-rows: 0fr; }',
+    '.zb-collapsed .zb-card-title { padding-bottom: 0; }',
+    '.zb-fold { opacity: .55; font-size: 9px; transition: transform .15s ease; }',
+    '.zb-collapsed .zb-fold { transform: rotate(-90deg); }',
     '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
     '.zb-tab:hover { background: rgba(255,255,255,.12); }',
@@ -201,7 +211,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '    <div class="zb-card"><div class="zb-card-title">最近使用</div>' +
     '      <div class="zb-lib-list" id="zb-history" style="max-height:64px"></div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 动态</div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-scenes"><div class="zb-card-title">壁纸库 · 动态 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="打开文件选择器:选 .pkg(场景)或 .mp4(视频),或壁纸目录内任意文件(会自动定位),选完自动开始导入">📁</button>' +
     '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
@@ -219,8 +230,10 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '        <button class="zb-act" id="zb-open-scenes" title="在资源管理器中打开动态壁纸缓存目录">📂</button>' +
     '        <button class="zb-act" id="zb-purge" title="删除全部已缓存的动态壁纸循环(正在使用的除外)">🗑 清理</button>' +
     '      </div>' +
+    '      </div></div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 图片</div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-images"><div class="zb-card-title">壁纸库 · 图片 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <label class="zb-btn zb-grow" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">🖼 更换图片…</label>' +
     '        <button class="zb-act" id="zb-img-sort" title="切换排序:按时间(新→旧)/按名称">⇅ 时间</button>' +
@@ -229,6 +242,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '        <input type="file" id="zb-file" accept="image/*" hidden>' +
     '      </div>' +
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
+    '      </div></div>' +
     '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">配置</div>' +
     '      <div class="zb-actions">' +
@@ -582,6 +596,29 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   });
 
   // --- library (dynamic + images, each with its import entry up front) -----
+  // Collapsible library cards: clicking the title folds the body; the state
+  // survives panel reopens (localStorage) per card.
+  function bindFold(cardId, storeKey) {
+    var card = document.getElementById(cardId);
+    if (!card) return;
+    var title = card.querySelector('.zb-card-title');
+    var apply = function (collapsed) {
+      card.classList.toggle('zb-collapsed', collapsed);
+      title.title = collapsed ? '展开' : '折叠';
+    };
+    var saved = null;
+    try { saved = localStorage.getItem(storeKey); } catch (e) {}
+    apply(saved === '1');
+    title.addEventListener('click', function () {
+      var next = !card.classList.contains('zb-collapsed');
+      apply(next);
+      try { localStorage.setItem(storeKey, next ? '1' : '0'); } catch (e) {}
+      hideHoverPreview(); // thumbnails vanish under the fold
+    });
+  }
+  bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
+  bindFold('zb-card-images', 'zcode-beautify:fold-images');
+
   // Image sort mode (F6): default newest first; toggles to name order.
   var imgSort = 'time';
   var LIB_QUERY = '';
