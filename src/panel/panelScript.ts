@@ -11,10 +11,19 @@
 
 export const PANEL_ROOT_ID = "zcode-beautify-panel-root";
 
-export function buildPanelScript(apiPort: number): string {
+export function buildPanelScript(apiPort: number, apiToken = ""): string {
   const api = `http://127.0.0.1:${apiPort}`;
   return `(function(){
   var API = ${JSON.stringify(api)};
+  var TOKEN = ${JSON.stringify(apiToken)};
+  /** Authenticated fetch: every API call carries the per-start token. */
+  function apiFetch(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ 'X-Beautify-Token': TOKEN }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  /** Media URLs (<img>/<video> cannot send headers) authenticate via ?t=. */
+  function mt(url) { return TOKEN ? url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + TOKEN : url; }
   var ROOT_ID = ${JSON.stringify(PANEL_ROOT_ID)};
   var runPanel = function() {
   // Always rebuild: an older panel left in the DOM would otherwise shadow the
@@ -180,11 +189,17 @@ export function buildPanelScript(apiPort: number): string {
     '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
     '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
     '    </div>' +
+    '    <div class="zb-row zb-toggles">' +
+    '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
+    '    </div>' +
     '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">' +
     '      <option value="cover">填满裁剪</option>' +
     '      <option value="contain">完整显示</option>' +
     '      <option value="smart">智能适配</option>' +
     '    </select></div>' +
+    '    </div>' +
+    '    <div class="zb-card"><div class="zb-card-title">最近使用</div>' +
+    '      <div class="zb-lib-list" id="zb-history" style="max-height:64px"></div>' +
     '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 动态</div>' +
     '      <div class="zb-import-row">' +
@@ -192,17 +207,35 @@ export function buildPanelScript(apiPort: number): string {
     '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
     '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入</button>' +
     '      </div>' +
+    '      <div class="zb-import-row" style="margin:0 0 4px">' +
+    '        <button class="zb-btn zb-grow" id="zb-import-cancel" hidden title="中止正在进行的导入,清理临时文件">✕ 取消导入</button>' +
+    '      </div>' +
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>…</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
     '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
     '      <div class="zb-lib-list" id="zb-lib-scenes"></div>' +
+    '      <div class="zb-lib-head" id="zb-storage" style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
+    '        <span id="zb-storage-text" style="flex:1">…</span>' +
+    '        <button class="zb-act" id="zb-open-scenes" title="在资源管理器中打开动态壁纸缓存目录">📂</button>' +
+    '        <button class="zb-act" id="zb-purge" title="删除全部已缓存的动态壁纸循环(正在使用的除外)">🗑 清理</button>' +
+    '      </div>' +
     '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">壁纸库 · 图片</div>' +
     '      <div class="zb-import-row">' +
     '        <label class="zb-btn zb-grow" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">🖼 更换图片…</label>' +
+    '        <button class="zb-act" id="zb-img-sort" title="切换排序:按时间(新→旧)/按名称">⇅ 时间</button>' +
+    '        <button class="zb-act" id="zb-img-batch" title="批量删除:勾选多个条目后一次删除">☰ 批量</button>' +
+    '        <button class="zb-act" id="zb-open-images" title="在资源管理器中打开图片壁纸目录">📂</button>' +
     '        <input type="file" id="zb-file" accept="image/*" hidden>' +
     '      </div>' +
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
+    '    </div>' +
+    '    <div class="zb-card"><div class="zb-card-title">配置</div>' +
+    '      <div class="zb-actions">' +
+    '        <button class="zb-btn" id="zb-cfg-export" title="导出当前壁纸/外观/播放方案为 JSON 文件">⬇ 导出配置</button>' +
+    '        <button class="zb-btn" id="zb-cfg-import" title="从导出的 JSON 文件恢复配置">⬆ 导入配置</button>' +
+    '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
+    '      </div>' +
     '    </div>' +
     '    <div class="zb-row zb-actions">' +
     '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
@@ -231,6 +264,12 @@ export function buildPanelScript(apiPort: number): string {
     '        <option value="blur">模糊渐清</option>' +
     '        <option value="none">直接切换</option>' +
     '      </select></div>' +
+    '      <div class="zb-sched-mode" title="方案生效时段:留空 = 全天生效;跨夜(如 20:00-06:00)支持"><span>时段</span>' +
+    '        <input type="time" id="zb-win-start" style="flex:1" step="60">' +
+    '        <span style="opacity:.5">至</span>' +
+    '        <input type="time" id="zb-win-end" style="flex:1" step="60">' +
+    '        <button class="zb-act" id="zb-win-clear" title="清除时段(全天生效)">✕</button>' +
+    '      </div>' +
     '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">播放列表</div>' +
     '      <div id="zb-sched-list"></div>' +
@@ -257,7 +296,7 @@ export function buildPanelScript(apiPort: number): string {
     setTimeout(function () { if (el.textContent === msg) el.textContent = ''; }, 2200);
   }
   function post(path, body, cb) {
-    fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (r) { return r.json(); })
       .then(function (d) { if (cb) cb(d); })
       .catch(function () { status('无法连接美化服务 service unreachable'); });
@@ -322,7 +361,8 @@ export function buildPanelScript(apiPort: number): string {
         blur: Number($('zb-blur').value),
         dim: Number($('zb-dim').value),
         monet: $('zb-monet').checked,
-        wallpaperVisible: $('zb-vis').checked
+        wallpaperVisible: $('zb-vis').checked,
+        kenBurns: $('zb-kb').checked
       }, function (d) { status(d && d.windows > 0 ? '已应用 applied' : '已保存(ZCode 未连接)'); });
     }, 300);
   }
@@ -370,7 +410,7 @@ export function buildPanelScript(apiPort: number): string {
   }
 
   function refresh() {
-    fetch(API + '/api/config')
+    apiFetch('/api/config')
       .then(function (r) { return r.json(); })
       .then(function (c) {
         setOffline(false);
@@ -379,6 +419,7 @@ export function buildPanelScript(apiPort: number): string {
         $('zb-dim').value = c.dim; $('zb-dim-val').textContent = c.dim;
         $('zb-monet').checked = !!c.monet;
         $('zb-vis').checked = !!c.wallpaperVisible;
+        $('zb-kb').checked = !!c.kenBurns;
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
@@ -406,6 +447,7 @@ export function buildPanelScript(apiPort: number): string {
   });
   $('zb-monet').addEventListener('change', pushConfig);
   $('zb-vis').addEventListener('change', pushConfig);
+  $('zb-kb').addEventListener('change', pushConfig);
 
   var FITS = ['cover', 'contain', 'smart'];
   var FIT_LABELS = { cover: '填满裁剪', contain: '完整显示', smart: '智能适配' };
@@ -442,7 +484,14 @@ export function buildPanelScript(apiPort: number): string {
       post('/api/wallpaper', { dataUri: fr.result, name: f.name }, function (d) {
         if (d && d.error) { status(d.error); return; }
         status('已添加并应用:' + f.name);
+        // Server adopted the upload as current — reflect it in the highlight
+        // immediately (the rows are not rebuilt anymore).
+        if (d && d.wallpaperPath) {
+          try { localStorage.setItem('zcode-beautify:current-key', d.wallpaperPath); } catch (e) {}
+          markCurrent(d.wallpaperPath);
+        }
         loadLibrary();
+        loadHistory();
       });
     };
     fr.readAsDataURL(f);
@@ -476,7 +525,7 @@ export function buildPanelScript(apiPort: number): string {
   $('zb-pick').addEventListener('click', function () {
     var btn = this;
     btn.textContent = '…';
-    fetch(API + '/api/pick-scene', { method: 'POST' })
+    apiFetch('/api/pick-scene', { method: 'POST' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         btn.textContent = '📁';
@@ -502,10 +551,11 @@ export function buildPanelScript(apiPort: number): string {
     });
   });
   function pollImport() {
-    fetch(API + '/api/import-status')
+    apiFetch('/api/import-status')
       .then(function (r) { return r.json(); })
       .then(function (j) {
         setProgress(j.running || j.stage === 'done', j.stage);
+        $('zb-import-cancel').hidden = !j.running;
         if (j.error) {
           clearInterval(importTimer); importTimer = null;
           setProgress(false);
@@ -516,6 +566,7 @@ export function buildPanelScript(apiPort: number): string {
           clearInterval(importTimer); importTimer = null;
           status(j.result && j.result.fromCache ? '已从缓存载入' : '动态壁纸已应用');
           refresh();
+          loadHistory();
         }
       })
       .catch(function () { /* transient */ });
@@ -526,8 +577,16 @@ export function buildPanelScript(apiPort: number): string {
   });
 
   // --- library (dynamic + images, each with its import entry up front) -----
+  // Image sort mode (F6): default newest first; toggles to name order.
+  var imgSort = 'time';
+  var LIB_QUERY = '';
+  function applyLibQuery() {
+    LIB_QUERY = imgSort === 'name' ? '?sort=name' : '';
+    $('zb-img-sort').textContent = imgSort === 'name' ? '⇅ 名称' : '⇅ 时间';
+  }
+  var batchMode = false;
   function loadLibrary() {
-    fetch(API + '/api/library')
+    apiFetch('/api/library' + LIB_QUERY)
       .then(function (r) { return r.json(); })
       .then(function (lib) {
         var scenes = $('zb-lib-scenes');
@@ -535,20 +594,185 @@ export function buildPanelScript(apiPort: number): string {
         scenes.innerHTML = '';
         images.innerHTML = '';
         (lib.scenes || []).forEach(function (s) {
-          scenes.appendChild(libItem(s.name || ('场景 ' + s.hash.slice(0, 8)), { hash: s.hash }, s.hash, 'scene', s.hash, API + '/media/poster/' + s.hash + '.jpg'));
+          var item = libItem(s.name || ('场景 ' + s.hash.slice(0, 8)), { hash: s.hash }, s.hash, 'scene', s.hash, mt(API + '/media/poster/' + s.hash + '.jpg'));
+          if (typeof s.sizeBytes === 'number' && s.sizeBytes > 0) item.title = (s.name || s.hash.slice(0, 8)) + ' — ' + (s.sizeBytes / 1048576).toFixed(1) + ' MB';
+          scenes.appendChild(item);
         });
         if (!(lib.scenes || []).length) {
           scenes.innerHTML = '<div class="zb-lib-head">暂无动态壁纸 — 用上方导入</div>';
         }
         (lib.images || []).forEach(function (im) {
-          images.appendChild(libItem(im.name, { path: im.path }, im.path, 'image', im.path, API + '/media/lib/' + encodeURIComponent(im.name)));
+          images.appendChild(libItem(im.name, { path: im.path }, im.path, 'image', im.path, mt(API + '/media/lib/' + encodeURIComponent(im.name))));
         });
         if (!(lib.images || []).length) {
           images.innerHTML = '<div class="zb-lib-head">暂无图片壁纸 — 用上方更换图片</div>';
         }
+        if (batchMode) enterBatchMode(false); // re-arm checkboxes on the fresh rows
       })
       .catch(function () { /* offline */ });
   }
+  applyLibQuery();
+  $('zb-img-sort').addEventListener('click', function () {
+    imgSort = imgSort === 'time' ? 'name' : 'time';
+    applyLibQuery();
+    loadLibrary();
+  });
+  $('zb-open-images').addEventListener('click', function () {
+    post('/api/open-folder', { target: 'images' }, function () { status('已在资源管理器打开'); });
+  });
+  $('zb-open-scenes').addEventListener('click', function () {
+    post('/api/open-folder', { target: 'scenes' }, function () { status('已在资源管理器打开'); });
+  });
+  // Batch delete (F6): checkboxes on image rows, one shot for the selection.
+  function enterBatchMode(on) {
+    batchMode = on;
+    var btn = $('zb-img-batch');
+    var images = $('zb-lib-images');
+    if (on) {
+      btn.textContent = '🗑 删所选';
+      var rows = images.querySelectorAll('.zb-item');
+      for (var i = 0; i < rows.length; i++) {
+        if (!rows[i].querySelector('.zb-item-img')) continue;
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'zb-batch-cb';
+        cb.setAttribute('data-key', rows[i].getAttribute('data-key'));
+        rows[i].insertBefore(cb, rows[i].firstChild);
+      }
+    } else {
+      btn.textContent = '☰ 批量';
+      var cbs = images.querySelectorAll('.zb-batch-cb');
+      for (var j = 0; j < cbs.length; j++) cbs[j].remove();
+    }
+  }
+  $('zb-img-batch').addEventListener('click', function () {
+    if (!batchMode) { enterBatchMode(true); status('勾选要删除的图片,再点"删所选"'); return; }
+    var checked = document.querySelectorAll('#zb-lib-images .zb-batch-cb:checked');
+    if (!checked.length) { enterBatchMode(false); status('未勾选任何条目'); return; }
+    var paths = [];
+    for (var i = 0; i < checked.length; i++) {
+      var k = checked[i].getAttribute('data-key') || '';
+      if (k.slice(0, 2) === 'p:') paths.push(k.slice(2));
+    }
+    if (!paths.length) { enterBatchMode(false); return; }
+    var self = this;
+    var pending = paths.length, failed = 0;
+    paths.forEach(function (p) {
+      post('/api/library-delete', { kind: 'image', path: p }, function (d) {
+        if (!d || !d.ok) failed++;
+        if (--pending === 0) {
+          enterBatchMode(false);
+          loadLibrary();
+          status(failed ? ('部分未删除:' + failed + ' 条(使用中的需先切换)') : ('已删除 ' + (paths.length - failed) + ' 张'));
+        }
+      });
+    });
+  });
+
+  // --- scene cache storage line (F2) ---------------------------------------
+  function loadStorage() {
+    apiFetch('/api/storage')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        var txt = $('zb-storage-text');
+        var mb = (s.scenesBytes || 0) / 1048576;
+        txt.textContent = mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB 缓存' : mb.toFixed(1) + ' MB 缓存';
+        txt.title = '壁纸缩略图 ' + ((s.thumbsBytes || 0) / 1048576).toFixed(1) + ' MB';
+      })
+      .catch(function () { $('zb-storage-text').textContent = ''; });
+  }
+  $('zb-purge').addEventListener('click', function () {
+    var btn = this;
+    if (btn.getAttribute('data-armed') !== '1') {
+      btn.setAttribute('data-armed', '1');
+      status('再点一次确认:清理全部动态壁纸缓存(使用中的保留)');
+      setTimeout(function () { btn.removeAttribute('data-armed'); }, 5000);
+      return;
+    }
+    btn.removeAttribute('data-armed');
+    post('/api/scenes-purge', {}, function (d) {
+      status(d && d.ok ? '已清理 ' + (d.removed || 0) + ' 项缓存' : '清理失败');
+      loadLibrary();
+      loadStorage();
+    });
+  });
+
+  // --- recently used (F8) ---------------------------------------------------
+  function loadHistory() {
+    apiFetch('/api/history')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var box = $('zb-history');
+        box.innerHTML = '';
+        var items = (d && d.items) || [];
+        if (!items.length) { box.innerHTML = '<div class="zb-lib-head">暂无记录</div>'; return; }
+        items.slice(0, 10).forEach(function (it) {
+          var el = document.createElement('div');
+          el.className = 'zb-item';
+          var img = document.createElement('img');
+          img.className = 'zb-item-img';
+          img.src = mt(it.thumbUrl || '');
+          img.loading = 'lazy';
+          var lb = document.createElement('span');
+          lb.className = 'zb-label';
+          lb.textContent = it.label;
+          lb.title = it.label + (it.at ? ' — ' + new Date(it.at).toLocaleString() : '');
+          lb.addEventListener('click', function () {
+            post('/api/apply-wallpaper', it.hash ? { hash: it.hash } : { path: it.path }, function (r) {
+              if (r && r.error) { status(r.error); return; }
+              try { localStorage.setItem('zcode-beautify:current-key', it.hash ? it.hash : it.path); } catch (e) {}
+              markCurrent(it.hash ? it.hash : it.path);
+              loadHistory();
+            });
+          });
+          el.appendChild(img);
+          el.appendChild(lb);
+          box.appendChild(el);
+        });
+      })
+      .catch(function () { /* offline */ });
+  }
+
+  // --- config export / import (F3) -----------------------------------------
+  $('zb-cfg-export').addEventListener('click', function () {
+    apiFetch('/api/export')
+      .then(function (r) { return r.json(); })
+      .then(function (cfg) {
+        var blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'zcode-beautify-' + new Date().toISOString().slice(0, 10) + '.json';
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+        status('已导出配置文件');
+      })
+      .catch(function () { status('导出失败,服务未连接'); });
+  });
+  $('zb-cfg-import').addEventListener('click', function () { $('zb-cfg-file').click(); });
+  $('zb-cfg-file').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (!f) return;
+    var fr = new FileReader();
+    fr.onload = function () {
+      var body;
+      try { body = JSON.parse(fr.result); } catch (e) { status('文件不是有效的 JSON'); return; }
+      post('/api/import-config', body, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        status('配置已导入并应用');
+        refresh();
+        loadLibrary();
+        loadHistory();
+        loadRotation();
+      });
+    };
+    fr.readAsText(f);
+  });
+
+  // --- import cancel (F4) ---------------------------------------------------
+  $('zb-import-cancel').addEventListener('click', function () {
+    post('/api/import-cancel', {}, function (d) { status(d && d.ok ? '已请求取消…' : (d && d.error) || '没有进行中的导入'); });
+  });
   /** Flip the data-current highlight in place. Rebuilding the whole list on
    *  every apply (loadLibrary) destroys and re-decodes every thumbnail <img>,
    *  which reads as the whole library flickering on each wallpaper switch. */
@@ -585,6 +809,7 @@ export function buildPanelScript(apiPort: number): string {
         try { localStorage.setItem('zcode-beautify:current-key', key); } catch (e) {}
         status('已应用 applied');
         markCurrent(key);
+        loadHistory();
       });
     });
     row.appendChild(labelEl);
@@ -656,7 +881,7 @@ export function buildPanelScript(apiPort: number): string {
   function schedMode() { return $('zb-sched-mode').value || 'sequence'; }
   function applyModeHint() { $('zb-sched-hint').textContent = MODE_HINTS[schedMode()] || ''; }
   function fetchScheduleOptions() {
-    return fetch(API + '/api/library')
+    return apiFetch('/api/library' + LIB_QUERY)
       .then(function (r) { return r.json(); })
       .then(function (lib) {
         schedOptions = [];
@@ -664,7 +889,7 @@ export function buildPanelScript(apiPort: number): string {
           schedOptions.push({
             value: 'h:' + s.hash,
             label: s.name || ('场景 ' + s.hash.slice(0, 8)),
-            thumb: API + '/media/poster/' + s.hash + '.jpg',
+            thumb: mt(API + '/media/poster/' + s.hash + '.jpg'),
             group: 'scene'
           });
         });
@@ -672,7 +897,7 @@ export function buildPanelScript(apiPort: number): string {
           schedOptions.push({
             value: 'p:' + im.path,
             label: im.name,
-            thumb: API + '/media/lib/' + encodeURIComponent(im.name),
+            thumb: mt(API + '/media/lib/' + encodeURIComponent(im.name)),
             group: 'image'
           });
         });
@@ -843,9 +1068,28 @@ export function buildPanelScript(apiPort: number): string {
     if (!plan) return;
     $('zb-sched-mode').value = plan.mode || 'sequence';
     $('zb-fx') && applyFxLabel($('zb-fx'), plan.transition || 'fade');
+    $('zb-win-start').value = plan.window ? plan.window.start : '';
+    $('zb-win-end').value = plan.window ? plan.window.end : '';
     applyModeHint();
     renderSchedRows(plan.entries || []);
   }
+  /** Persist the per-plan activation window (F5) as the inputs change. */
+  function pushPlanWindow() {
+    var plan = schedPlans[schedIdx];
+    if (!plan) return;
+    var s = $('zb-win-start').value, e = $('zb-win-end').value;
+    if (s && e && s !== e) plan.window = { start: s, end: e };
+    else plan.window = undefined;
+    persistPlans();
+  }
+  $('zb-win-start').addEventListener('change', pushPlanWindow);
+  $('zb-win-end').addEventListener('change', pushPlanWindow);
+  $('zb-win-clear').addEventListener('click', function () {
+    $('zb-win-start').value = '';
+    $('zb-win-end').value = '';
+    pushPlanWindow();
+    status('已清除时段,全天生效');
+  });
   /** Reads the row editor into entry objects for the currently shown mode. */
   function collectPlanEntries() {
     var entries = [];
@@ -878,7 +1122,11 @@ export function buildPanelScript(apiPort: number): string {
     plan.entries = collectPlanEntries();
   }
   function plansPayload() {
-    return schedPlans.map(function (p) { return { id: p.id, name: p.name, mode: p.mode, transition: p.transition || 'fade', entries: p.entries }; });
+    return schedPlans.map(function (p) {
+      var out = { id: p.id, name: p.name, mode: p.mode, transition: p.transition || 'fade', entries: p.entries };
+      if (p.window) out.window = p.window;
+      return out;
+    });
   }
   /**
    * Auto-persists plan structure edits (rename / create / delete): what the
@@ -914,7 +1162,7 @@ export function buildPanelScript(apiPort: number): string {
   }
   function loadRotation() {
     fetchScheduleOptions().then(function () {
-      return fetch(API + '/api/rotation').then(function (r) { return r.json(); });
+      return apiFetch('/api/rotation').then(function (r) { return r.json(); });
     }).then(function (d) {
       var rot = (d && d.rotation) || {};
       schedPlans = rot.plans && rot.plans.length
@@ -1003,11 +1251,20 @@ export function buildPanelScript(apiPort: number): string {
   });
   $('zb-sched-add').addEventListener('click', function () {
     var doAdd = function () {
+      // The server caps plans at 20 entries and silently drops the rest —
+      // stop at the source instead of letting rows vanish after a reload.
+      if (document.querySelectorAll('#zb-sched-list .zb-sched-row').length >= 20) {
+        status('播放列表最多 20 条');
+        return;
+      }
       var entry = schedMode() === 'schedule' ? { time: '09:00' } : { seconds: 300 };
       var key = currentWallpaperKey();
       if (key.slice(0, 2) === 'h:') entry.hash = key.slice(2);
       else if (key.length > 2) entry.path = key.slice(2);
-      $('zb-sched-list').appendChild(schedRow(entry));
+      var row = schedRow(entry);
+      $('zb-sched-list').appendChild(row);
+      // A full scroll window can hide the new row entirely.
+      row.scrollIntoView({ block: 'nearest' });
     };
     if (!schedOptions.length || schedOptions[0].value === '') {
       fetchScheduleOptions().then(function () {
@@ -1030,8 +1287,8 @@ export function buildPanelScript(apiPort: number): string {
     if (!activeId && schedPlans[schedIdx]) activeId = schedPlans[schedIdx].id;
     fetch(API + '/api/rotation', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rotation: { enabled: want, activePlanId: activeId, plans: plansPayload() } })
+      headers: { 'Content-Type': 'application/json', 'X-Beautify-Token': TOKEN },
+      body: JSON.stringify({ rotation: { enabled: want, activePlanId: activeId, plans: plansPayload() }, resume: true })
     })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -1110,7 +1367,7 @@ export function buildPanelScript(apiPort: number): string {
     $('zb-tab-sched').hidden = name !== 'sched';
     try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
     if (name === 'sched') loadRotation();
-    else { refresh(); loadLibrary(); }
+    else { refresh(); loadLibrary(); loadStorage(); loadHistory(); }
   }
   $('zb-tabs').addEventListener('click', function (e) {
     var b = e.target && e.target.closest ? e.target.closest('.zb-tab') : null;

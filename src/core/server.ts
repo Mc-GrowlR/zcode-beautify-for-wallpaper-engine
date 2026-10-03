@@ -12,7 +12,8 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import crypto from "node:crypto";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
   CdpConnection,
@@ -136,6 +137,7 @@ function publicConfig(config: BeautifyConfig) {
     dim: config.dim,
     monet: config.monet,
     wallpaperVisible: config.wallpaperVisible,
+    kenBurns: config.kenBurns ?? false,
     fit: config.fit,
     wallpaperSet: Boolean(config.wallpaperPath && fs.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
@@ -153,6 +155,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.dim === "number" && body.dim >= 0 && body.dim <= 100) out.dim = body.dim;
   if (typeof body?.monet === "boolean") out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
+  if (typeof body?.kenBurns === "boolean") out.kenBurns = body.kenBurns;
   if (body?.fit === "cover" || body?.fit === "contain" || body?.fit === "smart") out.fit = body.fit;
   return out;
 }
@@ -165,6 +168,8 @@ interface ImportJob {
   detail?: string;
   error?: string;
   guide?: string;
+  /** Live controller for /api/import-cancel (F4). */
+  abort?: AbortController;
   result?: { loopPath: string; posterPath: string; hash: string; fromCache: boolean };
 }
 
@@ -173,6 +178,16 @@ let importJob: ImportJob = { running: false, stage: "idle" };
 // --- injection session management -------------------------------------------
 
 const held = new Map<string, HeldSession>();
+
+/** Per-start random API token; handed to the injected panel and appended to
+ *  media URLs. Without it any web page open on this machine could read the
+ *  wallpaper library, delete entries, or exfiltrate images via CORS:*. */
+let mediaToken = "";
+
+function withMediaToken(url: string): string {
+  if (!mediaToken) return url;
+  return url + (url.includes("?") ? "&" : "?") + "t=" + mediaToken;
+}
 
 async function registerScript(
   session: HeldSession,
@@ -193,21 +208,27 @@ async function holdSession(
   const session: HeldSession = { conn };
 
   const assets = await getAssets(config);
-  const payload = buildPayload(config, assets);
+  const payload = buildPayload(config, assets, mediaToken);
   const bootstrap = buildBootstrapScript({
     css: payload.css,
     wallpaperDataUri: payload.wallpaperDataUri,
     videoSrc: payload.videoSrc,
     fit: payload.fit,
     transition: payload.transition,
+    kenBurns: payload.kenBurns,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
   });
   session.themeScriptId = identifier;
-  await conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+  // Runtime.evaluate does NOT reject when the script throws — same check as
+  // the panel below, or a broken theme fails silently.
+  const bootEval = await conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+  if (bootEval?.exceptionDetails) {
+    console.error(`serve: theme bootstrap threw — ${JSON.stringify(bootEval.exceptionDetails).slice(0, 400)}`);
+  }
 
-  const panelScript = buildPanelScript(apiPort);
+  const panelScript = buildPanelScript(apiPort, mediaToken);
   await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
   // Runtime.evaluate does NOT reject when the script itself throws — surface
   // exceptionDetails or a broken panel fails silently ("injected" in the log).
@@ -222,13 +243,14 @@ async function holdSession(
 /** Re-evaluates the theme bootstrap in every live session after a config change. */
 async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
   const assets = await getAssets(config);
-  const payload = buildPayload(config, assets);
+  const payload = buildPayload(config, assets, mediaToken);
   const bootstrap = buildBootstrapScript({
     css: payload.css,
     wallpaperDataUri: payload.wallpaperDataUri,
     videoSrc: payload.videoSrc,
     fit: payload.fit,
     transition: payload.transition,
+    kenBurns: payload.kenBurns,
   });
   let ok = 0;
   for (const [id, session] of held) {
@@ -348,6 +370,36 @@ const IMAGE_EXT: Record<string, string> = {
 export async function startServe(opts: ServeOptions): Promise<void> {
   const { cdpPort, apiPort } = opts;
 
+  // Fresh random token every start; scripts on this machine (watchdog, CLI)
+  // read it from <dataDir>/serve.token. The panel receives it in its injected
+  // source and sends it as a header; media URLs carry it as ?t=.
+  mediaToken = crypto.randomBytes(24).toString("hex");
+  try {
+    fs.mkdirSync(dataDir(), { recursive: true });
+    fs.writeFileSync(path.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
+  } catch {
+    /* best effort — auth degrades to tokenless only for /api/health */
+  }
+
+  // --- recently-used wallpaper history (F8) --------------------------------
+  const historyFile = (): string => path.join(dataDir(), "history.json");
+  function readHistory(): Array<{ at: number; label: string; kind: "image" | "video"; hash?: string; path?: string; thumbUrl?: string }> {
+    try {
+      return JSON.parse(fs.readFileSync(historyFile(), "utf8"));
+    } catch {
+      return [];
+    }
+  }
+  function recordHistory(entry: { label: string; kind: "image" | "video"; hash?: string; path?: string; thumbUrl?: string }): void {
+    try {
+      const list = readHistory().filter((e) => e.hash !== entry.hash || e.path !== entry.path);
+      list.unshift({ at: Date.now(), ...entry });
+      fs.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
+    } catch {
+      /* history is best effort */
+    }
+  }
+
   // `serve --port N` must win over the port stored in the config file: reading
   // the merged config alone silently dialed the stored port while still
   // printing the flag's value.
@@ -368,6 +420,12 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     if (typeof ref.hash === "string") {
       const loopPath = path.join(scenesCacheRoot(), ref.hash, "loop.mp4");
       if (!fs.existsSync(loopPath)) throw new Error("unknown scene hash");
+      let label = ref.hash.slice(0, 8);
+      try {
+        label = (JSON.parse(fs.readFileSync(path.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")) as { name?: string }).name || label;
+      } catch {
+        /* unnamed */
+      }
       const next: BeautifyConfig = {
         ...config,
         mediaType: "video",
@@ -377,6 +435,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${ref.hash}.mp4`,
       };
       saveConfig(persisted(next));
+      recordHistory({ label, kind: "video", hash: ref.hash, thumbUrl: `http://127.0.0.1:${apiPort}/media/poster/${ref.hash}.jpg` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
     if (typeof ref.path === "string" && fs.existsSync(ref.path)) {
@@ -388,6 +447,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         sceneVideoUrl: undefined,
       };
       saveConfig(persisted(next));
+      recordHistory({ label: path.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path.basename(ref.path))}` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
     throw new Error("provide hash or existing path");
@@ -417,8 +477,31 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     try {
       if (req.method === "OPTIONS") {
-        sendJson(res, 204, {});
+        // Preflight carries no secrets; approving the header list lets the
+        // injected panel (origin null) send its token header. Actual requests
+        // still 401 without a valid token.
+        try {
+          res.writeHead(204, {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, X-Beautify-Token",
+          });
+          res.end();
+        } catch {
+          /* socket gone */
+        }
         return;
+      }
+
+      // Auth: everything except the health probe requires the per-start token
+      // (header for API calls, ?t= for <video>/<img> media URLs). Without it
+      // any web page on this machine could drive this API and read media.
+      if (url.pathname !== "/api/health") {
+        const presented = String(req.headers["x-beautify-token"] ?? url.searchParams.get("t") ?? "");
+        if (presented !== mediaToken) {
+          sendJson(res, 401, { error: "unauthorized" });
+          return;
+        }
       }
 
       if (req.method === "GET" && url.pathname === "/api/config") {
@@ -460,11 +543,22 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           dest = path.join(dataDir(), `${safeBase}(${i})${ext}`);
         }
         fs.writeFileSync(dest, bytes);
+        // Leaving the video fields set made buildPayload keep injecting the
+        // OLD loop video: the upload "applied" while the wallpaper never
+        // changed. An upload is always an image — clear the scene state.
         const themeSrc = await themeThumbFor(dest);
         rememberAssets(themeSrc, fs.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
-        saveConfig(persisted({ ...config, wallpaperPath: dest }));
-        const windows = await pushConfigToSessions({ ...config, wallpaperPath: dest }).catch(() => 0);
-        sendJson(res, 200, { ok: true, windows, ...publicConfig({ ...config, wallpaperPath: dest }) });
+        const nextCfg: BeautifyConfig = {
+          ...config,
+          wallpaperPath: dest,
+          mediaType: "image",
+          sceneHash: undefined,
+          sceneVideoUrl: undefined,
+        };
+        saveConfig(persisted(nextCfg));
+        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path.basename(dest))}` });
+        const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
+        sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
         return;
       }
 
@@ -490,6 +584,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             held.delete(id);
           }
         }
+        // Without this the next rotation tick re-applied a playlist wallpaper
+        // seconds after the reset — "restore default appearance" read broken.
+        stopRotationTimers();
         saveConfig({ ...stored, wallpaperPath: undefined, mediaType: undefined, sceneHash: undefined, sceneVideoUrl: undefined });
         assetsCache.clear();
         sendJson(res, 200, { ok: true, hasBackup: true });
@@ -535,12 +632,14 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           sendJson(res, 409, { error: "another import is already running", stage: importJob.stage });
           return;
         }
-        importJob = { running: true, stage: "starting" };
-        // Fire-and-forget: the panel polls /api/import-status for progress.
+        const abort = new AbortController();
+        importJob = { running: true, stage: "starting", abort };
+        // Fire-and-forget: the panel polls /api/import-status for progress;
+        // /api/import-cancel aborts the controller (kills ffmpeg, cleans up).
         void importScene(scenePath, (stage, detail) => {
           importJob.stage = stage;
           importJob.detail = detail;
-        }, sceneOpts)
+        }, sceneOpts, undefined, abort.signal)
           .then(async (result: SceneImportResult) => {
             importJob = {
               running: false,
@@ -558,6 +657,13 @@ export async function startServe(opts: ServeOptions): Promise<void> {
               sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${result.hash}.mp4`,
             };
             saveConfig(persisted(next));
+            let label = result.hash.slice(0, 8);
+            try {
+              label = (JSON.parse(fs.readFileSync(path.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")) as { name?: string }).name || label;
+            } catch {
+              /* unnamed */
+            }
+            recordHistory({ label, kind: "video", hash: result.hash, thumbUrl: `http://127.0.0.1:${apiPort}/media/poster/${result.hash}.jpg` });
             await pushConfigToSessions(next).catch(() => 0);
           })
           .catch((err: Error) => {
@@ -569,6 +675,16 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             };
           });
         sendJson(res, 200, { ok: true, started: true });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/import-cancel") {
+        if (importJob.running && importJob.abort) {
+          importJob.abort.abort();
+          sendJson(res, 200, { ok: true, message: "已请求取消" });
+        } else {
+          sendJson(res, 200, { ok: false, error: "没有进行中的导入" });
+        }
         return;
       }
 
@@ -589,13 +705,20 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       }
 
       // Library listing for the panel: static images + cached scene loops.
+      // ?sort=name orders by filename; default is newest first (mtime desc).
       if (req.method === "GET" && url.pathname === "/api/library") {
-        const images: Array<{ name: string; path: string }> = [];
+        const images: Array<{ name: string; path: string; mtimeMs: number }> = [];
         for (const f of fs.readdirSync(dataDir())) {
           if (/\.(jpe?g|png|webp|bmp)$/i.test(f)) {
-            images.push({ name: f, path: path.join(dataDir(), f) });
+            try {
+              images.push({ name: f, path: path.join(dataDir(), f), mtimeMs: fs.statSync(path.join(dataDir(), f)).mtimeMs });
+            } catch {
+              /* vanished */
+            }
           }
         }
+        if (url.searchParams.get("sort") === "name") images.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+        else images.sort((a, b) => b.mtimeMs - a.mtimeMs);
         const scenes: Array<{ hash: string; name?: string; sizeBytes: number; mtimeMs: number }> = [];
         try {
           for (const d of fs.readdirSync(scenesCacheRoot())) {
@@ -640,8 +763,12 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         if (body?.kind === "image" && typeof body?.path === "string") {
           const oldPath = path.resolve(body.path);
           const renamed = renameLibraryImage(oldPath, name);
-          if (runtimeConfig().wallpaperPath === oldPath) {
-            saveConfig(persisted({ ...runtimeConfig(), wallpaperPath: renamed }));
+          // Resolve both sides: a config stored with forward slashes must
+          // still count as the same file (strict === once missed and the
+          // config kept pointing at the no-longer-existing old name).
+          const cfg = runtimeConfig();
+          if (cfg.wallpaperPath && path.resolve(cfg.wallpaperPath) === oldPath) {
+            saveConfig(persisted({ ...cfg, wallpaperPath: renamed }));
           }
           sendJson(res, 200, { ok: true, path: renamed });
           return;
@@ -653,7 +780,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         const body = JSON.parse(await readBody(req));
         const config = runtimeConfig();
         /** Also drops the deleted wallpaper from every rotation plan so the
-         *  playlist does not error on a dead reference until the next save. */
+         *  playlist does not error on a dead reference until the next save.
+         *  The running timers keep the OLD entry list — restart so playback
+         *  continues on the cleaned plans instead of erroring every tick. */
         const dropFromPlans = (match: (e: RotationEntry) => boolean): void => {
           const rot = normalizeRotation(runtimeConfig().rotation);
           let touched = false;
@@ -664,7 +793,10 @@ export async function startServe(opts: ServeOptions): Promise<void> {
               touched = true;
             }
           }
-          if (touched) saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
+          if (touched) {
+            saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
+            if (rot.enabled) startRotation(true);
+          }
         };
         if (body?.kind === "scene" && typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
           if (config.sceneHash === body.hash) {
@@ -714,7 +846,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         delete (stored as unknown as Record<string, unknown>).schedule;
         delete (stored as unknown as Record<string, unknown>).transition;
         saveConfig(stored);
-        startRotation();
+        // resume=true (the enable checkbox) continues from each plan's saved
+        // position; an explicit 播放 keeps its restart-from-zero semantics.
+        startRotation(body?.resume === true);
         sendJson(res, 200, { ok: true, rotation: next });
         return;
       }
@@ -722,6 +856,142 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // 立即切换: skip ahead to the next playlist entry right now.
       if (req.method === "POST" && url.pathname === "/api/rotation-next") {
         sendJson(res, 200, skipRotation());
+        return;
+      }
+
+      // --- storage stats + scene cache purge (F2) ---------------------------
+      if (req.method === "GET" && url.pathname === "/api/storage") {
+        let scenesBytes = 0;
+        const entries: Array<{ hash: string; name?: string; sizeBytes: number }> = [];
+        try {
+          for (const d of fs.readdirSync(scenesCacheRoot())) {
+            try {
+              let size = 0;
+              const walk = (dir: string): void => {
+                for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                  const p = path.join(dir, f.name);
+                  if (f.isDirectory()) walk(p);
+                  else { try { size += fs.statSync(p).size; } catch { /* gone */ } }
+                }
+              };
+              walk(path.join(scenesCacheRoot(), d));
+              let name: string | undefined;
+              try {
+                name = (JSON.parse(fs.readFileSync(path.join(scenesCacheRoot(), d, "name.json"), "utf8")) as { name?: string }).name;
+              } catch {
+                /* unnamed */
+              }
+              entries.push({ hash: d, name, sizeBytes: size });
+              scenesBytes += size;
+            } catch {
+              /* partial entry */
+            }
+          }
+        } catch {
+          /* no scenes dir */
+        }
+        let thumbsBytes = 0;
+        try {
+          for (const f of fs.readdirSync(thumbDir())) {
+            try { thumbsBytes += fs.statSync(path.join(thumbDir(), f)).size; } catch { /* gone */ }
+          }
+        } catch {
+          /* no thumbs dir */
+        }
+        sendJson(res, 200, { scenesBytes, thumbsBytes, entries: entries.sort((a, b) => b.sizeBytes - a.sizeBytes) });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/scenes-purge") {
+        const config = runtimeConfig();
+        let removed = 0;
+        try {
+          for (const d of fs.readdirSync(scenesCacheRoot())) {
+            if (config.sceneHash === d) continue; // the playing loop must survive
+            try {
+              fs.rmSync(path.join(scenesCacheRoot(), d), { recursive: true, force: true });
+              removed++;
+            } catch {
+              /* locked */
+            }
+          }
+        } catch {
+          /* no scenes dir */
+        }
+        if (removed) {
+          // Plans referencing purged scenes must not keep dead entries.
+          const rot = normalizeRotation(runtimeConfig().rotation);
+          for (const plan of rot.plans) plan.entries = plan.entries.filter((e) => !e.hash || fs.existsSync(path.join(scenesCacheRoot(), e.hash, "loop.mp4")));
+          saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
+          if (rot.enabled) startRotation(true);
+        }
+        sendJson(res, 200, { ok: true, removed });
+        return;
+      }
+
+      // --- config export / import (F3) --------------------------------------
+      if (req.method === "GET" && url.pathname === "/api/export") {
+        const stored = runtimeConfig();
+        sendJson(res, 200, {
+          kind: "zcode-beautify-config",
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          config: {
+            blur: stored.blur,
+            dim: stored.dim,
+            monet: stored.monet,
+            wallpaperVisible: stored.wallpaperVisible,
+            kenBurns: stored.kenBurns ?? false,
+            fit: stored.fit,
+            wallpaperPath: stored.wallpaperPath,
+            mediaType: stored.mediaType,
+            sceneHash: stored.sceneHash,
+            rotation: normalizeRotation(stored.rotation),
+          },
+        });
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/api/import-config") {
+        const body = JSON.parse(await readBody(req));
+        if (body?.kind !== "zcode-beautify-config" || !body?.config) {
+          throw new Error("not a zcode-beautify config export");
+        }
+        const incoming = body.config as Record<string, unknown>;
+        const patch = sanitize(incoming); // blur/dim/monet/visible/kenBurns/fit
+        const withWp: BeautifyConfig = { ...runtimeConfig(), ...patch };
+        if (typeof incoming.wallpaperPath === "string" && fs.existsSync(incoming.wallpaperPath)) {
+          withWp.wallpaperPath = incoming.wallpaperPath;
+          withWp.mediaType = incoming.mediaType === "video" ? "video" : "image";
+          withWp.sceneHash = typeof incoming.sceneHash === "string" ? incoming.sceneHash : undefined;
+          withWp.sceneVideoUrl = withWp.mediaType === "video" && withWp.sceneHash
+            ? `http://127.0.0.1:${apiPort}/media/scene/${withWp.sceneHash}.mp4`
+            : undefined;
+        }
+        if (incoming.rotation) withWp.rotation = sanitizeRotation(incoming.rotation);
+        saveConfig(persisted(withWp));
+        const windows = await pushConfigToSessions(withWp).catch(() => 0);
+        startRotation(true);
+        sendJson(res, 200, { ok: true, windows });
+        return;
+      }
+
+      // --- open library folders in Explorer (F6) ----------------------------
+      if (req.method === "POST" && url.pathname === "/api/open-folder") {
+        const body = JSON.parse(await readBody(req));
+        const target =
+          body?.target === "scenes" ? scenesCacheRoot()
+          : body?.target === "thumbs" ? thumbDir()
+          : dataDir();
+        fs.mkdirSync(target, { recursive: true });
+        spawn("explorer", [target], { detached: true, stdio: "ignore" }).unref();
+        sendJson(res, 200, { ok: true, path: target });
+        return;
+      }
+
+      // --- recently-used wallpapers (F8) -------------------------------------
+      if (req.method === "GET" && url.pathname === "/api/history") {
+        sendJson(res, 200, { items: readHistory() });
         return;
       }
 
@@ -792,25 +1062,59 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   // Three modes: "sequence" plays every entry for its duration in order and
   // loops; "random" does the same but never plays the same entry twice in a
   // row; "schedule" switches at daily HH:MM clock times and leaves the
-  // wallpaper alone in between. Restarting a duration playlist (save or serve
-  // start) re-applies entry 0 immediately; the schedule mode only acts when
-  // one of its minutes arrives.
+  // wallpaper alone in between. A plan may also declare a daily time window
+  // (F5): while "now" falls inside it, that plan plays regardless of
+  // activePlanId. Re-enabling after a pause resumes each plan's saved
+  // position (F1) instead of always restarting at entry 0.
   let rotationTimer: NodeJS.Timeout | undefined;
   let rotationTick: NodeJS.Timeout | undefined;
   let lastScheduleFire = "";
   let randomAvoid = -1;
   let rotationIndex = 0;
+  /** Generation guard: a restart while an applyRef is in flight must leave
+   *  the OLD timer chain dead — without it two chains both schedule switches. */
+  let rotationGen = 0;
+  /** Where each plan left off (F1), keyed by plan id. */
+  const resumeIndex = new Map<string, number>();
+  /** The plan id the window watcher currently has active (F5). */
+  let windowPlanId: string | undefined;
+
+  const hhmmNow = (): string =>
+    `${String(new Date().getHours()).padStart(2, "0")}:${String(new Date().getMinutes()).padStart(2, "0")}`;
+
+  /** Daily-window containment; start > end means an overnight span. */
+  function inWindow(win: { start: string; end: string } | undefined, hhmm: string): boolean {
+    if (!win) return false;
+    return win.start <= win.end
+      ? hhmm >= win.start && hhmm <= win.end
+      : hhmm >= win.start || hhmm <= win.end;
+  }
 
   /** The rotation as it should play right now (normalized + active plan). */
   function rotationNow(): { on: boolean; plan?: RotationPlan } {
     const norm = normalizeRotation(runtimeConfig().rotation);
-    if (!norm.enabled) return { on: false };
-    const plan = norm.plans.find((p) => p.id === norm.activePlanId) ?? norm.plans[0];
+    if (!norm.enabled || !norm.plans.length) return { on: false };
+    const hhmm = hhmmNow();
+    const windowed = norm.plans.find((p) => inWindow(p.window, hhmm) && p.entries.length);
+    const plan = windowed ?? norm.plans.find((p) => p.id === norm.activePlanId) ?? norm.plans[0];
     if (!plan || !plan.entries.length) return { on: false };
     return { on: true, plan };
   }
 
+  function stopRotationTimers(): void {
+    rotationGen++;
+    if (rotationTimer) {
+      clearTimeout(rotationTimer);
+      rotationTimer = undefined;
+    }
+    if (rotationTick) {
+      clearInterval(rotationTick);
+      rotationTick = undefined;
+    }
+  }
+
   async function playRotationEntry(index: number): Promise<void> {
+    const gen = rotationGen;
     const s = rotationNow();
     if (!s.on || !s.plan || s.plan.mode === "schedule") return;
     const rot = s.plan;
@@ -819,14 +1123,19 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     const entry = rot.entries[i];
     randomAvoid = i;
     rotationIndex = i;
+    resumeIndex.set(rot.id, i);
     try {
       const r = await applyRef(entry);
       console.log(`serve: rotation [${rot.name}/${rot.mode}] ${i + 1}/${n} -> ${entry.hash ?? entry.path} for ${entry.seconds}s (${r.windows} window(s))`);
     } catch (err) {
       console.error(`serve: rotation apply failed — ${(err as Error).message}`);
     }
+    // A restart raced this apply: its chain owns the future; drop out here so
+    // this stale chain can never schedule a second, competing timer.
+    if (gen !== rotationGen) return;
     if (rotationTimer) clearTimeout(rotationTimer);
     rotationTimer = setTimeout(() => {
+      if (gen !== rotationGen) return;
       const cur = rotationNow();
       if (!cur.on || !cur.plan || cur.plan.mode === "schedule" || !cur.plan.entries.length) return;
       const total = cur.plan.entries.length;
@@ -861,6 +1170,19 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       .catch((err: Error) => console.error(`serve: rotation schedule fire failed — ${err.message}`));
   }
 
+  /** 20s watchdog for duration plans: switches to a plan whose window just
+   *  opened (F5). Fires only on CHANGES — entry timing stays with the timers. */
+  function rotationWatch(): void {
+    const norm = normalizeRotation(runtimeConfig().rotation);
+    if (!norm.enabled) return;
+    const hhmm = hhmmNow();
+    const windowed = norm.plans.find((p) => inWindow(p.window, hhmm) && p.entries.length);
+    if (windowed && windowed.id !== windowPlanId) {
+      console.log(`serve: rotation window -> plan "${windowed.name}" (${hhmm})`);
+      startRotation(true);
+    }
+  }
+
   /**
    * 立即切换: skip the rest of the current entry's duration and jump to the
    * next wallpaper right now (same next-pick logic as the timer callback).
@@ -883,18 +1205,19 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     return { ok: true };
   }
 
-  /** (Re)starts or stops the playlist per the current stored rotation. */
-  function startRotation(): void {
-    if (rotationTimer) {
-      clearTimeout(rotationTimer);
-      rotationTimer = undefined;
-    }
-    if (rotationTick) {
-      clearInterval(rotationTick);
-      rotationTick = undefined;
-    }
+  /** (Re)starts or stops the playlist per the current stored rotation.
+   *  resume=true continues each plan from its saved position (F1). */
+  function startRotation(resume = false): void {
+    stopRotationTimers();
     lastScheduleFire = "";
     randomAvoid = -1;
+    const norm = normalizeRotation(runtimeConfig().rotation);
+    const hhmm = hhmmNow();
+    windowPlanId = (
+      norm.plans.find((p) => inWindow(p.window, hhmm) && p.entries.length) ??
+      norm.plans.find((p) => p.id === norm.activePlanId) ??
+      norm.plans[0]
+    )?.id;
     const s = rotationNow();
     if (!s.on || !s.plan) return;
     if (s.plan.mode === "schedule") {
@@ -902,7 +1225,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       rotationTick.unref?.();
       checkRotationSchedule();
     } else {
-      void playRotationEntry(0);
+      rotationTick = setInterval(rotationWatch, 20_000);
+      rotationTick.unref?.();
+      void playRotationEntry(resume ? (resumeIndex.get(s.plan.id) ?? 0) : 0);
     }
   }
 
@@ -974,9 +1299,10 @@ function sanitizeRotation(raw: unknown): RotationConfig {
     ? r.plans.slice(0, 10)
     : [{ mode: r.mode, entries: r.entries }];
   const plans: RotationPlan[] = [];
+  const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   plansRaw.forEach((p, i) => {
     if (!p || typeof p !== "object") return;
-    const q = p as { id?: unknown; name?: unknown; mode?: unknown; transition?: unknown; entries?: unknown };
+    const q = p as { id?: unknown; name?: unknown; mode?: unknown; transition?: unknown; window?: unknown; entries?: unknown };
     const mode: RotationMode = q.mode === "random" || q.mode === "schedule" ? q.mode : "sequence";
     // Plans without (valid) entries are kept: a freshly created plan in the
     // panel starts empty, and dropping it here would make it vanish on save.
@@ -989,6 +1315,12 @@ function sanitizeRotation(raw: unknown): RotationConfig {
     const name = typeof q.name === "string" && q.name.trim() ? q.name.trim().slice(0, 20) : `方案 ${i + 1}`;
     const plan: RotationPlan = { id, name, mode, entries };
     if (transition) plan.transition = transition;
+    // Optional daily activation window (F5): "HH:MM"-"HH:MM", overnight spans
+    // (start > end) allowed. Only stored when both ends parse.
+    const w = q.window as { start?: unknown; end?: unknown } | undefined;
+    if (w && typeof w.start === "string" && typeof w.end === "string" && HHMM_RE.test(w.start) && HHMM_RE.test(w.end) && w.start !== w.end) {
+      plan.window = { start: w.start, end: w.end };
+    }
     plans.push(plan);
   });
   if (!plans.length) {
@@ -1023,15 +1355,32 @@ if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { Write-O
   }
 }
 
-/** Renames a plugin-managed wallpaper image, keeping its extension. */
+/** Renames a plugin-managed wallpaper image, keeping its extension.
+ *  Collisions get a numeric suffix — a bare rename would SILENTLY OVERWRITE
+ *  the existing file (Windows MoveFileEx semantics). */
 function renameLibraryImage(oldPath: string, name: string): string {
   if (!isInsideDataDir(oldPath) || !/\.(jpe?g|png|webp|bmp)$/i.test(oldPath)) {
     throw new Error("only plugin-managed wallpapers can be renamed here");
   }
   const ext = path.extname(oldPath);
   const safe = name.replace(/[\/:*?"<>|]/g, "").trim() || "wallpaper";
-  const newPath = path.join(path.dirname(oldPath), safe + ext);
-  if (newPath !== oldPath) fs.renameSync(oldPath, newPath);
+  let newPath = path.join(path.dirname(oldPath), safe + ext);
+  if (newPath.toLowerCase() !== path.resolve(oldPath).toLowerCase()) {
+    for (let i = 2; fs.existsSync(newPath); i++) {
+      newPath = path.join(path.dirname(oldPath), `${safe}(${i})${ext}`);
+    }
+    fs.renameSync(oldPath, newPath);
+  }
+  // Keep the palette thumb beside it (keyed by basename); the old one would
+  // orphan and slowly pile up in thumbs/.
+  const oldThumb = path.join(thumbDir(), path.basename(oldPath) + ".jpg");
+  if (fs.existsSync(oldThumb)) {
+    try {
+      fs.renameSync(oldThumb, path.join(thumbDir(), path.basename(newPath) + ".jpg"));
+    } catch {
+      /* cosmetic only */
+    }
+  }
   return newPath;
 }
 

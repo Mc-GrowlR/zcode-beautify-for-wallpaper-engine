@@ -40,6 +40,9 @@ export interface RotationPlan {
   mode: RotationMode;
   /** Switching effect used while this plan is active (default "fade"). */
   transition?: WallpaperTransition;
+  /** Optional daily activation window "HH:MM"-"HH:MM" (overnight spans ok):
+   *  while "now" is inside, this plan plays regardless of activePlanId. */
+  window?: { start: string; end: string };
   entries: RotationEntry[];
 }
 
@@ -76,6 +79,8 @@ export interface BeautifyConfig {
   apiPort?: number;
   /** Wallpaper rotation playlist (定时播放). */
   rotation?: RotationConfig;
+  /** Slow pan/zoom breathing on static image wallpapers (Ken Burns). */
+  kenBurns?: boolean;
 }
 
 export const DEFAULT_CONFIG: BeautifyConfig = {
@@ -99,6 +104,8 @@ export interface BuiltPayload {
   /** Normalized focus point for background-position. */
   focusX: number;
   focusY: number;
+  /** True when Ken Burns motion applies to the current image wallpaper. */
+  kenBurns: boolean;
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -109,8 +116,9 @@ function activePlanTransition(rotation: RotationConfig | undefined): WallpaperTr
   return plan?.transition ?? "fade";
 }
 
-export function buildPayload(config: BeautifyConfig, assets?: WallpaperAssets): BuiltPayload {
+export function buildPayload(config: BeautifyConfig, assets?: WallpaperAssets, mediaToken = ""): BuiltPayload {
   const parts: string[] = [];
+  const tok = mediaToken ? (u: string) => `${u}?t=${mediaToken}` : (u: string) => u;
 
   // "smart" resolves to the analyzed suggestion at build time, so the injected
   // CSS only ever deals with cover or contain.
@@ -178,12 +186,16 @@ html, body { background: transparent !important; }
     const p = path.resolve(config.wallpaperPath ?? "").toLowerCase();
     const dir = path.resolve(dataDir()).toLowerCase();
     if (p.startsWith(dir + path.sep) && /\.(jpe?g|png|webp|bmp)$/i.test(p)) {
-      wallpaperDataUri = `http://127.0.0.1:${config.apiPort ?? 9223}/media/lib/${encodeURIComponent(path.basename(config.wallpaperPath!))}`;
+      wallpaperDataUri = tok(`http://127.0.0.1:${config.apiPort ?? 9223}/media/lib/${encodeURIComponent(path.basename(config.wallpaperPath!))}`);
     } else {
       wallpaperDataUri = assets?.dataUri;
     }
   }
-  const videoSrc = config.wallpaperVisible ? config.sceneVideoUrl : undefined;
+  const videoSrc = config.wallpaperVisible && config.sceneVideoUrl ? tok(config.sceneVideoUrl) : undefined;
+  // Ken Burns animates the wallpaper layer's transform — only meaningful for
+  // a static image (a video plays its own motion) and with blur off (blur
+  // already occupies the transform).
+  const kenBurns = Boolean(config.kenBurns) && !videoSrc && config.blur === 0 && Boolean(wallpaperDataUri);
 
   return {
     css: parts.join("\n"),
@@ -193,6 +205,7 @@ html, body { background: transparent !important; }
     transition: activePlanTransition(config.rotation),
     focusX,
     focusY,
+    kenBurns,
   };
 }
 

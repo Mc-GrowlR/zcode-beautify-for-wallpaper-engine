@@ -124,6 +124,8 @@ export interface InjectionPayload {
   fit?: "cover" | "contain";
   /** Switching effect played by the transition overlay (default "fade"). */
   transition?: string;
+  /** Slow pan/zoom breathing on a static image wallpaper (Ken Burns). */
+  kenBurns?: boolean;
 }
 
 /**
@@ -194,6 +196,22 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var wp = document.getElementById(MARKER + '-wallpaper');
   var HAS_NEW = ${JSON.stringify(Boolean(payload.wallpaperDataUri))} || VIDEO_SRC;
   var TRANSITION = ${JSON.stringify(payload.transition ?? "fade")};
+  var KB_ON = ${JSON.stringify(Boolean(payload.kenBurns))} && !VIDEO_SRC;
+  /** Ken Burns breathing on the settled wallpaper layer (image only): the
+   *  running animation's transform outranks the stylesheet's static scale,
+   *  and the payload only arms it when blur is off, so the two never fight.
+   *  Re-assigning the same animation is a no-op — clear + reflow restarts it
+   *  so every switch begins the pan from its first keyframe. */
+  var applyKb = function(on) {
+    if (!wp) return;
+    if (!on) {
+      wp.style.animation = '';
+      return;
+    }
+    wp.style.animation = 'none';
+    void wp.offsetWidth;
+    wp.style.animation = MARKER + '-kb 26s ease-in-out infinite alternate';
+  };
   if (HAS_NEW && !wp) {
     wp = document.createElement('div');
     wp.id = MARKER + '-wallpaper';
@@ -271,7 +289,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           + '@keyframes ' + MARKER + '-fx-fade { from { opacity: 0; } to { opacity: 1; } }'
           + '@keyframes ' + MARKER + '-fx-slide { from { transform: translateX(100%); } to { transform: translateX(0); } }'
           + '@keyframes ' + MARKER + '-fx-zoom { from { opacity: 0; transform: scale(1.15); } to { opacity: 1; transform: scale(1); } }'
-          + '@keyframes ' + MARKER + '-fx-blur { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0px); } }';
+          + '@keyframes ' + MARKER + '-fx-blur { from { opacity: 0; filter: blur(24px); } to { opacity: 1; filter: blur(0px); } }'
+          + '@keyframes ' + MARKER + '-kb { from { transform: scale(1) translate(0%, 0%); } to { transform: scale(1.08) translate(-1.6%, -1.1%); } }';
         (document.head || document.documentElement).appendChild(fs);
       }
       if (holder) wp.appendChild(holder);
@@ -297,6 +316,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       if (!animate) {
         retireVideo(document.getElementById(MARKER + '-video'));
         nv.id = MARKER + '-video';
+        applyKb(false);
       }
     } else if (${JSON.stringify(Boolean(payload.wallpaperDataUri))}) {
       if (!holder) holder = wp; // instant image switch paints the main layer directly
@@ -316,6 +336,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         retireVideo(document.getElementById(MARKER + '-video'));
         if (VIDEO_SRC) {
           wp.style.backgroundImage = 'none';
+          applyKb(false);
           if (newVid) {
             newVid.id = MARKER + '-video';
             // Settle in place (opacity 1, animation styles dropped). No DOM
@@ -326,6 +347,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         } else if (overlay && overlay.parentNode) {
           wp.style.backgroundImage = overlay.style.backgroundImage;
           overlay.remove();
+          applyKb(KB_ON);
         }
       };
       window.__zcodeBeautify.finishFade = promote;
@@ -376,6 +398,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   }
 
   if (!cssDeferred) style.textContent = CSS_TEXT;
+  // Instant switches (and option-only pushes) settle Ken Burns right away.
+  if (HAS_NEW) applyKb(KB_ON);
 
   var FIT = ${JSON.stringify(payload.fit ?? "cover")};
   var bp = document.getElementById(MARKER + '-backdrop');
