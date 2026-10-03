@@ -958,6 +958,32 @@ export function buildPanelScript(apiPort: number): string {
     }
     doAdd();
   });
+  // 启用开关立即提交:服务端 startRotation() 收到后马上开播/停播。之前它
+  // 只是个表单值,要再点「保存/播放」才随 payload 生效,读起来像"没反应"。
+  // 语义与 persistPlans 一致:不换活动方案,只翻 enabled;任何失败回滚勾选。
+  $('zb-sched-on').addEventListener('change', function () {
+    var want = this.checked;
+    var self = this;
+    syncEditorIntoPlan();
+    var activeId = null;
+    for (var i = 0; i < schedPlans.length; i++) if (schedPlans[i].id === schedActiveId) activeId = schedActiveId;
+    if (!activeId && schedPlans[schedIdx]) activeId = schedPlans[schedIdx].id;
+    fetch(API + '/api/rotation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rotation: { enabled: want, activePlanId: activeId, plans: plansPayload() } })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.error) { self.checked = !want; status(d.error); return; }
+        status(want ? '已启用,开始按方案播放' : '已停止播放');
+        loadRotation();
+      })
+      .catch(function () {
+        self.checked = !want;
+        status('无法连接美化服务 service unreachable');
+      });
+  });
   $('zb-sched-save').addEventListener('click', function () {
     syncEditorIntoPlan();
     var payload = {
