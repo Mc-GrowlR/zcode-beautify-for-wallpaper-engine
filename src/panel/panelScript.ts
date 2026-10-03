@@ -114,8 +114,8 @@ export function buildPanelScript(apiPort: number): string {
     // (and the browser scrolls the list to reveal it, cutting off row 1).
     // z-index ties with the panel root (2147483647 is the ceiling) — the popup
     // is appended later, so DOM order paints it ABOVE the panel card.
-    '.zb-wp-pop { position: fixed; z-index: 2147483647; max-height: 200px;',
-      ' overflow: auto; background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
+    '.zb-wp-pop { position: fixed; z-index: 2147483647; max-height: 200px; color: #e8e8ea;',
+      ' overflow: auto; overscroll-behavior: contain; background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 3px; }',
     '.zb-wp-group { padding: 4px 6px 2px; font-size: 10px; opacity: .55; }',
     '.zb-wp-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; cursor: pointer; font-size: 11px; }',
     '.zb-wp-item:hover { background: rgba(255,255,255,.12); }',
@@ -713,8 +713,13 @@ export function buildPanelScript(apiPort: number): string {
     function onDoc(e) {
       if (pop && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop();
     }
-    // A fixed popup does not follow scrolling — any scroll closes it.
-    function onScrollClose() { closePop(); }
+    // A fixed popup does not follow scrolling — a BACKGROUND scroll closes it.
+    // Scrolling inside the popup itself (wheel over it, dragging its own
+    // scrollbar) is ordinary browsing and must leave it open.
+    function onScrollClose(e) {
+      if (pop && e && e.target && pop.contains(e.target)) return;
+      closePop();
+    }
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       if (pop) { closePop(); return; }
