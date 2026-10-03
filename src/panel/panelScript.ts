@@ -77,6 +77,13 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-lib { font-size: 11px; }',
     '.zb-lib .zb-lib-head { opacity: .55; margin: 4px 0 2px; }',
     '.zb-lib-list { max-height: 110px; overflow: auto; }',
+    // Hover peek: a bigger wallpaper preview that opens to the LEFT of the
+    // panel when the cursor rests on any thumbnail-bearing item.
+    '#zb-hover-preview { position: fixed; z-index: 2147483646; width: 200px; border-radius: 8px;',
+    '  border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
+    '  overflow: hidden; pointer-events: none; }',
+    '#zb-hover-preview img { display: block; width: 100%; max-height: 300px; object-fit: cover; }',
+    '#zb-hover-preview[hidden] { display: none; }',
     '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
     '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
     '.zb-sched-plan { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }',
@@ -88,7 +95,7 @@ export function buildPanelScript(apiPort: number): string {
     '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
       ' outline: none; color-scheme: dark; }',
-    '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }',
+    '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 200px; overflow-y: auto; padding-right: 2px; }',
     '.zb-sched-row { display: flex; align-items: center; gap: 4px; }',
     '.zb-sched-row input[type=number], .zb-sched-row input[type=time], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
@@ -229,6 +236,7 @@ export function buildPanelScript(apiPort: number): string {
     '    </div>' +
     '  </div>' +
     '</div>' +
+    '<div id="zb-hover-preview" hidden><img alt=""></div>' +
     '<div id="zb-status"></div>';
   document.body.appendChild(root);
 
@@ -245,6 +253,48 @@ export function buildPanelScript(apiPort: number): string {
       .then(function (d) { if (cb) cb(d); })
       .catch(function () { status('无法连接美化服务 service unreachable'); });
   }
+
+  // --- hover peek: resting the cursor on a wallpaper thumbnail (library rows,
+  // picker popup items, picker buttons) opens a bigger preview to the LEFT of
+  // the panel. The 260ms delay keeps a cursor merely sweeping past quiet.
+  var ZB_HOVER_SEL = '.zb-item .zb-item-img, .zb-wp-item img, .zb-wp-btn img';
+  var zbHoverTimer = null;
+  function hideHoverPreview() {
+    if (zbHoverTimer) { clearTimeout(zbHoverTimer); zbHoverTimer = null; }
+    var box = $('zb-hover-preview');
+    if (box) box.hidden = true;
+  }
+  function showHoverPreview(thumb) {
+    var box = $('zb-hover-preview');
+    if (!box) return;
+    var big = box.querySelector('img');
+    if (big.getAttribute('src') !== thumb.getAttribute('src')) big.src = thumb.src;
+    box.hidden = false;
+    var r = thumb.getBoundingClientRect();
+    box.style.left = 'auto';
+    box.style.right = '296px'; // panel column (264+18) plus breathing room
+    var top = r.top + r.height / 2 - box.offsetHeight / 2;
+    if (top < 8) top = 8;
+    if (top + box.offsetHeight > window.innerHeight - 8) top = window.innerHeight - box.offsetHeight - 8;
+    box.style.top = Math.round(top) + 'px';
+  }
+  document.addEventListener('mouseover', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var thumb = t.closest(ZB_HOVER_SEL);
+    if (!thumb || thumb.tagName !== 'IMG') return;
+    if (zbHoverTimer) clearTimeout(zbHoverTimer);
+    zbHoverTimer = setTimeout(function () { zbHoverTimer = null; showHoverPreview(thumb); }, 260);
+  });
+  document.addEventListener('mouseout', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var thumb = t.closest(ZB_HOVER_SEL);
+    if (!thumb) return;
+    if (e.relatedTarget && thumb.contains(e.relatedTarget)) return;
+    hideHoverPreview();
+  });
+  window.addEventListener('scroll', hideHoverPreview, true);
 
   // Local live preview; the server re-injects the authoritative CSS right after.
   function preview() {
@@ -648,6 +698,7 @@ export function buildPanelScript(apiPort: number): string {
     function closePop() {
       if (!pop) return;
       pop.remove(); pop = null;
+      hideHoverPreview();
       document.removeEventListener('mousedown', onDoc, true);
     }
     function onDoc(e) {
@@ -997,8 +1048,9 @@ export function buildPanelScript(apiPort: number): string {
       }
       activateSavedTab();
       beat(true);
-    } else if (root.getAttribute('data-offline') !== '1') {
-      beat(false);
+    } else {
+      hideHoverPreview(); // thumbnails vanish under the closed panel
+      if (root.getAttribute('data-offline') !== '1') beat(false);
     }
   });
 
