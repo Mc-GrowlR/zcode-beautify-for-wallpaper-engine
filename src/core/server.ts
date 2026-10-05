@@ -915,6 +915,51 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         return;
       }
 
+      // Power-saver re-encode (GPU): loops are recorded at 1080p30/60 —
+      // 720p24 crf26 cuts decode load ~60% and size ~70%. The scene in use
+      // is skipped (its decoder holds the file open), replace only on shrink.
+      if (req.method === "POST" && url.pathname === "/api/scenes-recompress") {
+        const ff = await ffmpegPath();
+        if (!ff) throw new Error("ffmpeg not found");
+        const config = runtimeConfig();
+        let done = 0;
+        let skipped = 0;
+        let savedBytes = 0;
+        try {
+          for (const d of fs.readdirSync(scenesCacheRoot())) {
+            const loop = path.join(scenesCacheRoot(), d, "loop.mp4");
+            try {
+              if (!fs.statSync(loop).isFile()) continue;
+              if (config.sceneHash === d) { skipped++; continue; }
+              const before = fs.statSync(loop).size;
+              const tmp = `${loop}.cmp-${process.pid}.mp4`;
+              await execFileP(ff, [
+                "-y", "-hide_banner", "-loglevel", "error",
+                "-i", loop,
+                "-vf", "scale=-2:720", "-r", "24",
+                "-c:v", "libx264", "-crf", "26", "-preset", "veryfast",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an",
+                tmp,
+              ], { timeout: 300_000 });
+              const after = fs.statSync(tmp).size;
+              if (after > 0 && after < before) {
+                fs.renameSync(tmp, loop);
+                done++;
+                savedBytes += before - after;
+              } else {
+                fs.rmSync(tmp, { force: true });
+              }
+            } catch {
+              /* leave this entry as-is */
+            }
+          }
+        } catch {
+          /* no scenes dir */
+        }
+        sendJson(res, 200, { ok: true, done, skipped, savedBytes });
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/api/scenes-purge") {
         const config = runtimeConfig();
         let removed = 0;

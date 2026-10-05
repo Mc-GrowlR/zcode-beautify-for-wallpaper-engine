@@ -228,11 +228,14 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // detaching a video's compositor surface mid-transition makes Windows flash
   // a black rectangle on screen (invisible to CDP captures, very visible to
   // the user). The retired element is swept at the START of the next switch,
-  // when the fresh transition masks any surface churn.
+  // when the fresh transition masks any surface churn. Clearing src + load()
+  // also RELEASES the hardware decoder session right away — a paused <video>
+  // keeps its decoder (and its GPU budget) alive until unloaded.
   var retireVideo = function(v) {
     if (!v) return;
     v.removeAttribute('id');
     try { v.pause(); } catch (e) {}
+    try { v.removeAttribute('src'); v.load(); } catch (e) {}
     v.style.opacity = '0';
     v.style.pointerEvents = 'none';
     v.dataset.zbRetired = '1';
@@ -274,13 +277,18 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     var holder = null;
     var vidBase = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
     var vidFx = '';
+    // blur(24px) is a per-frame GPU filter over the FULL screen — on a video
+    // target it costs far more than the crossfade look justifies. Filter-type
+    // effects downgrade to the compositor-cheap fade; transform/opacity ones
+    // (slide/zoom) stay.
+    var EFFECT = VIDEO_SRC && TRANSITION === 'blur' ? 'fade' : TRANSITION;
     if (animate) {
       cssDeferred = true; // theme swap moves to promote(); see CSS_TEXT above
-      if (TRANSITION === 'slide') {
+      if (EFFECT === 'slide') {
         vidFx = 'animation:' + MARKER + '-fx-slide 650ms cubic-bezier(.22,.61,.36,1) forwards;';
-      } else if (TRANSITION === 'zoom') {
+      } else if (EFFECT === 'zoom') {
         vidFx = 'opacity:0;animation:' + MARKER + '-fx-zoom 650ms ease forwards;';
-      } else if (TRANSITION === 'blur') {
+      } else if (EFFECT === 'blur') {
         vidFx = 'opacity:0;animation:' + MARKER + '-fx-blur 650ms ease forwards;';
       } else {
         vidFx = 'opacity:0;animation:' + MARKER + '-fx-fade 650ms ease forwards;';
@@ -309,18 +317,20 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       nv.setAttribute('muted', '');
       nv.setAttribute('playsinline', '');
       nv.muted = true;
-      // Born in the wallpaper layer — its final home. An instant switch takes
-      // the official id right away; an animated one stays anonymous and
-      // parked at opacity 0 until promote hands the id over.
+      // Born in the wallpaper layer — its final home. NOT playing yet: the
+      // warm-up only needs the FIRST frame (preload decodes it), so the old
+      // wallpaper keeps the only active decoder until the animation starts.
+      // Two parallel 1080p decodes during warm-up was a real GPU spike.
+      nv.setAttribute('preload', 'auto');
       nv.style.cssText = vidBase + (animate ? 'opacity:0;' : '');
       nv.setAttribute('src', VIDEO_SRC);
       nv.load();
       wp.appendChild(nv);
-      nv.play().catch(function() {});
       newVid = nv;
       if (!animate) {
         retireVideo(document.getElementById(MARKER + '-video'));
         nv.id = MARKER + '-video';
+        nv.play().catch(function() {});
         applyKb(false);
       }
     } else if (${JSON.stringify(Boolean(payload.wallpaperDataUri))}) {
@@ -370,26 +380,24 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           overlay.addEventListener('animationend', promote);
         } else if (newVid) {
           newVid.style.cssText = vidBase + vidFx;
+          // Playback starts WITH the animation — the parked element held no
+          // decoder session until this exact moment.
+          newVid.play().catch(function() {});
           newVid.addEventListener('animationend', promote);
         }
         setTimeout(promote, 780);
       };
-      // Warm the new content first: video waits for its first decoded frame
-      // (loadeddata) AND one presented frame (requestVideoFrameCallback) —
-      // the compositor must already hold the first frame before the animation
-      // exposes the layer, or the effect fades in a black video surface.
-      // Images wait for decode(). A timeout keeps the switch landing even if
-      // an event never fires (throttled renderers stall rvfc too).
+      // Warm the new content first: a parked (paused) video needs
+      // readyState >= 2 — the first frame decoded and renderable — before the
+      // animation exposes it (requestVideoFrameCallback is playback-driven
+      // and never fires while parked). Images wait for decode(). A timeout
+      // keeps the switch landing even if the event never fires.
       if (newVid) {
-        var budget = setTimeout(startAnim, 900);
-        var onFrame = function() { clearTimeout(budget); startAnim(); };
-        var onReady = function() {
-          if (typeof newVid.requestVideoFrameCallback === 'function') {
-            newVid.requestVideoFrameCallback(function() { onFrame(); });
-          } else onFrame();
-        };
-        if (newVid.readyState >= 2) onReady();
-        else newVid.addEventListener('loadeddata', onReady);
+        if (newVid.readyState >= 2) startAnim();
+        else {
+          newVid.addEventListener('loadeddata', startAnim);
+          setTimeout(startAnim, 900);
+        }
       } else {
         var im = new Image();
         var imSrc = overlay.style.backgroundImage.replace(/^url\\(["']?/, '').replace(/["']?\\)$/, '');

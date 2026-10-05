@@ -236,6 +236,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <div class="zb-lib-head" id="zb-storage" style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
     '        <span id="zb-storage-text" style="flex:1">…</span>' +
     '        <button class="zb-act" id="zb-open-scenes" title="在资源管理器中打开动态壁纸缓存目录">📂</button>' +
+    '        <button class="zb-act" id="zb-compress" title="省电压缩:把动态壁纸循环重编码为 720p/24fps,显著降低 GPU 解码占用与体积(使用中的跳过,可重新导入恢复原画质)">⚡ 压缩</button>' +
     '        <button class="zb-act" id="zb-purge" title="删除全部已缓存的动态壁纸循环(正在使用的除外)">🗑 清理</button>' +
     '      </div>' +
     '      </div></div>' +
@@ -735,6 +736,25 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       })
       .catch(function () { $('zb-storage-text').textContent = ''; });
   }
+  $('zb-compress').addEventListener('click', function () {
+    var btn = this;
+    if (btn.getAttribute('data-armed') !== '1') {
+      btn.setAttribute('data-armed', '1');
+      status('再点一次确认:全部动态壁纸压缩为 720p/24fps(使用中的跳过,耗时数秒)');
+      setTimeout(function () { btn.removeAttribute('data-armed'); }, 5000);
+      return;
+    }
+    btn.removeAttribute('data-armed');
+    btn.textContent = '⚡ 压缩中…';
+    post('/api/scenes-recompress', {}, function (d) {
+      btn.textContent = '⚡ 压缩';
+      if (!d || !d.ok) { status('压缩失败:' + ((d && d.error) || '服务未连接')); return; }
+      var mb = (d.savedBytes || 0) / 1048576;
+      status('已压缩 ' + d.done + ' 个' + (d.skipped ? '(跳过 ' + d.skipped + ' 个使用中)' : '') + ' 省 ' + mb.toFixed(1) + ' MB');
+      loadLibrary();
+      loadStorage();
+    });
+  });
   $('zb-purge').addEventListener('click', function () {
     var btn = this;
     if (btn.getAttribute('data-armed') !== '1') {
