@@ -23,7 +23,8 @@ import {
   pickRendererTargets,
 } from "./cdp.js";
 import { buildPayload, DEFAULT_CONFIG, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
-import { loadWallpaper, type WallpaperAssets } from "./monet.js";
+import { loadWallpaper, extractPalette, type WallpaperAssets } from "./monet.js";
+import { themeFromSourceColor, argbFromRgb } from "@material/material-color-utilities";
 import { buildPanelScript } from "../panel/panelScript.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
@@ -92,6 +93,17 @@ async function themeThumbFor(source: string): Promise<string> {
   }
 }
 
+/** Applies the pinned theme color (🎨 lock) over extracted assets — cheap,
+ *  recomputed on every call so pinning/unpinning never serves a stale theme. */
+function withPinnedTheme(assets: WallpaperAssets, config: BeautifyConfig): WallpaperAssets {
+  const hex = config.themeColor;
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return assets;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { ...assets, theme: themeFromSourceColor(argbFromRgb(r, g, b)) };
+}
+
 async function getAssets(config: BeautifyConfig): Promise<WallpaperAssets | undefined> {
   const wallpaperPath = config.wallpaperPath;
   if (!wallpaperPath || !fs.existsSync(wallpaperPath)) return undefined;
@@ -108,12 +120,12 @@ async function getAssets(config: BeautifyConfig): Promise<WallpaperAssets | unde
   if (cached?.mtimeMs === mtimeMs) {
     assetsCache.delete(sourcePath);
     assetsCache.set(sourcePath, cached); // refresh LRU position
-    return cached.assets;
+    return withPinnedTheme(cached.assets, config);
   }
   try {
     const assets = await loadWallpaper(sourcePath);
     rememberAssets(sourcePath, mtimeMs, assets);
-    return assets;
+    return withPinnedTheme(assets, config);
   } catch {
     return undefined; // undecodable wallpaper: inject without Monet rather than not at all
   }
@@ -131,13 +143,37 @@ function hasBackup(): boolean {
   return fs.existsSync(backupFile());
 }
 
+function isDayPeriod(dn: NonNullable<BeautifyConfig["dayNight"]>): boolean {
+  const hhmm = `${String(new Date().getHours()).padStart(2, "0")}:${String(new Date().getMinutes()).padStart(2, "0")}`;
+  return dn.start <= dn.end ? hhmm >= dn.start && hhmm < dn.end : hhmm >= dn.start || hhmm < dn.end;
+}
+
+/** The dim/blur actually in effect: day/night schedule overrides the flat
+ *  sliders while enabled (the sliders then edit the CURRENT period's value). */
+function effectiveLook(config: BeautifyConfig): { dim: number; blur: number } {
+  const dn = config.dayNight;
+  if (!dn?.enabled) return { dim: config.dim, blur: config.blur };
+  return isDayPeriod(dn) ? { dim: dn.dayDim, blur: dn.dayBlur } : { dim: dn.nightDim, blur: dn.nightBlur };
+}
+
+/** Config view with the day/night look applied — what payloads inject. */
+function lookConfigFor(config: BeautifyConfig): BeautifyConfig {
+  return { ...config, ...effectiveLook(config) };
+}
+
 function publicConfig(config: BeautifyConfig) {
+  const look = effectiveLook(config);
   return {
-    blur: config.blur,
-    dim: config.dim,
+    blur: look.blur,
+    dim: look.dim,
+    flatBlur: config.blur,
+    flatDim: config.dim,
     monet: config.monet,
     wallpaperVisible: config.wallpaperVisible,
     kenBurns: config.kenBurns ?? false,
+    videoVolume: config.videoVolume ?? 0,
+    themeColor: config.themeColor ?? null,
+    dayNight: config.dayNight ?? null,
     fit: config.fit,
     wallpaperSet: Boolean(config.wallpaperPath && fs.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
@@ -156,7 +192,28 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.monet === "boolean") out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (typeof body?.kenBurns === "boolean") out.kenBurns = body.kenBurns;
+  if (typeof body?.videoVolume === "number" && body.videoVolume >= 0 && body.videoVolume <= 100) out.videoVolume = Math.round(body.videoVolume);
+  if (body?.themeColor === null) out.themeColor = undefined;
+  else if (typeof body?.themeColor === "string" && /^#[0-9a-fA-F]{6}$/.test(body.themeColor)) out.themeColor = body.themeColor;
   if (body?.fit === "cover" || body?.fit === "contain" || body?.fit === "smart") out.fit = body.fit;
+  // Day/night look schedule (护眼): two dim/blur presets switch at times.
+  const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const dn = body?.dayNight;
+  if (dn && typeof dn === "object") {
+    const num = (v: unknown, max: number): number | undefined =>
+      typeof v === "number" && v >= 0 && v <= max ? Math.round(v) : undefined;
+    const start = typeof dn.start === "string" && HHMM_RE.test(dn.start) ? dn.start : undefined;
+    const end = typeof dn.end === "string" && HHMM_RE.test(dn.end) ? dn.end : undefined;
+    out.dayNight = {
+      enabled: dn.enabled === true,
+      start: start ?? "06:00",
+      end: end ?? "18:00",
+      dayDim: num(dn.dayDim, 80) ?? 20,
+      nightDim: num(dn.nightDim, 80) ?? 55,
+      dayBlur: num(dn.dayBlur, 30) ?? 0,
+      nightBlur: num(dn.nightBlur, 30) ?? 6,
+    };
+  }
   return out;
 }
 
@@ -208,7 +265,7 @@ async function holdSession(
   const session: HeldSession = { conn };
 
   const assets = await getAssets(config);
-  const payload = buildPayload(config, assets, mediaToken);
+  const payload = buildPayload(lookConfigFor(config), assets, mediaToken);
   const bootstrap = buildBootstrapScript({
     css: payload.css,
     wallpaperDataUri: payload.wallpaperDataUri,
@@ -216,6 +273,7 @@ async function holdSession(
     fit: payload.fit,
     transition: payload.transition,
     kenBurns: payload.kenBurns,
+    videoVolume: payload.videoVolume,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -243,7 +301,7 @@ async function holdSession(
 /** Re-evaluates the theme bootstrap in every live session after a config change. */
 async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
   const assets = await getAssets(config);
-  const payload = buildPayload(config, assets, mediaToken);
+  const payload = buildPayload(lookConfigFor(config), assets, mediaToken);
   const bootstrap = buildBootstrapScript({
     css: payload.css,
     wallpaperDataUri: payload.wallpaperDataUri,
@@ -251,6 +309,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     fit: payload.fit,
     transition: payload.transition,
     kenBurns: payload.kenBurns,
+    videoVolume: payload.videoVolume,
   });
   let ok = 0;
   for (const [id, session] of held) {
@@ -262,6 +321,17 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
       }
       session.themeScriptId = await registerScript(session, bootstrap);
       await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      // Audio belt-and-braces: apply the volume DIRECTLY as well. The page-side
+      // assignment lives inside the bootstrap's fast path and proved flaky in
+      // the wild (a stray null write); this idempotent pass guarantees the
+      // <video> ends up at the configured volume whatever happened before.
+      const vv = Math.max(0, Math.min(100, Math.round(payload.videoVolume ?? 0)));
+      await session.conn
+        .send("Runtime.evaluate", {
+          expression: `(function(){var v=document.getElementById('zcode-beautify-video');if(v){v.muted=${JSON.stringify(vv === 0)};v.volume=${(vv / 100).toFixed(3)};}})()`,
+          returnByValue: true,
+        })
+        .catch(() => {});
       ok++;
     } catch {
       session.conn.close();
@@ -512,6 +582,20 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       if (req.method === "POST" && url.pathname === "/api/config") {
         const patch = sanitize(JSON.parse(await readBody(req)));
         const config = { ...runtimeConfig(), ...patch };
+        // While the day/night schedule runs, dim/blur are DERIVED — a slider
+        // edit retargets the current period's preset instead of the flat one.
+        if (config.dayNight?.enabled && (patch.dim !== undefined || patch.blur !== undefined)) {
+          const dn = config.dayNight;
+          const day = isDayPeriod(dn);
+          if (patch.dim !== undefined) {
+            if (day) dn.dayDim = patch.dim; else dn.nightDim = patch.dim;
+            config.dim = patch.dim;
+          }
+          if (patch.blur !== undefined) {
+            if (day) dn.dayBlur = patch.blur; else dn.nightBlur = patch.blur;
+            config.blur = patch.blur;
+          }
+        }
         saveConfig(persisted(config));
         const windows = await pushConfigToSessions(config).catch(() => 0);
         sendJson(res, 200, { ok: true, windows, ...publicConfig(config) });
@@ -632,14 +716,20 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // local serve process can — so the dialog lives here.
       if (req.method === "POST" && url.pathname === "/api/pick-scene") {
         const picked = await pickFileViaDialog();
-        sendJson(res, 200, { ok: Boolean(picked), path: picked });
+        sendJson(res, 200, { ok: picked.length > 0, path: picked[0], paths: picked });
         return;
       }
 
       if (req.method === "POST" && url.pathname === "/api/import-scene") {
         const body = JSON.parse(await readBody(req));
         const scenePath = typeof body?.path === "string" ? body.path.trim() : "";
-        const sceneOpts = typeof body?.maxSeconds === "number" && body.maxSeconds >= 5 && body.maxSeconds <= 60 ? { maxSeconds: body.maxSeconds } : {};
+        // Import spec: "eco" records/encodes at 720p24 directly (no ⚡ pass
+        // needed later); "std" (default) keeps the classic 1080p30.
+        const spec = body?.spec === "eco" ? "eco" : "std";
+        const sceneOpts: { width?: number; height?: number; fps?: number; maxWidth?: number; maxSeconds?: number; keepAudio?: boolean } =
+          typeof body?.maxSeconds === "number" && body.maxSeconds >= 5 && body.maxSeconds <= 60 ? { maxSeconds: body.maxSeconds } : {};
+        if (spec === "eco") Object.assign(sceneOpts, { width: 1280, height: 720, fps: 24, maxWidth: 1280 });
+        if (body?.keepAudio === true) sceneOpts.keepAudio = true;
         if (!scenePath) throw new Error("path is required");
         if (importJob.running) {
           sendJson(res, 409, { error: "another import is already running", stage: importJob.stage });
@@ -719,20 +809,32 @@ export async function startServe(opts: ServeOptions): Promise<void> {
 
       // Library listing for the panel: static images + cached scene loops.
       // ?sort=name orders by filename; default is newest first (mtime desc).
+      // Favorites float to the top regardless of sort.
       if (req.method === "GET" && url.pathname === "/api/library") {
-        const images: Array<{ name: string; path: string; mtimeMs: number }> = [];
+        let fav: { hashes: string[]; paths: string[] } = { hashes: [], paths: [] };
+        try {
+          fav = JSON.parse(fs.readFileSync(path.join(dataDir(), "favorites.json"), "utf8"));
+        } catch {
+          /* no favorites yet */
+        }
+        const images: Array<{ name: string; path: string; mtimeMs: number; favorite: boolean }> = [];
         for (const f of fs.readdirSync(dataDir())) {
           if (/\.(jpe?g|png|webp|bmp)$/i.test(f)) {
             try {
-              images.push({ name: f, path: path.join(dataDir(), f), mtimeMs: fs.statSync(path.join(dataDir(), f)).mtimeMs });
+              const p = path.join(dataDir(), f);
+              images.push({ name: f, path: p, mtimeMs: fs.statSync(p).mtimeMs, favorite: fav.paths.includes(path.resolve(p)) });
             } catch {
               /* vanished */
             }
           }
         }
-        if (url.searchParams.get("sort") === "name") images.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-        else images.sort((a, b) => b.mtimeMs - a.mtimeMs);
-        const scenes: Array<{ hash: string; name?: string; sizeBytes: number; mtimeMs: number }> = [];
+        const byFav = (a: { favorite: boolean }, b: { favorite: boolean }): number => Number(b.favorite) - Number(a.favorite);
+        if (url.searchParams.get("sort") === "name") {
+          images.sort((a, b) => byFav(a, b) || a.name.localeCompare(b.name, "zh-Hans-CN"));
+        } else {
+          images.sort((a, b) => byFav(a, b) || b.mtimeMs - a.mtimeMs);
+        }
+        const scenes: Array<{ hash: string; name?: string; sizeBytes: number; mtimeMs: number; favorite: boolean }> = [];
         try {
           for (const d of fs.readdirSync(scenesCacheRoot())) {
             const loop = path.join(scenesCacheRoot(), d, "loop.mp4");
@@ -744,7 +846,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
               } catch {
                 /* unnamed entry */
               }
-              scenes.push({ hash: d, name, sizeBytes: st.size, mtimeMs: st.mtimeMs });
+              scenes.push({ hash: d, name, sizeBytes: st.size, mtimeMs: st.mtimeMs, favorite: fav.hashes.includes(d) });
             } catch {
               /* incomplete entry */
             }
@@ -752,7 +854,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         } catch {
           /* no scenes dir yet */
         }
-        scenes.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        scenes.sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.mtimeMs - a.mtimeMs);
         sendJson(res, 200, { images, scenes });
         return;
       }
@@ -869,6 +971,50 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // 立即切换: skip ahead to the next playlist entry right now.
       if (req.method === "POST" && url.pathname === "/api/rotation-next") {
         sendJson(res, 200, skipRotation());
+        return;
+      }
+
+      // Focus tracking (idle GPU): the injected page reports its visibility;
+      // hidden freezes the playlist timer (remaining delay preserved).
+      if (req.method === "POST" && url.pathname === "/api/rotation-visibility") {
+        const body = JSON.parse(await readBody(req));
+        const visible = body?.visible === true;
+        if (visible === !rotationHidden) {
+          sendJson(res, 200, { ok: true, unchanged: true });
+          return;
+        }
+        rotationHidden = !visible;
+        if (rotationHidden) {
+          if (rotationTimer) {
+            rotationRemainMs = Math.max(0, rotationDeadline - Date.now());
+            clearTimeout(rotationTimer);
+            rotationTimer = undefined;
+          }
+          console.log("serve: rotation frozen (page hidden)");
+        } else if (rotationRemainMs > 0 && !rotationTimer) {
+          scheduleRotationNext(rotationRemainMs);
+          console.log("serve: rotation resumed (page visible)");
+        }
+        sendJson(res, 200, { ok: true, hidden: rotationHidden });
+        return;
+      }
+
+      // Playlist status line for the panel (第 N/M 张 · 剩余 Xs).
+      if (req.method === "GET" && url.pathname === "/api/rotation-state") {
+        const s = rotationNow();
+        if (!s.on || !s.plan) {
+          sendJson(res, 200, { on: false });
+          return;
+        }
+        sendJson(res, 200, {
+          on: true,
+          planName: s.plan.name,
+          mode: s.plan.mode,
+          index: rotationIndex,
+          total: s.plan.entries.length,
+          remainMs: rotationHidden ? rotationRemainMs : Math.max(0, rotationDeadline - Date.now()),
+          frozen: rotationHidden,
+        });
         return;
       }
 
@@ -1059,6 +1205,78 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         return;
       }
 
+      // Usage-time ranking derived from the history log: the gap between one
+      // application and the next approximates how long it stayed on screen.
+      if (req.method === "GET" && url.pathname === "/api/stats") {
+        const items = readHistory();
+        const acc = new Map<string, { label: string; thumbUrl?: string; seconds: number }>();
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          const key = it.hash ?? it.path ?? String(i);
+          const end = i > 0 ? items[i - 1].at : Date.now(); // newest first
+          const dur = Math.max(0, Math.min(end - it.at, 24 * 3600 * 1000));
+          const row = acc.get(key) ?? { label: it.label, thumbUrl: it.thumbUrl, seconds: 0 };
+          row.seconds += Math.round(dur / 1000);
+          acc.set(key, row);
+        }
+        const top = [...acc.entries()]
+          .map(([key, v]) => ({ key, ...v }))
+          .sort((a, b) => b.seconds - a.seconds)
+          .slice(0, 8);
+        sendJson(res, 200, { items: top });
+        return;
+      }
+
+      // --- favorites (library pinning) --------------------------------------
+      const favoritesFile = (): string => path.join(dataDir(), "favorites.json");
+      const readFavorites = (): { hashes: string[]; paths: string[] } => {
+        try {
+          return JSON.parse(fs.readFileSync(favoritesFile(), "utf8"));
+        } catch {
+          return { hashes: [], paths: [] };
+        }
+      };
+      if (req.method === "POST" && url.pathname === "/api/favorite") {
+        const body = JSON.parse(await readBody(req));
+        const fav = readFavorites();
+        const toggle = (arr: string[], v: string, on: boolean): void => {
+          const i = arr.indexOf(v);
+          if (on && i < 0) arr.push(v);
+          if (!on && i >= 0) arr.splice(i, 1);
+        };
+        if (typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
+          toggle(fav.hashes, body.hash, body.on === true);
+        } else if (typeof body?.path === "string") {
+          toggle(fav.paths, path.resolve(body.path), body.on === true);
+        } else {
+          throw new Error("hash or path required");
+        }
+        fs.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      // Dominant-color swatches from the current wallpaper (theme pinning).
+      if (req.method === "GET" && url.pathname === "/api/palette") {
+        const config = runtimeConfig();
+        const sourcePath =
+          config.mediaType === "video" && config.sceneHash
+            ? path.join(scenesCacheRoot(), config.sceneHash, "poster.jpg")
+            : config.wallpaperPath
+              ? await themeThumbFor(config.wallpaperPath)
+              : undefined;
+        let colors: string[] = [];
+        if (sourcePath && fs.existsSync(sourcePath)) {
+          try {
+            colors = await extractPalette(sourcePath);
+          } catch {
+            /* fall through with empty palette */
+          }
+        }
+        sendJson(res, 200, { colors, pinned: config.themeColor ?? null });
+        return;
+      }
+
       // Loop video streaming for the injected <video> layer (Range-capable).
       if (req.method === "GET" && url.pathname.startsWith("/media/scene/")) {
         const hash = /^\/media\/scene\/([a-f0-9]{8,64})\.mp4$/.exec(url.pathname)?.[1];
@@ -1142,6 +1360,46 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   const resumeIndex = new Map<string, number>();
   /** The plan id the window watcher currently has active (F5). */
   let windowPlanId: string | undefined;
+  // Focus-pause bookkeeping (idle GPU): while the renderer page is hidden
+  // (minimized / fully covered) the playlist freezes instead of decoding a
+  // new wallpaper nobody sees; the remaining delay survives the pause.
+  let rotationHidden = false;
+  let rotationRemainMs = 0;
+  let rotationDeadline = 0;
+
+  /** Schedules the next entry switch; freezing instead when hidden. */
+  function scheduleRotationNext(delayMs: number): void {
+    if (rotationTimer) {
+      clearTimeout(rotationTimer);
+      rotationTimer = undefined;
+    }
+    rotationDeadline = Date.now() + delayMs;
+    rotationRemainMs = delayMs;
+    if (rotationHidden) return;
+    rotationTimer = setTimeout(rotationFire, delayMs);
+    rotationTimer.unref?.();
+  }
+
+  function rotationFire(): void {
+    rotationTimer = undefined;
+    const s = rotationNow();
+    if (!s.on || !s.plan || s.plan.mode === "schedule" || !s.plan.entries.length) return;
+    const total = s.plan.entries.length;
+    let next: number;
+    if (s.plan.id !== planIdAtSchedule) {
+      next = (resumeIndex.get(s.plan.id) ?? -1) + 1;
+    } else if (s.plan.mode === "random" && total > 1) {
+      do {
+        next = Math.floor(Math.random() * total);
+      } while (next === randomAvoid);
+    } else {
+      next = (rotationIndex + 1) % total;
+    }
+    void playRotationEntry(next);
+  }
+
+  /** Which plan scheduled the pending timer (cross-plan handoff seed). */
+  let planIdAtSchedule: string | undefined;
 
   const hhmmNow = (): string =>
     `${String(new Date().getHours()).padStart(2, "0")}:${String(new Date().getMinutes()).padStart(2, "0")}`;
@@ -1197,27 +1455,8 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     // A restart raced this apply: its chain owns the future; drop out here so
     // this stale chain can never schedule a second, competing timer.
     if (gen !== rotationGen) return;
-    if (rotationTimer) clearTimeout(rotationTimer);
-    rotationTimer = setTimeout(() => {
-      if (gen !== rotationGen) return;
-      const cur = rotationNow();
-      if (!cur.on || !cur.plan || cur.plan.mode === "schedule" || !cur.plan.entries.length) return;
-      const total = cur.plan.entries.length;
-      let next: number;
-      if (cur.plan.id !== rot.id) {
-        // The plan changed under this timer (window opened/closed): seed from
-        // the NEW plan's saved position, not the old plan's index.
-        next = (resumeIndex.get(cur.plan.id) ?? -1) + 1;
-      } else if (cur.plan.mode === "random" && total > 1) {
-        do {
-          next = Math.floor(Math.random() * total);
-        } while (next === randomAvoid);
-      } else {
-        next = (i + 1) % total;
-      }
-      void playRotationEntry(next);
-    }, Math.max(10, entry.seconds ?? 60) * 1000);
-    rotationTimer.unref?.();
+    planIdAtSchedule = rot.id;
+    scheduleRotationNext(Math.max(10, entry.seconds ?? 60) * 1000);
   }
 
   /** Schedule-mode minute check; the "date + HH:MM" key fires each entry at
@@ -1236,6 +1475,22 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     void applyRef(entry)
       .then((r) => console.log(`serve: rotation [${s.plan!.name}/schedule] ${hhmm} -> ${entry.hash ?? entry.path} (${r.windows} window(s))`))
       .catch((err: Error) => console.error(`serve: rotation schedule fire failed — ${err.message}`));
+  }
+
+  /** 20s day/night watcher: on a period flip re-inject the new look
+   *  (in-memory push only — the stored config keeps both presets). */
+  let dayNightWas: number | undefined;
+  function dayNightTick(): void {
+    const config = runtimeConfig();
+    const dn = config.dayNight;
+    if (!dn?.enabled) { dayNightWas = undefined; return; }
+    const isDay = isDayPeriod(dn) ? 1 : 0;
+    if (dayNightWas === undefined) { dayNightWas = isDay; return; }
+    if (isDay !== dayNightWas) {
+      dayNightWas = isDay;
+      console.log(`serve: day/night flip -> ${isDay ? "day" : "night"} look`);
+      void pushConfigToSessions(config).catch(() => 0);
+    }
   }
 
   /** 20s watchdog for duration plans: switches to a plan whose window just
@@ -1311,6 +1566,10 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       void playRotationEntry(resume ? (resumeIndex.get(s.plan.id) ?? 0) : 0);
     }
   }
+
+  // Day/night look flips on its own 20s cadence — rotation running or not.
+  const dayNightTimer = setInterval(dayNightTick, 20_000);
+  dayNightTimer.unref?.();
 
   // Initial pass, then keep polling so restarts of the app get re-injected.
   await poll(runtimeConfig(), apiPort);
@@ -1418,21 +1677,22 @@ function sanitizeRotation(raw: unknown): RotationConfig {
  * panel is a web page and cannot read absolute paths from <input type=file>,
  * so the dialog has to live in this local process. Resolves "" on cancel.
  */
-async function pickFileViaDialog(): Promise<string> {
+async function pickFileViaDialog(): Promise<string[]> {
   const script = `
 Add-Type -AssemblyName System.Windows.Forms
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $owner = New-Object System.Windows.Forms.Form
 $owner.TopMost = $true
 $d = New-Object System.Windows.Forms.OpenFileDialog
-$d.Title = '选择动态壁纸 (场景 .pkg / 视频 .mp4, 或壁纸目录内任意文件)'
+$d.Title = '选择动态壁纸 (可多选:场景 .pkg / 视频 .mp4,或壁纸目录内任意文件)'
 $d.Filter = '动态壁纸 (*.pkg;*.json;*.gif;*.jpg;*.png;*.mp4;*.webm)|*.pkg;*.json;*.gif;*.jpg;*.png;*.mp4;*.webm|所有文件 (*.*)|*.*'
-if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.FileName }`;
+$d.Multiselect = $true
+if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $d.FileNames | ForEach-Object { Write-Output $_ } }`;
   try {
     const { stdout } = await promisify(execFile)("powershell", ["-STA", "-NoProfile", "-Command", script], { timeout: 300_000, windowsHide: true });
-    return stdout.trim();
+    return stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   } catch {
-    return "";
+    return [];
   }
 }
 

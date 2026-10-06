@@ -81,6 +81,20 @@ export interface BeautifyConfig {
   rotation?: RotationConfig;
   /** Slow pan/zoom breathing on static image wallpapers (Ken Burns). */
   kenBurns?: boolean;
+  /** Video wallpaper audio 0-100 (0 = muted; wallpapers default silent). */
+  videoVolume?: number;
+  /** Pinned Monet source color "#rrggbb" overriding extraction. */
+  themeColor?: string;
+  /** Day/night look schedule (护眼): two dim/blur presets switching by time. */
+  dayNight?: {
+    enabled: boolean;
+    start: string;
+    end: string;
+    dayDim: number;
+    nightDim: number;
+    dayBlur: number;
+    nightBlur: number;
+  };
 }
 
 export const DEFAULT_CONFIG: BeautifyConfig = {
@@ -106,6 +120,8 @@ export interface BuiltPayload {
   focusY: number;
   /** True when Ken Burns motion applies to the current image wallpaper. */
   kenBurns: boolean;
+  /** Video wallpaper audio volume 0-100 (0 = muted). */
+  videoVolume: number;
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -206,6 +222,7 @@ html, body { background: transparent !important; }
     focusX,
     focusY,
     kenBurns,
+    videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
   };
 }
 

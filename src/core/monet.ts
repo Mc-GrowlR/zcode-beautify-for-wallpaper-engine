@@ -130,6 +130,37 @@ function extractSourceColor(bitmap: { width: number; height: number; data: Uint8
   return ranked[0] ?? argbFromRgb(103, 80, 164);
 }
 
+/** Up to 8 dominant wallpaper colors as #rrggbb (theme pinning swatches):
+ *  a coarse grid sample quantized by merging near-duplicates, most frequent
+ *  first. Runs on the tiny ffmpeg thumb, so it stays fast. */
+export async function extractPalette(imagePath: string): Promise<string[]> {
+  const image = await Jimp.read(imagePath);
+  const { width, height, data } = image.bitmap;
+  const buckets = new Map<string, { r: number; g: number; b: number; n: number }>();
+  const step = Math.max(1, Math.floor(Math.min(width, height) / 24));
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] < 128) continue;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      // Skip near-black/near-white noise so swatches stay colorful.
+      const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (luma < 24 || luma > 236) continue;
+      const key =  Math.floor(r / 48) + ':' + Math.floor(g / 48) + ':' + Math.floor(b / 48);
+      const cur = buckets.get(key) || { r: 0, g: 0, b: 0, n: 0 };
+      cur.r += r; cur.g += g; cur.b += b; cur.n++;
+      buckets.set(key, cur);
+    }
+  }
+  return [...buckets.values()]
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 8)
+    .map((c) => {
+      const h = (v: number) => Math.round(v / c.n).toString(16).padStart(2, '0');
+      return '#' + h(c.r) + h(c.g) + h(c.b);
+    });
+}
+
 export function argbToCss(argb: number, alpha = 1): string {
   const r = (argb & 0xff0000) >> 16;
   const g = (argb & 0x00ff00) >> 8;

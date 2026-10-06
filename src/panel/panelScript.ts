@@ -207,11 +207,14 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"></div>' +
     '    <div class="zb-row zb-toggles">' +
     '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
-    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
+    '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
     '    </div>' +
     '    <div class="zb-row zb-toggles">' +
+    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
     '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
     '    </div>' +
+    '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
+    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
     '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">' +
     '      <option value="cover">填满裁剪</option>' +
     '      <option value="contain">完整显示</option>' +
@@ -219,7 +222,18 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '    </select></div>' +
     '      </div></div>' +
     '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title">最近使用 <span class="zb-fold">▾</span></div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-daynight"><div class="zb-card-title">昼夜护眼 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '      <div class="zb-sched-mode" style="margin-bottom:4px"><label title="按时间段自动切换两套显示参数"><input type="checkbox" id="zb-dn-on">按时段自动调暗</label></div>' +
+    '      <div class="zb-sched-mode"><span>白天</span><input type="time" id="zb-dn-start" style="flex:1">' +
+    '        <span style="opacity:.5">至</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
+    '      <div class="zb-sched-mode"><span>白天压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
+    '        <span>模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
+    '      <div class="zb-sched-mode"><span>夜间压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
+    '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
+    '      </div></div>' +
+    '    </div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center"><span>最近使用 <button class="zb-act" id="zb-stats" title="壁纸累计展示时长排行">📊</button></span> <span class="zb-fold">▾</span></div>' +
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-lib-list" id="zb-history" style="max-height:192px"></div>' +
     '      </div></div>' +
@@ -227,9 +241,14 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '    <div class="zb-card zb-collapsible" id="zb-card-scenes"><div class="zb-card-title">壁纸库 · 动态 <span class="zb-fold">▾</span></div>' +
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
-    '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="打开文件选择器:选 .pkg(场景)或 .mp4(视频),或壁纸目录内任意文件(会自动定位),选完自动开始导入">📁</button>' +
+    '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="打开文件选择器(可多选):选 .pkg(场景)或 .mp4(视频),选完自动排队导入">📁</button>' +
     '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
     '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入</button>' +
+    '      </div>' +
+    '      <div class="zb-sched-mode" style="margin-bottom:4px">' +
+    '        <span title="省电=直接录/压成 720p24(GPU 解码省约 60%);标准=1080p30">规格</span>' +
+    '        <select id="zb-spec" style="flex:1"><option value="std">标准 1080p</option><option value="eco">省电 720p</option></select>' +
+    '        <label title="视频文件导入时保留声音(雨声/篝火等氛围壁纸);场景录制本身无声"><input type="checkbox" id="zb-keep-audio">🔊</label>' +
     '      </div>' +
     '      <div class="zb-import-row" style="margin:0 0 4px">' +
     '        <button class="zb-btn zb-grow" id="zb-import-cancel" hidden title="中止正在进行的导入,清理临时文件">✕ 取消导入</button>' +
@@ -270,6 +289,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
+    '    <div class="zb-card"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center">轮播状态 <span id="zb-rot-state" style="opacity:.7;font-weight:400">…</span></div>' +
+    '    </div>' +
     '    <div class="zb-card"><div class="zb-card-title">方案</div>' +
     '      <div class="zb-sched-head" style="margin-bottom:6px"><span>当前</span>' +
     '        <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
@@ -395,7 +416,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         dim: Number($('zb-dim').value),
         monet: $('zb-monet').checked,
         wallpaperVisible: $('zb-vis').checked,
-        kenBurns: $('zb-kb').checked
+        kenBurns: $('zb-kb').checked,
+        videoVolume: Number($('zb-vol').value)
       }, function (d) { status(d && d.windows > 0 ? '已应用 applied' : '已保存(ZCode 未连接)'); });
     }, 300);
   }
@@ -453,6 +475,17 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         $('zb-monet').checked = !!c.monet;
         $('zb-vis').checked = !!c.wallpaperVisible;
         $('zb-kb').checked = !!c.kenBurns;
+        $('zb-vol').value = c.videoVolume ?? 0;
+        $('zb-vol-val').textContent = String(c.videoVolume ?? 0);
+        $('zb-pin').textContent = c.themeColor ? '🎨 已锁' : '🎨 锁色';
+        $('zb-pin').style.color = c.themeColor ? (c.themeColor) : '';
+        var dn = c.dayNight;
+        $('zb-dn-on').checked = !!(dn && dn.enabled);
+        if (dn) {
+          $('zb-dn-start').value = dn.start; $('zb-dn-end').value = dn.end;
+          $('zb-dn-daydim').value = dn.dayDim; $('zb-dn-nightdim').value = dn.nightDim;
+          $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
+        }
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
@@ -481,6 +514,84 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   $('zb-monet').addEventListener('change', pushConfig);
   $('zb-vis').addEventListener('change', pushConfig);
   $('zb-kb').addEventListener('change', pushConfig);
+  $('zb-vol').addEventListener('input', function () {
+    $('zb-vol-val').textContent = this.value;
+    pushConfig();
+  });
+
+  // --- day/night look schedule (护眼) --------------------------------------
+  function pushDayNight() {
+    var dn = {
+      enabled: $('zb-dn-on').checked,
+      start: $('zb-dn-start').value || '06:00',
+      end: $('zb-dn-end').value || '18:00',
+      dayDim: Number($('zb-dn-daydim').value) || 20,
+      nightDim: Number($('zb-dn-nightdim').value) || 55,
+      dayBlur: Number($('zb-dn-dayblur').value) || 0,
+      nightBlur: Number($('zb-dn-nightblur').value) || 6
+    };
+    post('/api/config', { dayNight: dn }, function (d) { if (d && d.error) status(d.error); });
+  }
+  ['zb-dn-on', 'zb-dn-start', 'zb-dn-end', 'zb-dn-daydim', 'zb-dn-nightdim', 'zb-dn-dayblur', 'zb-dn-nightblur'].forEach(function (id) {
+    $(id).addEventListener('change', pushDayNight);
+  });
+
+  // --- pinned theme color (🎨) ---------------------------------------------
+  $('zb-pin').addEventListener('click', function () {
+    apiFetch('/api/palette')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var existing = document.querySelector('body > .zb-wp-pop');
+        if (existing) { existing.remove(); return; }
+        var pop = document.createElement('div');
+        pop.className = 'zb-wp-pop';
+        var colors = (d && d.colors) || [];
+        if (d && d.pinned) {
+          var auto = document.createElement('div');
+          auto.className = 'zb-wp-item';
+          auto.textContent = '✕ 解除锁定(恢复自动取色)';
+          auto.addEventListener('click', function () {
+            post('/api/config', { themeColor: null }, function () { refresh(); pop.remove(); status('已恢复自动取色'); });
+          });
+          pop.appendChild(auto);
+        }
+        colors.forEach(function (hex) {
+          var it = document.createElement('div');
+          it.className = 'zb-wp-item';
+          var sw = document.createElement('span');
+          sw.style.cssText = 'width:46px;height:26px;border-radius:3px;flex:none;background:' + hex + ';border:1px solid rgba(255,255,255,.2)';
+          var name = document.createElement('span');
+          name.textContent = hex;
+          it.appendChild(sw); it.appendChild(name);
+          it.addEventListener('click', function () {
+            post('/api/config', { themeColor: hex }, function () { refresh(); pop.remove(); status('已锁定主题色 ' + hex); });
+          });
+          pop.appendChild(it);
+        });
+        if (!pop.children.length) pop.textContent = '当前壁纸没有可用色板';
+        document.body.appendChild(pop);
+        var btn = $('zb-pin').getBoundingClientRect();
+        pop.style.left = Math.max(8, Math.min(btn.left, window.innerWidth - 216)) + 'px';
+        pop.style.width = '208px';
+        pop.style.bottom = 'auto';
+        pop.style.top = (btn.bottom + 4) + 'px';
+        setTimeout(function () {
+          var close = function (e) {
+            if (!pop.contains(e.target) && e.target !== $('zb-pin')) { pop.remove(); document.removeEventListener('mousedown', close, true); }
+          };
+          document.addEventListener('mousedown', close, true);
+        }, 0);
+      })
+      .catch(function () { status('服务未连接'); });
+  });
+
+  // --- Alt+B panel shortcut -------------------------------------------------
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+      e.preventDefault();
+      $('zb-fab').click();
+    }
+  });
 
   var FITS = ['cover', 'contain', 'smart'];
   var FIT_LABELS = { cover: '填满裁剪', contain: '完整显示', smart: '智能适配' };
@@ -563,11 +674,40 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       .then(function (d) {
         btn.textContent = '📁';
         if (!d || !d.ok || !d.path) return; // user cancelled the dialog
+        var paths = (d.paths && d.paths.length) ? d.paths : [d.path];
+        if (paths.length > 1) { startImportQueue(paths); return; }
         $('zb-scene-path').value = d.path;
         $('zb-import').click();
       })
       .catch(function () { btn.textContent = '📁'; status('无法连接美化服务 service unreachable'); });
   });
+  /** Resolves once no import job is running (multi-file queue pacing). */
+  function importIdle() {
+    return new Promise(function (resolve) {
+      var t = setInterval(function () {
+        apiFetch('/api/import-status')
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!j || !j.running) { clearInterval(t); setTimeout(resolve, 400); }
+          })
+          .catch(function () { clearInterval(t); resolve(); });
+      }, 800);
+    });
+  }
+  /** Serial import queue for multi-selected files (one job at a time). */
+  function startImportQueue(paths) {
+    status('已选 ' + paths.length + ' 个,开始排队导入…');
+    var i = 0;
+    var next = function () {
+      if (i >= paths.length) { status('队列完成:' + paths.length + ' 个'); loadLibrary(); loadStorage(); return; }
+      $('zb-scene-path').value = paths[i];
+      i++;
+      status('导入 ' + i + '/' + paths.length + '…');
+      $('zb-import').click();
+      void importIdle().then(next);
+    };
+    next();
+  }
   $('zb-scene-path').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') $('zb-import').click();
   });
@@ -576,7 +716,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     var p = $('zb-scene-path').value.trim();
     if (!p) { status('请先粘贴场景壁纸路径'); return; }
     showGuide('', false);
-    post('/api/import-scene', { path: p }, function (d) {
+    post('/api/import-scene', { path: p, spec: $('zb-spec').value, keepAudio: $('zb-keep-audio').checked }, function (d) {
       if (d && d.error) { status(d.error); return; }
       setProgress(true, 'starting');
       if (importTimer) clearInterval(importTimer);
@@ -631,6 +771,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     });
   }
   bindFold('zb-card-display', 'zcode-beautify:fold-display');
+  bindFold('zb-card-daynight', 'zcode-beautify:fold-daynight');
   bindFold('zb-card-history', 'zcode-beautify:fold-history');
   bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
   bindFold('zb-card-images', 'zcode-beautify:fold-images');
@@ -652,7 +793,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         scenes.innerHTML = '';
         images.innerHTML = '';
         (lib.scenes || []).forEach(function (s) {
-          var item = libItem(s.name || ('场景 ' + s.hash.slice(0, 8)), { hash: s.hash }, s.hash, 'scene', s.hash, mt(API + '/media/poster/' + s.hash + '.jpg'));
+          var item = libItem(s.name || ('场景 ' + s.hash.slice(0, 8)), { hash: s.hash }, s.hash, 'scene', s.hash, mt(API + '/media/poster/' + s.hash + '.jpg'), s.favorite);
           if (typeof s.sizeBytes === 'number' && s.sizeBytes > 0) item.title = (s.name || s.hash.slice(0, 8)) + ' — ' + (s.sizeBytes / 1048576).toFixed(1) + ' MB';
           scenes.appendChild(item);
         });
@@ -660,7 +801,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           scenes.innerHTML = '<div class="zb-lib-head">暂无动态壁纸 — 用上方导入</div>';
         }
         (lib.images || []).forEach(function (im) {
-          images.appendChild(libItem(im.name, { path: im.path }, im.path, 'image', im.path, mt(API + '/media/lib/' + encodeURIComponent(im.name))));
+          images.appendChild(libItem(im.name, { path: im.path }, im.path, 'image', im.path, mt(API + '/media/lib/' + encodeURIComponent(im.name)), im.favorite));
         });
         if (!(lib.images || []).length) {
           images.innerHTML = '<div class="zb-lib-head">暂无图片壁纸 — 用上方更换图片</div>';
@@ -812,6 +953,72 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       .catch(function () { /* offline */ });
   }
 
+  // --- playlist status line (第 N/M 张 · 剩余 Xs), 1s while the panel is open
+  var rotStateTimer = null;
+  function pollRotState() {
+    apiFetch('/api/rotation-state')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        var el = $('zb-rot-state');
+        if (!s || !s.on) { el.textContent = '未启用'; return; }
+        if (s.mode === 'schedule') { el.textContent = '定点模式 ' + s.planName; return; }
+        var remain = Math.ceil((s.remainMs || 0) / 1000);
+        el.textContent = '第 ' + (s.index + 1) + '/' + s.total + ' 张 · ' + (s.frozen ? '已暂停(后台)' : remain + 's');
+      })
+      .catch(function () { /* offline */ });
+  }
+  $('zb-fab').addEventListener('click', function () {
+    if (panelOpen()) {
+      if (!rotStateTimer) { pollRotState(); rotStateTimer = setInterval(pollRotState, 1000); }
+    } else if (rotStateTimer) {
+      clearInterval(rotStateTimer); rotStateTimer = null;
+    }
+  }, { capture: true });
+  var fabOrig = $('zb-fab');
+  rotStateTimer = setInterval(pollRotState, 1000); // panel may already be open on re-inject
+
+  // --- usage-time ranking (📊) ----------------------------------------------
+  $('zb-stats').addEventListener('click', function () {
+    apiFetch('/api/stats')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var existing = document.querySelector('body > .zb-wp-pop');
+        if (existing) { existing.remove(); return; }
+        var pop = document.createElement('div');
+        pop.className = 'zb-wp-pop';
+        var items = (d && d.items) || [];
+        if (!items.length) pop.textContent = '暂无使用记录';
+        items.forEach(function (it, i) {
+          var row = document.createElement('div');
+          row.className = 'zb-wp-item';
+          var rank = document.createElement('span');
+          rank.textContent = (i + 1) + '.';
+          rank.style.cssText = 'width:16px;flex:none;opacity:.6';
+          var name = document.createElement('span');
+          name.textContent = it.label;
+          name.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+          var t = document.createElement('span');
+          var min = Math.round(it.seconds / 60);
+          t.textContent = min >= 60 ? (Math.round(min / 60 * 10) / 10) + '小时' : min + '分钟';
+          t.style.opacity = '.7';
+          row.appendChild(rank); row.appendChild(name); row.appendChild(t);
+          pop.appendChild(row);
+        });
+        document.body.appendChild(pop);
+        var btn = $('zb-stats').getBoundingClientRect();
+        pop.style.left = Math.max(8, Math.min(btn.left, window.innerWidth - 216)) + 'px';
+        pop.style.width = '208px';
+        pop.style.bottom = 'auto';
+        pop.style.top = (btn.bottom + 4) + 'px';
+        setTimeout(function () {
+          var close = function (e) {
+            if (!pop.contains(e.target) && e.target !== $('zb-stats')) { pop.remove(); document.removeEventListener('mousedown', close, true); }
+          };
+          document.addEventListener('mousedown', close, true);
+        }, 0);
+      })
+      .catch(function () { status('服务未连接'); });
+  });
   // --- config export / import (F3) -----------------------------------------
   $('zb-cfg-export').addEventListener('click', function () {
     apiFetch('/api/export')
@@ -863,12 +1070,26 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     }
   }
   /** One library row: click-to-apply label + rename (inline) + two-step delete. */
-  function libItem(label, applyBody, key, kind, ref, thumbUrl) {
+  function libItem(label, applyBody, key, kind, ref, thumbUrl, favorite) {
     var row = document.createElement('div');
     row.className = 'zb-item';
     row.setAttribute('data-key', key);
     var cur = localStorage.getItem('zcode-beautify:current-key');
     if (cur === key) row.setAttribute('data-current', '1');
+
+    // Favorite pin: floats to the top of the list (server sorts), survives
+    // restarts in favorites.json.
+    var star = document.createElement('button');
+    star.className = 'zb-act';
+    star.textContent = favorite ? '★' : '☆';
+    star.title = favorite ? '取消收藏' : '收藏置顶';
+    star.addEventListener('click', function (e) {
+      e.stopPropagation();
+      post('/api/favorite', { on: !favorite, hash: applyBody.hash, path: applyBody.path }, function (d) {
+        if (d && d.ok) loadLibrary();
+      });
+    });
+    row.appendChild(star);
 
     if (thumbUrl) {
       var thumb = document.createElement('img');

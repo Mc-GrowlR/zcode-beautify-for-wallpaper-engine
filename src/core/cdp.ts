@@ -126,6 +126,8 @@ export interface InjectionPayload {
   transition?: string;
   /** Slow pan/zoom breathing on a static image wallpaper (Ken Burns). */
   kenBurns?: boolean;
+  /** Video wallpaper audio 0-100 (0/absent = muted). */
+  videoVolume?: number;
 }
 
 /**
@@ -161,17 +163,34 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
+  // Volume-only fast path: changing just the audio must not rebuild the
+  // video (instant switch would retire + re-create the decoder).
+  if (VIDEO_SRC && VOL !== (window.__zcodeBeautify.vol ?? 0)
+      && window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}) {
+    var liveVid = document.getElementById(MARKER + '-video');
+    if (liveVid) {
+      liveVid.muted = VOL === 0;
+      liveVid.volume = VOL / 100;
+      liveVid.play().catch(function() {});
+    }
+    window.__zcodeBeautify.vol = VOL;
+    return;
+  }
+
   // State alone is not proof the DOM work succeeded: an earlier run may have
   // died halfway (e.g. aborted mid-transition) leaving state set but no style
   // element — without the element check every later injection would silently
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
   window.__zcodeBeautify.kb = ${JSON.stringify(Boolean(payload.kenBurns))};
+  window.__zcodeBeautify.vol = VOL;
 
   var style = document.getElementById(MARKER + '-style');
   if (!style) {
@@ -200,6 +219,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var HAS_NEW = ${JSON.stringify(Boolean(payload.wallpaperDataUri))} || VIDEO_SRC;
   var TRANSITION = ${JSON.stringify(payload.transition ?? "fade")};
   var KB_ON = ${JSON.stringify(Boolean(payload.kenBurns))} && !VIDEO_SRC;
+  var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   /** Ken Burns breathing on the settled wallpaper layer (image only): the
    *  running animation's transform outranks the stylesheet's static scale,
    *  and the payload only arms it when blur is off, so the two never fight.
@@ -312,16 +332,18 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     var newVid = null;
     if (VIDEO_SRC) {
       var nv = document.createElement('video');
-      nv.setAttribute('autoplay', '');
+      // NO autoplay attribute: the element must stay parked until the
+      // transition arms (autoplay would start playback on attach and defeat
+      // the single-decoder warm-up).
       nv.setAttribute('loop', '');
-      nv.setAttribute('muted', '');
       nv.setAttribute('playsinline', '');
-      nv.muted = true;
       // Born in the wallpaper layer — its final home. NOT playing yet: the
       // warm-up only needs the FIRST frame (preload decodes it), so the old
       // wallpaper keeps the only active decoder until the animation starts.
       // Two parallel 1080p decodes during warm-up was a real GPU spike.
       nv.setAttribute('preload', 'auto');
+      nv.muted = VOL === 0;
+      nv.volume = VOL / 100;
       nv.style.cssText = vidBase + (animate ? 'opacity:0;' : '');
       nv.setAttribute('src', VIDEO_SRC);
       nv.load();
@@ -457,7 +479,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       if (!v) return;
       var S = window.__zcodeBeautify;
       if (document.hidden) { S.lastClock = -1; return; }
-      if (v.ended || (v.paused && v.autoplay)) {
+      if (v.ended || v.paused) {
         S.stallCount = 0;
         v.play().catch(function() {});
       } else if (!v.paused && v.readyState >= 2 && S.lastClock === v.currentTime) {

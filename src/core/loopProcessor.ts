@@ -37,6 +37,10 @@ export interface SeamlessOptions {
   seconds?: number;
   /** Downscale so width <= maxWidth (keeps aspect, even heights). Default no scaling. */
   maxWidth?: number;
+  /** Re-encode the OUTPUT at this frame rate (e.g. 24 for the eco spec). */
+  fps?: number;
+  /** Keep the source audio track (ambient-sound wallpapers). Default strips it. */
+  keepAudio?: boolean;
   /** AbortSignal: aborting kills the running ffmpeg (import cancellation). */
   signal?: AbortSignal;
 }
@@ -92,12 +96,15 @@ export async function makeSeamless(
     "-i", input,
     "-filter_complex", filter,
     "-map", "[out]",
+    ...(options.fps ? ["-r", String(options.fps)] : []),
     "-c:v", "libx264",
     "-crf", "18",
     "-preset", "veryfast",
     "-pix_fmt", "yuv420p",
     "-movflags", "+faststart",
-    "-an",
+    // Ambient-sound wallpapers keep a low-bitrate AAC track; "0:a?" tolerates
+    // sources without audio. Everything else stays silent.
+    ...(options.keepAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "96k"] : ["-an"]),
     output,
   ], { timeout: 600_000, maxBuffer: 16 * 1024 * 1024, signal: options.signal });
 

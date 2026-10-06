@@ -28,6 +28,10 @@ export interface SceneImportOptions {
   fadeSec?: number;
   /** Video imports longer than this are truncated to a middle segment. */
   maxSeconds?: number;
+  /** Cap the loop width (eco spec = 1280). */
+  maxWidth?: number;
+  /** Keep the source audio (ambient-sound wallpapers). */
+  keepAudio?: boolean;
   /** Window title for the temporary WE render window. */
   title?: string;
   maxCacheBytes?: number;
@@ -189,7 +193,9 @@ export async function importScene(
       await makeSeamless(pkgPath, tmpLoop, opts.fadeSec, ffmpegPath, {
         startAt: trim?.startAt,
         seconds: trim?.seconds,
-        maxWidth: 1920,
+        maxWidth: opts.maxWidth ?? 1920,
+        fps: opts.fps,
+        keepAudio: opts.keepAudio,
         signal,
       });
 
