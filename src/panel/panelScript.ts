@@ -203,6 +203,16 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-item .zb-label-input { flex: 1; min-width: 0; padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(122,162,247,.6);',
       ' background: rgba(0,0,0,.35); color: inherit; font-size: 11px; outline: none; }',
     '.zb-item .zb-act { cursor: pointer; opacity: .5; padding: 0 3px; font-size: 11px; background: none; border: none; color: inherit; }',
+    // Display card sections: one card hosts 画面/界面/聊天界面/昼夜护眼
+    // groups — a hairline-separated mini header each, sliders paired in a
+    // two-column grid so the merged card stays compact.
+    '.zb-sec { display: flex; align-items: center; justify-content: space-between; gap: 8px;',
+      ' padding: 7px 2px 3px; margin-top: 6px; border-top: 1px solid rgba(255,255,255,.08);',
+      ' font-size: 10px; opacity: .55; letter-spacing: 2px; }',
+    '.zb-collapse-inner > .zb-sec:first-child { border-top: none; margin-top: 0; padding-top: 2px; }',
+    '.zb-sec .zb-sec-on { display: flex; align-items: center; gap: 4px; font-size: 10px;',
+      ' letter-spacing: normal; opacity: 1; cursor: pointer; white-space: nowrap; }',
+    '.zb-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }',
     '.zb-item .zb-act:hover { opacity: 1; }',
     '.zb-item .zb-act[data-armed="1"] { opacity: 1; color: #f87171; }',
     '#zb-offline { display: flex; flex-direction: column; gap: 6px; align-items: center;',
@@ -243,40 +253,28 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '    <div id="zb-tab-main">' +
     '    <div class="zb-card zb-collapsible" id="zb-card-display"><div class="zb-card-title">显示调节 <span class="zb-fold">▾</span></div>' +
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-sec">画面</div>' +
+    '    <div class="zb-g2">' +
     '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
     '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
     '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
     '      <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"></div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
-    '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
     '    </div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
-    '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
-    '    </div>' +
-    '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">' +
+    '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体" style="flex:1">' +
     '      <option value="cover">填满裁剪</option>' +
     '      <option value="contain">完整显示</option>' +
     '      <option value="smart">智能适配</option>' +
-    '    </select></div>' +
-    '      </div></div>' +
+    '    </select><label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label></div>' +
+    '    <div class="zb-sec">界面</div>' +
+    '    <div class="zb-row zb-toggles">' +
+    '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
+    '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
+    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
     '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-daynight"><div class="zb-card-title">昼夜护眼 <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
-    '      <div class="zb-sched-mode" style="margin-bottom:4px"><label title="按时间段自动切换两套显示参数"><input type="checkbox" id="zb-dn-on">按时段自动调暗</label></div>' +
-    '      <div class="zb-sched-mode"><span>白天</span><input type="time" id="zb-dn-start" style="flex:1">' +
-    '        <span style="opacity:.5">至</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
-    '      <div class="zb-sched-mode"><span>白天压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
-    '        <span>模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
-    '      <div class="zb-sched-mode"><span>夜间压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
-    '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
-    '      </div></div>' +
-    '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-chat"><div class="zb-card-title">聊天界面 <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
+    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-sec">聊天界面</div>' +
+    '    <div class="zb-g2">' +
     '    <div class="zb-row"><label title="对话列背后的额外压暗,消息文字浮在其上不受影响"><span>聊天区暗度</span><span id="zb-chat-dim-val">0.00</span></label>' +
     '      <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"></div>' +
     '    <div class="zb-row"><label title="窗口顶部向下渐隐遮罩的浓度"><span>遮罩上端</span><span id="zb-chat-top-val">0.00</span></label>' +
@@ -285,6 +283,14 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"></div>' +
     '    <div class="zb-row"><label title="整窗白色薄纱浓度,暗色壁纸下提升文字可读性"><span>大容器偏白</span><span id="zb-chat-frost-val">0.00</span></label>' +
     '      <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"></div>' +
+    '    </div>' +
+    '    <div class="zb-sec">昼夜护眼 <label title="按时间段自动切换两套显示参数" class="zb-sec-on"><input type="checkbox" id="zb-dn-on">按时段自动调暗</label></div>' +
+    '      <div class="zb-sched-mode"><span>白天</span><input type="time" id="zb-dn-start" style="flex:1">' +
+    '        <span style="opacity:.5">至</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
+    '      <div class="zb-sched-mode"><span>白天压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
+    '        <span>模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
+    '      <div class="zb-sched-mode"><span>夜间压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
+    '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
     '      </div></div>' +
     '    </div>' +
     '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center"><span>最近使用 <button class="zb-act" id="zb-stats" title="壁纸累计展示时长排行">📊</button></span> <span class="zb-fold">▾</span></div>' +
@@ -1076,8 +1082,6 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     });
   }
   bindFold('zb-card-display', 'zcode-beautify:fold-display');
-  bindFold('zb-card-daynight', 'zcode-beautify:fold-daynight');
-  bindFold('zb-card-chat', 'zcode-beautify:fold-chat');
   bindFold('zb-card-history', 'zcode-beautify:fold-history');
   bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
   bindFold('zb-card-images', 'zcode-beautify:fold-images');
