@@ -22,7 +22,7 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, normalizeChatLook, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
 import { loadWallpaper, extractPalette, type WallpaperAssets } from "./monet.js";
 import { themeFromSourceColor, argbFromRgb } from "@material/material-color-utilities";
 import { buildPanelScript } from "../panel/panelScript.js";
@@ -174,6 +174,7 @@ function publicConfig(config: BeautifyConfig) {
     videoVolume: config.videoVolume ?? 0,
     themeColor: config.themeColor ?? null,
     dayNight: config.dayNight ?? null,
+    chatLook: normalizeChatLook(config.chatLook),
     fit: config.fit,
     wallpaperSet: Boolean(config.wallpaperPath && fs.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
@@ -196,6 +197,18 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (body?.themeColor === null) out.themeColor = undefined;
   else if (typeof body?.themeColor === "string" && /^#[0-9a-fA-F]{6}$/.test(body.themeColor)) out.themeColor = body.themeColor;
   if (body?.fit === "cover" || body?.fit === "contain" || body?.fit === "smart") out.fit = body.fit;
+  // Chat-area zone look (聊天界面): frost/edge masks + chat column dim.
+  const cl = body?.chatLook;
+  if (cl && typeof cl === "object") {
+    const pct = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : undefined;
+    out.chatLook = {
+      chatDim: pct(cl.chatDim) ?? 0,
+      maskTop: pct(cl.maskTop) ?? 0,
+      maskBottom: pct(cl.maskBottom) ?? 0,
+      frost: pct(cl.frost) ?? 0,
+    };
+  }
   // Day/night look schedule (护眼): two dim/blur presets switch at times.
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const dn = body?.dayNight;
@@ -274,6 +287,7 @@ async function holdSession(
     transition: payload.transition,
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
+    chatLook: payload.chatLook,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -310,6 +324,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     transition: payload.transition,
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
+    chatLook: payload.chatLook,
   });
   let ok = 0;
   for (const [id, session] of held) {

@@ -58,6 +58,33 @@ export interface RotationConfig {
   plans: RotationPlan[];
 }
 
+/**
+ * Zone-refined chat-area look (聊天界面): four independent masks layered
+ * between the wallpaper and the UI, each a 0-100 density.
+ */
+export interface ChatLookConfig {
+  /** Extra darkening behind the conversation column (聊天区暗度). */
+  chatDim: number;
+  /** Top-edge fading mask (遮罩上端浓度). */
+  maskTop: number;
+  /** Bottom-edge fading mask (遮罩下端浓度). */
+  maskBottom: number;
+  /** Whole-window white frost sheet (大容器偏白). */
+  frost: number;
+}
+
+/** Clamp a partial chat look to four ints 0-100 (missing values become 0). */
+export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig {
+  const pct = (v: unknown): number =>
+    typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
+  return {
+    chatDim: pct(raw?.chatDim),
+    maskTop: pct(raw?.maskTop),
+    maskBottom: pct(raw?.maskBottom),
+    frost: pct(raw?.frost),
+  };
+}
+
 export interface BeautifyConfig {
   port: number;
   wallpaperPath?: string;
@@ -85,6 +112,8 @@ export interface BeautifyConfig {
   videoVolume?: number;
   /** Pinned Monet source color "#rrggbb" overriding extraction. */
   themeColor?: string;
+  /** Zone-refined chat-area masks (聊天界面); absent = all zero. */
+  chatLook?: Partial<ChatLookConfig>;
   /** Day/night look schedule (护眼): two dim/blur presets switching by time. */
   dayNight?: {
     enabled: boolean;
@@ -122,6 +151,8 @@ export interface BuiltPayload {
   kenBurns: boolean;
   /** Video wallpaper audio volume 0-100 (0 = muted). */
   videoVolume: number;
+  /** Zone-refined chat-area masks (聊天界面), normalized 0-100. */
+  chatLook?: ChatLookConfig;
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -223,6 +254,7 @@ html, body { background: transparent !important; }
     focusY,
     kenBurns,
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
+    chatLook: normalizeChatLook(config.chatLook),
   };
 }
 

@@ -128,6 +128,8 @@ export interface InjectionPayload {
   kenBurns?: boolean;
   /** Video wallpaper audio 0-100 (0/absent = muted). */
   videoVolume?: number;
+  /** Zone-refined chat-area masks (聊天界面); absent = all zero. */
+  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number };
 }
 
 /**
@@ -163,8 +165,13 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
+  var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0 }))};
   // Volume-only fast path: changing just the audio must not rebuild the
-  // video (instant switch would retire + re-create the decoder).
+  // video (instant switch would retire + re-create the decoder). VOL must be
+  // declared ABOVE this block — it used to sit below the fast path, which
+  // therefore read undefined, unmuted the video and wrote NaN volume (the
+  // serve-side volume re-evaluate fallback was masking exactly this).
   if (VIDEO_SRC && VOL !== (window.__zcodeBeautify.vol ?? 0)
       && window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
       && window.__zcodeBeautify.videoSrc === VIDEO_SRC
@@ -176,7 +183,27 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       liveVid.play().catch(function() {});
     }
     window.__zcodeBeautify.vol = VOL;
+    if (window.__zcodeBeautify.chatKey !== CHAT) {
+      window.__zcodeBeautify.chatKey = CHAT;
+      applyChatLook();
+    }
     return;
+  }
+
+  // Chat-look fast path: the zone masks are standalone CSS-var layers, so a
+  // slider drag must not replay the wallpaper transition. When ONLY the chat
+  // look changed (wallpaper state identical + style element alive), apply it
+  // and bail before any wallpaper work.
+  if (window.__zcodeBeautify.chatKey !== CHAT) {
+    var chatOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.chatKey = CHAT;
+    applyChatLook();
+    if (chatOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -219,7 +246,6 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var HAS_NEW = ${JSON.stringify(Boolean(payload.wallpaperDataUri))} || VIDEO_SRC;
   var TRANSITION = ${JSON.stringify(payload.transition ?? "fade")};
   var KB_ON = ${JSON.stringify(Boolean(payload.kenBurns))} && !VIDEO_SRC;
-  var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   /** Ken Burns breathing on the settled wallpaper layer (image only): the
    *  running animation's transform outranks the stylesheet's static scale,
    *  and the payload only arms it when blur is off, so the two never fight.
@@ -450,6 +476,79 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     bp.dataset.on = '0';
   }
 
+  // --- chat-area zone look (聊天界面) ----------------------------------------
+  // Four independent masks layered OVER the wallpaper but UNDER the UI (same
+  // stacking model as the dim ::after): a white frost sheet, a top/bottom
+  // edge gradient, and an extra darkening behind the conversation column —
+  // set as the scroller's own background so messages stay readable above it.
+  // All are static composited layers; no per-frame cost.
+  window.__zcodeBeautify.chatKey = CHAT;
+  applyChatLook();
+
+  function applyChatLook() {
+    var C;
+    try { C = JSON.parse(CHAT); } catch (e) { return; }
+    var anyOn = C.chatDim > 0 || C.maskTop > 0 || C.maskBottom > 0 || C.frost > 0;
+    var st = document.getElementById(MARKER + '-chatlook-style');
+    var fr = document.getElementById(MARKER + '-frost');
+    var zm = document.getElementById(MARKER + '-zonemask');
+    if (!anyOn) {
+      if (st) st.remove();
+      if (fr) fr.remove();
+      if (zm) zm.remove();
+      if (window.__zcodeBeautify.chatObs) {
+        try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.chatObs = null;
+      }
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-chatlook-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    st.textContent = ':root{--zb-chat-dim:' + (C.chatDim / 100) + ';--zb-mask-top:' + (C.maskTop / 100)
+      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100) + '}'
+      + '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
+      + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
+      + 'background:linear-gradient(to bottom,rgb(0 0 0 / var(--zb-mask-top)),rgb(0 0 0 / 0) 30%,rgb(0 0 0 / 0) 70%,rgb(0 0 0 / var(--zb-mask-bot)))}'
+      // The conversation scroller carries distinctive Tailwind arbitrary
+      // classes; .zb-chat-col is the version-proof fallback (markChatCol).
+      + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
+      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';
+    if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
+    if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
+    document.documentElement.appendChild(fr);
+    document.documentElement.appendChild(zm);
+    // Route changes (chat <-> settings) recreate the column, so keep tagging
+    // it while the darkening is on. rAF-coalesced: streaming mutates a lot.
+    if (C.chatDim > 0 && !window.__zcodeBeautify.chatObs) {
+      markChatCol();
+      var chatPend = false;
+      var obs = new MutationObserver(function() {
+        if (chatPend) return;
+        chatPend = true;
+        requestAnimationFrame(function() { chatPend = false; markChatCol(); });
+      });
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      window.__zcodeBeautify.chatObs = obs;
+    }
+  }
+  // The composer's first TALL scroll ancestor is the conversation column.
+  // (Not the composer itself — it is a small overflow-y-auto editor.)
+  function markChatCol() {
+    var el = document.querySelector('[contenteditable="true"]');
+    el = el && el.parentElement;
+    while (el && el !== document.body) {
+      var oy = getComputedStyle(el).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && el.getBoundingClientRect().height > 300) {
+        if (!el.classList.contains('zb-chat-col')) el.classList.add('zb-chat-col');
+        return;
+      }
+      el = el.parentElement;
+    }
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops — occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -525,6 +624,17 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   document.getElementById(${JSON.stringify(marker)} + '-fade-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-wallpaper')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
-  if (window.__zcodeBeautify) { window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null; window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null; }
+  document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
+  if (window.__zcodeBeautify) {
+    window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
+    window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
+    window.__zcodeBeautify.chatKey = null;
+    if (window.__zcodeBeautify.chatObs) {
+      try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.chatObs = null;
+    }
+  }
 })();`;
 }

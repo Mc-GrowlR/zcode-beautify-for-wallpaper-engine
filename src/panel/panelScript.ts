@@ -233,6 +233,18 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
     '      </div></div>' +
     '    </div>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-chat"><div class="zb-card-title">聊天界面 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-row"><label title="对话列背后的额外压暗,消息文字浮在其上不受影响"><span>聊天区暗度</span><span id="zb-chat-dim-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="窗口顶部向下渐隐遮罩的浓度"><span>遮罩上端</span><span id="zb-chat-top-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="窗口底部向上渐隐遮罩的浓度(输入框附近)"><span>遮罩下端</span><span id="zb-chat-bot-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="整窗白色薄纱浓度,暗色壁纸下提升文字可读性"><span>大容器偏白</span><span id="zb-chat-frost-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"></div>' +
+    '      </div></div>' +
+    '    </div>' +
     '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center"><span>最近使用 <button class="zb-act" id="zb-stats" title="壁纸累计展示时长排行">📊</button></span> <span class="zb-fold">▾</span></div>' +
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-lib-list" id="zb-history" style="max-height:192px"></div>' +
@@ -441,6 +453,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     if (on) {
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
+      setChatSliders(0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -486,6 +499,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           $('zb-dn-daydim').value = dn.dayDim; $('zb-dn-nightdim').value = dn.nightDim;
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
+        var cl = c.chatLook || {};
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0);
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
@@ -534,6 +549,54 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   }
   ['zb-dn-on', 'zb-dn-start', 'zb-dn-end', 'zb-dn-daydim', 'zb-dn-nightdim', 'zb-dn-dayblur', 'zb-dn-nightblur'].forEach(function (id) {
     $(id).addEventListener('change', pushDayNight);
+  });
+
+  // --- chat-area zone look (聊天界面) ----------------------------------------
+  function setChatSliders(d, mu, mb, f) {
+    $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
+    $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
+    $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
+    $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
+    // Reflecting SERVER state: drop the drag-preview inline vars so the
+    // injected :root block (the authoritative values) rules again — inline
+    // vars outrank the stylesheet and would otherwise pin stale previews.
+    var rs = document.documentElement.style;
+    rs.removeProperty('--zb-chat-dim');
+    rs.removeProperty('--zb-mask-top');
+    rs.removeProperty('--zb-mask-bot');
+    rs.removeProperty('--zb-frost');
+  }
+  // Live preview via the same CSS vars the injected style consumes — inline
+  // vars outrank the :root block, so drags feel instant; the server push
+  // re-applies the authoritative values right after.
+  function chatPreview(d, mu, mb, f) {
+    var rs = document.documentElement.style;
+    rs.setProperty('--zb-chat-dim', String(d / 100));
+    rs.setProperty('--zb-mask-top', String(mu / 100));
+    rs.setProperty('--zb-mask-bot', String(mb / 100));
+    rs.setProperty('--zb-frost', String(f / 100));
+  }
+  var chatPushTimer = null;
+  function pushChatLook() {
+    clearTimeout(chatPushTimer);
+    chatPushTimer = setTimeout(function () {
+      post('/api/config', {
+        chatLook: {
+          chatDim: Number($('zb-chat-dim').value),
+          maskTop: Number($('zb-chat-top').value),
+          maskBottom: Number($('zb-chat-bot').value),
+          frost: Number($('zb-chat-frost').value)
+        }
+      }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  [['zb-chat-dim', 'zb-chat-dim-val'], ['zb-chat-top', 'zb-chat-top-val'], ['zb-chat-bot', 'zb-chat-bot-val'], ['zb-chat-frost', 'zb-chat-frost-val']].forEach(function (pair) {
+    $(pair[0]).addEventListener('input', function () {
+      var v = Number(this.value);
+      $(pair[1]).textContent = (v / 100).toFixed(2);
+      chatPreview(Number($('zb-chat-dim').value), Number($('zb-chat-top').value), Number($('zb-chat-bot').value), Number($('zb-chat-frost').value));
+      pushChatLook();
+    });
   });
 
   // --- pinned theme color (🎨) ---------------------------------------------
@@ -772,6 +835,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   }
   bindFold('zb-card-display', 'zcode-beautify:fold-display');
   bindFold('zb-card-daynight', 'zcode-beautify:fold-daynight');
+  bindFold('zb-card-chat', 'zcode-beautify:fold-chat');
   bindFold('zb-card-history', 'zcode-beautify:fold-history');
   bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
   bindFold('zb-card-images', 'zcode-beautify:fold-images');
