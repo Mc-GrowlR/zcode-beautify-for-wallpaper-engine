@@ -175,6 +175,19 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-we-mode button { background: none; border: none; color: inherit; font-size: 11px; padding: 3px 9px; cursor: pointer; opacity: .55; }',
     '.zb-we-mode button:hover { opacity: .9; }',
     '.zb-we-mode button[data-on="1"] { background: rgba(122,162,247,.4); opacity: 1; }',
+    // Folder-mode file-browser look: folder cards in the root view and a
+    // back row above a folder's wallpaper grid.
+    '.zb-we-fcard { border: 1px solid rgba(255,255,255,.14); border-radius: 8px; overflow: hidden; cursor: pointer;',
+      ' background: rgba(255,255,255,.04); padding: 14px 8px 10px; text-align: center; }',
+    '.zb-we-fcard:hover { border-color: rgba(122,162,247,.7); background: rgba(255,255,255,.08); }',
+    '.zb-we-fcard .zb-we-fico { font-size: 36px; line-height: 1; filter: saturate(1.3); }',
+    '.zb-we-fcard .zb-we-fname { font-size: 12px; margin-top: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+    '.zb-we-fcard .zb-we-fcount { font-size: 10px; opacity: .5; margin-top: 2px; }',
+    '.zb-we-fcard[hidden] { display: none; }',
+    '.zb-we-back { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; padding: 5px 8px;',
+      ' margin-bottom: 4px; border-radius: 6px; cursor: pointer; font-size: 11px; background: rgba(255,255,255,.06);',
+      ' border: 1px solid rgba(255,255,255,.12); color: inherit; }',
+    '.zb-we-back:hover { background: rgba(255,255,255,.12); }',
     '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
     '.zb-we-group { padding: 6px 4px 4px; font-size: 11px; opacity: .6; }',
     '.zb-we-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }',
@@ -865,6 +878,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     var list = document.createElement('div');
     list.className = 'zb-we-list';
     var groupEls = [];
+    // Folder mode navigates like a real file browser: the root shows one
+    // card per WE folder (📁 + name + count); clicking one descends into it
+    // with a back row on top. 未分类 is just another folder card.
+    var folderNav = 'root';
+    var curFolder = '';
     var selInfo = document.createElement('span');
     var impBtn = document.createElement('button');
     function refreshSel() {
@@ -879,6 +897,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     function setWeMode(m) {
       if (!hasFolders || weMode === m) return;
       weMode = m;
+      folderNav = 'root';
+      curFolder = '';
       try { localStorage.setItem('zcode-beautify:we-mode', m); } catch (e) {}
       refreshModeBtns();
       renderGroups();
@@ -941,9 +961,10 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       groupEls = [];
       list.textContent = '';
       var groups;
-      if (weMode === 'folder') {
-        // WE's own browser folders (config.json → browser.folders), with
-        // everything unfiled under WE falling into 未分类 at the end.
+      if (weMode === 'folder' && folderNav === 'root') {
+        // Root of the folder view: folder cards only (real-file-browser
+        // look), 未分类 last. Folder titles come from WE's own browser
+        // folder tree (config.json → browser.folders).
         var titles = [];
         items.forEach(function (it) {
           var f = it.folder || '未分类';
@@ -952,16 +973,70 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         titles.sort(function (a, b) {
           return (a === '未分类' ? 1 : 0) - (b === '未分类' ? 1 : 0) || a.localeCompare(b, 'zh');
         });
-        groups = titles.map(function (t) {
-          return { label: t, list: items.filter(function (it) { return (it.folder || '未分类') === t; }) };
+        var fgrid = document.createElement('div');
+        fgrid.className = 'zb-we-grid';
+        titles.forEach(function (t) {
+          var cnt = items.filter(function (it) { return (it.folder || '未分类') === t; }).length;
+          var fc = document.createElement('div');
+          fc.className = 'zb-we-fcard';
+          fc.setAttribute('data-title', t.toLowerCase());
+          fc.title = t + ' — ' + cnt + ' 个壁纸,点击进入';
+          var ico = document.createElement('div');
+          ico.className = 'zb-we-fico';
+          ico.textContent = t === '未分类' ? '🗃' : '📁';
+          fc.appendChild(ico);
+          var fn = document.createElement('div');
+          fn.className = 'zb-we-fname';
+          fn.textContent = t;
+          fc.appendChild(fn);
+          var fcnt = document.createElement('div');
+          fcnt.className = 'zb-we-fcount';
+          fcnt.textContent = cnt + ' 个';
+          fc.appendChild(fcnt);
+          fc.addEventListener('click', function () {
+            curFolder = t;
+            folderNav = 'inside';
+            search.value = '';
+            renderGroups();
+          });
+          fgrid.appendChild(fc);
         });
-      } else {
-        groups = [
-          { label: '场景', list: items.filter(function (it) { return it.type === 'scene'; }) },
-          { label: '视频', list: items.filter(function (it) { return it.type === 'video'; }) },
-          { label: '网页 · 暂不支持导入', list: items.filter(function (it) { return it.type === 'web'; }) },
-        ];
+        list.appendChild(fgrid);
+        groupEls.push(fgrid);
+        applyFilter();
+        return;
       }
+      if (weMode === 'folder' && folderNav === 'inside') {
+        // Inside one folder: back row + its wallpapers as a flat grid.
+        var back = document.createElement('button');
+        back.className = 'zb-we-back';
+        back.innerHTML = '← 返回文件夹列表';
+        back.title = '返回上一层';
+        back.addEventListener('click', function () {
+          folderNav = 'root';
+          curFolder = '';
+          search.value = '';
+          renderGroups();
+        });
+        list.appendChild(back);
+        var lab = document.createElement('div');
+        lab.className = 'zb-we-group';
+        lab.textContent = (curFolder === '未分类' ? '🗃 ' : '📁 ') + curFolder;
+        list.appendChild(lab);
+        var grid = document.createElement('div');
+        grid.className = 'zb-we-grid';
+        items.filter(function (it) { return (it.folder || '未分类') === curFolder; })
+          .forEach(function (it) { grid.appendChild(buildCard(it)); });
+        list.appendChild(grid);
+        groupEls.push(grid);
+        applyFilter();
+        return;
+      }
+      groups = [
+        { label: '场景', list: items.filter(function (it) { return it.type === 'scene'; }) },
+        { label: '视频', list: items.filter(function (it) { return it.type === 'video'; }) },
+        { label: '网页 · 暂不支持导入', list: items.filter(function (it) { return it.type === 'web'; }) },
+      ];
       groups.forEach(function (g) {
         if (!g.list.length) return;
         var wrap = document.createElement('div');
@@ -986,7 +1061,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     }
     function applyFilter() {
       var q = search.value.trim().toLowerCase();
-      var cards = list.querySelectorAll('.zb-we-card');
+      var cards = list.querySelectorAll('.zb-we-card, .zb-we-fcard');
       for (var i = 0; i < cards.length; i++) {
         cards[i].hidden = Boolean(q) && cards[i].getAttribute('data-title').indexOf(q) < 0;
       }
