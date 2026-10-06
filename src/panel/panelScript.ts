@@ -826,10 +826,14 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     var pops = document.querySelectorAll('body > .zb-we-pop');
     for (var i = 0; i < pops.length; i++) pops[i].remove();
     wePop = null;
-    document.removeEventListener('scroll', weScrollClose, true);
+    document.removeEventListener('wheel', weScrollClose, true);
     document.removeEventListener('keydown', weEscClose, true);
   }
-  // Scrolling OUTSIDE the popup dismisses it; scrolling its own list must not.
+  // Dismiss on USER scrolling outside the popup (wheel only — a scroll EVENT
+  // also fires from programmatic scrolls, and ZCode's chat column
+  // auto-follows streaming output, which closed the popup the instant any
+  // in-popup click coincided with a chat autoscroll). Scrolling the popup's
+  // own list must not close it.
   var weScrollClose = function (e) {
     if (wePop && wePop.contains(e.target)) return;
     closeWePop();
@@ -1108,7 +1112,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     var anchor = $('zb-we-lib').getBoundingClientRect();
     wePop.style.left = Math.max(8, Math.min(window.innerWidth - 568, anchor.left - 570)) + 'px';
     wePop.style.top = Math.max(8, Math.min(window.innerHeight - wePop.offsetHeight - 8, anchor.top)) + 'px';
-    document.addEventListener('scroll', weScrollClose, true);
+    document.addEventListener('wheel', weScrollClose, { capture: true, passive: true });
     document.addEventListener('keydown', weEscClose, true);
 
     search.addEventListener('input', applyFilter);
@@ -1680,14 +1684,16 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       pop.remove(); pop = null;
       hideHoverPreview();
       document.removeEventListener('mousedown', onDoc, true);
-      window.removeEventListener('scroll', onScrollClose, true);
+      document.removeEventListener('wheel', onScrollClose, true);
     }
     function onDoc(e) {
       if (pop && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop();
     }
-    // A fixed popup does not follow scrolling — a BACKGROUND scroll closes it.
-    // Scrolling inside the popup itself (wheel over it, dragging its own
-    // scrollbar) is ordinary browsing and must leave it open.
+    // A fixed popup does not follow scrolling — a USER wheel scroll in the
+    // background closes it. wheel (not scroll): ZCode's chat column scrolls
+    // programmatically while streaming, and a scroll EVENT would close the
+    // popup without any user intent. Scrolling inside the popup itself is
+    // ordinary browsing and must leave it open.
     function onScrollClose(e) {
       if (pop && e && e.target && pop.contains(e.target)) return;
       closePop();
@@ -1756,7 +1762,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         }
       }
       document.addEventListener('mousedown', onDoc, true);
-      window.addEventListener('scroll', onScrollClose, true);
+      document.addEventListener('wheel', onScrollClose, { capture: true, passive: true });
     });
     wrap.appendChild(btn);
     return wrap;
