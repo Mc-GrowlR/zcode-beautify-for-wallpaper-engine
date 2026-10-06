@@ -32,6 +32,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   if (stale) stale.remove();
   var staleStyle = document.getElementById('zcode-beautify-panel-style');
   if (staleStyle) staleStyle.remove();
+  // A popup the previous panel version left open survives its panel root;
+  // it belongs to a dead closure now — sweep it so it cannot shadow the
+  // next openWePop.
+  var stalePops = document.querySelectorAll('body > .zb-we-pop');
+  for (var spi = 0; spi < stalePops.length; spi++) stalePops[spi].remove();
 
   var css = [
     '#zcode-beautify-panel-root, #zcode-beautify-panel-root * { box-sizing: border-box; font-family: system-ui, sans-serif; }',
@@ -155,26 +160,41 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-wp-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
     // WE library browser popup: same fixed-on-body scheme as the wallpaper
     // picker (panel is narrow, so it opens as its own window to the LEFT).
+    // Grid of cards: bigger previews, click-to-multi-select, bottom bar.
     '.zb-we-pop { position: fixed; z-index: 2147483647; color: #e8e8ea;',
-      ' background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 8px; width: 340px; }',
-    '.zb-we-head { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 0 2px 6px; }',
-    '.zb-we-head .zb-we-count { opacity: .55; font-size: 10px; flex: none; }',
+      ' background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 10px; padding: 10px; width: 560px; }',
+    '.zb-we-head { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 0 2px 8px; }',
+    '.zb-we-head .zb-we-total { opacity: .55; font-size: 11px; flex: none; }',
     '.zb-we-search { flex: 1; min-width: 0; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);',
-      ' border-radius: 4px; color: inherit; font-size: 11px; padding: 3px 6px; outline: none; }',
-    '.zb-we-act { cursor: pointer; background: none; border: none; color: inherit; opacity: .6; font-size: 12px; padding: 0 3px; flex: none; }',
+      ' border-radius: 5px; color: inherit; font-size: 12px; padding: 4px 8px; outline: none; }',
+    '.zb-we-act { cursor: pointer; background: none; border: none; color: inherit; opacity: .6; font-size: 13px; padding: 0 4px; flex: none; }',
     '.zb-we-act:hover { opacity: 1; }',
-    '.zb-we-list { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }',
-    '.zb-we-group { padding: 4px 6px 2px; font-size: 10px; opacity: .55; }',
-    '.zb-we-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; font-size: 11px; }',
-    '.zb-we-item:hover { background: rgba(255,255,255,.12); }',
-    '.zb-we-item img { width: 46px; height: 26px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
-    '.zb-we-thumb-off { width: 46px; height: 26px; border-radius: 3px; flex: none; background: rgba(255,255,255,.08);',
-      ' display: flex; align-items: center; justify-content: center; font-size: 10px; opacity: .5; }',
-    '.zb-we-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
-    '.zb-we-item .zb-btn { flex: none; font-size: 10px; padding: 2px 8px; }',
-    '.zb-we-item[data-off="1"] { opacity: .45; }',
-    '.zb-we-item[hidden] { display: none; }',
-    '.zb-we-empty { padding: 14px 10px; font-size: 11px; opacity: .7; line-height: 1.6; text-align: center; }',
+    '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
+    '.zb-we-group { padding: 6px 4px 4px; font-size: 11px; opacity: .6; }',
+    '.zb-we-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }',
+    '.zb-we-card { position: relative; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; overflow: hidden;',
+      ' cursor: pointer; background: rgba(255,255,255,.04); }',
+    '.zb-we-card:hover { border-color: rgba(122,162,247,.7); background: rgba(255,255,255,.08); }',
+    '.zb-we-card[data-sel="1"] { border-color: #7aa2f7; background: rgba(122,162,247,.16); }',
+    '.zb-we-card[data-off="1"] { opacity: .45; cursor: default; }',
+    '.zb-we-card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }',
+    '.zb-we-ph { width: 100%; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center;',
+      ' font-size: 12px; opacity: .5; background: rgba(255,255,255,.06); }',
+    '.zb-we-name { font-size: 12px; line-height: 1.35; padding: 5px 6px 6px; display: -webkit-box;',
+      ' -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
+    '.zb-we-tick { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%;',
+      ' background: #7aa2f7; color: #0d0d14; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center; display: none; }',
+    '.zb-we-card[data-sel="1"] .zb-we-tick { display: block; }',
+    '.zb-we-done { position: absolute; top: 6px; left: 6px; font-size: 10px; padding: 1px 6px; border-radius: 4px;',
+      ' background: rgba(74,222,128,.9); color: #0d0d14; }',
+    '.zb-we-tag { position: absolute; bottom: 6px; right: 6px; font-size: 10px; padding: 1px 5px; border-radius: 4px;',
+      ' background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.25); }',
+    '.zb-we-foot { display: flex; align-items: center; gap: 8px; padding-top: 8px; font-size: 12px; }',
+    '.zb-we-selinfo { flex: 1; opacity: .75; }',
+    '.zb-we-foot .zb-btn { font-size: 12px; padding: 4px 12px; }',
+    '.zb-we-foot .zb-btn[disabled] { opacity: .45; cursor: default; }',
+    '.zb-we-card[hidden] { display: none; }',
+    '.zb-we-empty { padding: 18px 10px; font-size: 12px; opacity: .7; line-height: 1.7; text-align: center; }',
     '.zb-item { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; }',
     '.zb-item:hover { background: rgba(255,255,255,.1); }',
     '.zb-item[data-current="1"] { background: rgba(122,162,247,.25); }',
@@ -773,8 +793,13 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   // previews; picking one feeds its directory into the normal import queue.
   var wePop = null;
   function closeWePop() {
-    if (!wePop) return;
-    wePop.remove();
+    // Sweep EVERY .zb-we-pop on <body>: after a serve restart the panel
+    // script is re-evaluated and this closure's wePop is null again, while
+    // the previous panel's popup element still sits in the DOM — clearing
+    // only our own reference would leave that stale popup shadowing
+    // querySelector('body > .zb-we-pop') and breaking the next open.
+    var pops = document.querySelectorAll('body > .zb-we-pop');
+    for (var i = 0; i < pops.length; i++) pops[i].remove();
     wePop = null;
     document.removeEventListener('scroll', weScrollClose, true);
     document.removeEventListener('keydown', weEscClose, true);
@@ -789,6 +814,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   };
   function openWePop(items) {
     closeWePop();
+    var selected = {};
     wePop = document.createElement('div');
     wePop.className = 'zb-we-pop';
 
@@ -797,8 +823,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     var titleEl = document.createElement('span');
     titleEl.textContent = 'Wallpaper Engine 壁纸库';
     var countEl = document.createElement('span');
-    countEl.className = 'zb-we-count';
-    countEl.textContent = items.length + ' 个';
+    countEl.className = 'zb-we-total';
+    countEl.textContent = items.length + ' 个 · 点击卡片多选';
     var search = document.createElement('input');
     search.className = 'zb-we-search';
     search.type = 'text';
@@ -815,6 +841,13 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     var list = document.createElement('div');
     list.className = 'zb-we-list';
     var groupEls = [];
+    var selInfo = document.createElement('span');
+    var impBtn = document.createElement('button');
+    function refreshSel() {
+      var n = Object.keys(selected).length;
+      selInfo.textContent = n > 0 ? ('已选 ' + n + ' 项') : '未选择';
+      impBtn.disabled = n === 0;
+    }
     [
       { type: 'scene', label: '场景' },
       { type: 'video', label: '视频' },
@@ -827,11 +860,25 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       lab.className = 'zb-we-group';
       lab.textContent = g.label + ' · ' + gItems.length;
       wrap.appendChild(lab);
+      var grid = document.createElement('div');
+      grid.className = 'zb-we-grid';
       gItems.forEach(function (it) {
-        var row = document.createElement('div');
-        row.className = 'zb-we-item';
-        row.setAttribute('data-title', it.title.toLowerCase());
-        if (!it.importable) row.setAttribute('data-off', '1');
+        var card = document.createElement('div');
+        card.className = 'zb-we-card';
+        card.setAttribute('data-title', it.title.toLowerCase());
+        card.setAttribute('data-dir', it.dir);
+        if (!it.importable) card.setAttribute('data-off', '1');
+        card.title = it.title + '\\n' + it.dir + (it.imported ? '\\n(已导入过,再次导入秒完成)' : '');
+        if (it.imported) {
+          var done = document.createElement('span');
+          done.className = 'zb-we-done';
+          done.textContent = '已导入';
+          card.appendChild(done);
+        }
+        var tick = document.createElement('span');
+        tick.className = 'zb-we-tick';
+        tick.textContent = '✓';
+        card.appendChild(tick);
         if (it.previewUrl) {
           var img = document.createElement('img');
           img.loading = 'lazy';
@@ -839,31 +886,32 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           // the img loads against the ZCode app origin and 404s.
           img.src = mt(API + it.previewUrl);
           img.alt = '';
-          row.appendChild(img);
+          card.appendChild(img);
         } else {
-          var ph = document.createElement('span');
-          ph.className = 'zb-we-thumb-off';
-          ph.textContent = 'WE';
-          row.appendChild(ph);
+          var ph = document.createElement('div');
+          ph.className = 'zb-we-ph';
+          ph.textContent = '无预览';
+          card.appendChild(ph);
         }
-        var t = document.createElement('span');
-        t.className = 'zb-we-title';
+        if (!it.importable) {
+          var tag = document.createElement('span');
+          tag.className = 'zb-we-tag';
+          tag.textContent = '网页';
+          card.appendChild(tag);
+        }
+        var t = document.createElement('div');
+        t.className = 'zb-we-name';
         t.textContent = it.title;
-        t.title = it.title + '\\n' + it.dir;
-        row.appendChild(t);
-        if (it.importable) {
-          var imp = document.createElement('button');
-          imp.className = 'zb-btn';
-          imp.textContent = '导入';
-          imp.title = '渲染并导入为动态壁纸(规格/保留声音跟随上方导入设置)';
-          imp.addEventListener('click', function () {
-            closeWePop();
-            startImportQueue([it.dir]);
-          });
-          row.appendChild(imp);
-        }
-        wrap.appendChild(row);
+        card.appendChild(t);
+        card.addEventListener('click', function () {
+          if (!it.importable) return;
+          if (selected[it.dir]) { delete selected[it.dir]; card.removeAttribute('data-sel'); }
+          else { selected[it.dir] = 1; card.setAttribute('data-sel', '1'); }
+          refreshSel();
+        });
+        grid.appendChild(card);
       });
+      wrap.appendChild(grid);
       groupEls.push(wrap);
       list.appendChild(wrap);
     });
@@ -874,24 +922,52 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       list.appendChild(empty);
     }
     wePop.appendChild(list);
+
+    // Bottom action bar: multi-select summary + one-shot queued import.
+    var foot = document.createElement('div');
+    foot.className = 'zb-we-foot';
+    selInfo.className = 'zb-we-selinfo';
+    impBtn.className = 'zb-btn';
+    impBtn.textContent = '导入所选';
+    impBtn.title = '将选中的壁纸逐个排队导入(规格/保留声音跟随上方导入设置)';
+    impBtn.disabled = true;
+    impBtn.addEventListener('click', function () {
+      var dirs = Object.keys(selected);
+      if (!dirs.length) return;
+      closeWePop();
+      startImportQueue(dirs);
+    });
+    var clearBtn = document.createElement('button');
+    clearBtn.className = 'zb-btn';
+    clearBtn.textContent = '清空选择';
+    clearBtn.title = '取消全部选择';
+    clearBtn.addEventListener('click', function () {
+      selected = {};
+      var cards = list.querySelectorAll('.zb-we-card[data-sel]');
+      for (var i = 0; i < cards.length; i++) cards[i].removeAttribute('data-sel');
+      refreshSel();
+    });
+    refreshSel();
+    foot.appendChild(selInfo); foot.appendChild(clearBtn); foot.appendChild(impBtn);
+    wePop.appendChild(foot);
     document.body.appendChild(wePop);
 
     // Opens to the LEFT of the panel (the panel hugs the right edge).
     var anchor = $('zb-we-lib').getBoundingClientRect();
-    wePop.style.left = Math.max(8, Math.min(window.innerWidth - 348, anchor.left - 350)) + 'px';
+    wePop.style.left = Math.max(8, Math.min(window.innerWidth - 568, anchor.left - 570)) + 'px';
     wePop.style.top = Math.max(8, Math.min(window.innerHeight - wePop.offsetHeight - 8, anchor.top)) + 'px';
     document.addEventListener('scroll', weScrollClose, true);
     document.addEventListener('keydown', weEscClose, true);
 
     search.addEventListener('input', function () {
       var q = this.value.trim().toLowerCase();
-      var rows = list.querySelectorAll('.zb-we-item');
-      for (var i = 0; i < rows.length; i++) {
-        rows[i].hidden = Boolean(q) && rows[i].getAttribute('data-title').indexOf(q) < 0;
+      var cards = list.querySelectorAll('.zb-we-card');
+      for (var i = 0; i < cards.length; i++) {
+        cards[i].hidden = Boolean(q) && cards[i].getAttribute('data-title').indexOf(q) < 0;
       }
       groupEls.forEach(function (g) {
         var visible = 0;
-        var gr = g.querySelectorAll('.zb-we-item');
+        var gr = g.querySelectorAll('.zb-we-card');
         for (var j = 0; j < gr.length; j++) if (!gr[j].hidden) visible++;
         g.hidden = visible === 0;
       });

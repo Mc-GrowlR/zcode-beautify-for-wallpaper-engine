@@ -29,7 +29,7 @@ import { buildPanelScript } from "../panel/panelScript.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
-import { listWeWallpapers, resolveWePreview } from "./weLibrary.js";
+import { listWeWallpapers, resolveWePreview, weDirForPath, weTitleForPath } from "./weLibrary.js";
 import { getInstallGuide, checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
 import { scenesCacheRoot } from "./cacheManager.js";
@@ -142,6 +142,49 @@ function backupFile(): string {
 
 function hasBackup(): boolean {
   return fs.existsSync(backupFile());
+}
+
+// --- WE import marks (已导入) --------------------------------------------------
+// dir(lower) -> { hash }: which local WE wallpapers already live in the scene
+// cache. Written at import completion, seeded by name matching at listing.
+function weImportsFile(): string {
+  return path.join(dataDir(), "we-imports.json");
+}
+
+function loadWeImports(): Record<string, { hash: string }> {
+  try {
+    return JSON.parse(fs.readFileSync(weImportsFile(), "utf8")) as Record<string, { hash: string }>;
+  } catch {
+    return {};
+  }
+}
+
+function saveWeImports(map: Record<string, { hash: string }>): void {
+  try {
+    fs.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
+  } catch {
+    /* advisory only */
+  }
+}
+
+/** Cached scene display names -> hashes; skips hash8 fallback names. */
+function cachedSceneNames(): Map<string, string[]> {
+  const names = new Map<string, string[]>();
+  try {
+    for (const d of fs.readdirSync(scenesCacheRoot())) {
+      try {
+        const name = (JSON.parse(fs.readFileSync(path.join(scenesCacheRoot(), d, "name.json"), "utf8")) as { name?: string }).name;
+        if (name && !/^[0-9a-f]{8}$/.test(name)) {
+          names.set(name, [...(names.get(name) ?? []), d]);
+        }
+      } catch {
+        /* unnamed entry */
+      }
+    }
+  } catch {
+    /* no scenes dir yet */
+  }
+  return names;
 }
 
 function isDayPeriod(dn: NonNullable<BeautifyConfig["dayNight"]>): boolean {
@@ -777,12 +820,45 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             };
             saveConfig(persisted(next));
             let label = result.hash.slice(0, 8);
+            let named = false;
             try {
               label = (JSON.parse(fs.readFileSync(path.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")) as { name?: string }).name || label;
+              named = true; // existing sidecar wins (user rename / earlier import)
             } catch {
               /* unnamed */
             }
+            if (!named) {
+              // A fresh import deserves a real name: the WE project title
+              // when it came from the local WE library, else the source file
+              // name. Persisted as name.json so the library list, history and
+              // the WE browser's 已导入 marks agree — without it the panel
+              // renders "场景 <hash8>".
+              const fallback =
+                weTitleForPath(scenePath) ??
+                (path.extname(scenePath) ? path.basename(scenePath).replace(/\.[^.]+$/, "") : undefined);
+              if (fallback) {
+                label = fallback;
+                try {
+                  fs.writeFileSync(path.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
+                } catch {
+                  /* best effort */
+                }
+              }
+            }
             recordHistory({ label, kind: "video", hash: result.hash, thumbUrl: `http://127.0.0.1:${apiPort}/media/poster/${result.hash}.jpg` });
+            // Remember which local WE wallpaper this loop came from, so the
+            // library browser can badge it as 已导入 (works for dir and
+            // file-inside-dir inputs alike).
+            try {
+              const weDir = weDirForPath(scenePath);
+              if (weDir) {
+                const weMap = loadWeImports();
+                weMap[weDir.toLowerCase()] = { hash: result.hash };
+                saveWeImports(weMap);
+              }
+            } catch {
+              /* advisory only */
+            }
             await pushConfigToSessions(next).catch(() => 0);
           })
           .catch((err: Error) => {
@@ -1294,10 +1370,40 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       }
 
       // Local Wallpaper Engine library browser (创意工坊 + myprojects): the
-      // panel lists these and imports a picked one through the normal
+      // panel lists these and imports picked ones through the normal
       // /api/import-scene pipeline (wallpaper dirs are valid scene inputs).
       if (req.method === "GET" && url.pathname === "/api/we-library") {
         const items = listWeWallpapers();
+        // "已导入" marks: dir(lower) -> { hash }. Recorded at import
+        // completion; additionally seeded here by matching cached scene
+        // names (user-renamed, e.g. 斯卡哈) against WE titles. Exact match
+        // on the DECORATION-STRIPPED title (brackets/parens removed) wins;
+        // otherwise a substring match counts only when that scene name
+        // appears in exactly ONE workshop title — ambiguous names stay
+        // unmarked instead of guessing wrong (伊什塔尔 alone would
+        // otherwise badge seven different wallpapers).
+        const map = loadWeImports();
+        const sceneNames = cachedSceneNames();
+        const cleanTitle = (t: string): string =>
+          t.replace(/\[.*?\]/g, " ").replace(/（.*?）/g, " ").replace(/\(.*?\)/g, " ").replace(/\s+/g, " ").trim();
+        let dirty = false;
+        for (const it of items) {
+          const key = it.dir.toLowerCase();
+          if (map[key]) continue;
+          const exact = [...sceneNames.entries()].filter(([n]) => n === cleanTitle(it.title));
+          if (exact.length === 1 && exact[0][1].length === 1) {
+            map[key] = { hash: exact[0][1][0] };
+            dirty = true;
+            continue;
+          }
+          const contains = [...sceneNames.entries()].filter(([n]) => it.title.includes(n));
+          if (contains.length === 1 && contains[0][1].length === 1
+            && items.filter((x) => x.title.includes(contains[0][0])).length === 1) {
+            map[key] = { hash: contains[0][1][0] };
+            dirty = true;
+          }
+        }
+        if (dirty) saveWeImports(map);
         sendJson(res, 200, {
           count: items.length,
           items: items.map((it) => ({
@@ -1306,6 +1412,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             type: it.type,
             dir: it.dir,
             importable: it.importable,
+            imported: Boolean(it.imported || (map[it.dir.toLowerCase()] && fs.existsSync(path.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4")))),
             source: it.source,
             previewUrl: it.previewName
               ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}`

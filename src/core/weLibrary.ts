@@ -23,6 +23,8 @@ export interface WeWallpaper {
   /** scene/video can be imported; web wallpapers are listed but disabled. */
   importable: boolean;
   source: "workshop" | "myprojects";
+  /** True when this wallpaper's loop already sits in the scene cache. */
+  imported?: boolean;
 }
 
 export interface WeLibraryRoot {
@@ -117,6 +119,35 @@ export function listWeWallpapers(): WeWallpaper[] {
   const order: Record<WeWallpaper["type"], number> = { scene: 0, video: 1, web: 2 };
   items.sort((a, b) => order[a.type] - order[b.type] || a.title.localeCompare(b.title, "zh"));
   return items;
+}
+
+/**
+ * The WE wallpaper directory containing `p` — accepts the dir itself, a .pkg
+ * inside it, or any file inside it (workshop/<id>/...). Used to record which
+ * local WE wallpapers have already been imported.
+ */
+export function weDirForPath(p: string): string | undefined {
+  let abs: string;
+  try {
+    abs = path.resolve(p).toLowerCase();
+  } catch {
+    return undefined;
+  }
+  for (const root of findWeRoots()) {
+    const rootLower = root.dir.toLowerCase() + path.sep;
+    if (!abs.startsWith(rootLower)) continue;
+    const id = abs.slice(rootLower.length).split(path.sep)[0];
+    if (id) return path.join(root.dir, id);
+  }
+  return undefined;
+}
+
+/** The WE project title of the wallpaper containing `p`, when there is one. */
+export function weTitleForPath(p: string): string | undefined {
+  const dir = weDirForPath(p);
+  if (!dir) return undefined;
+  const project = readJsonSafe(path.join(dir, "project.json"));
+  return typeof project?.title === "string" && project.title.trim() ? project.title.trim() : undefined;
 }
 
 /** Resolve a preview request against the live roots; undefined = rejected. */
