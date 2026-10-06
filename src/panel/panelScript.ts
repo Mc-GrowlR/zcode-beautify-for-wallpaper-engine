@@ -1071,7 +1071,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       }
       groupEls.forEach(function (g) {
         var visible = 0;
-        var gr = g.querySelectorAll('.zb-we-card');
+        // Count BOTH wallpaper and folder cards: the folder-view root grid
+        // holds only .zb-we-fcard, and matching .zb-we-card alone read as
+        // "empty group" — hiding the whole folder grid, which is exactly the
+        // "popup opens blank" bug.
+        var gr = g.querySelectorAll('.zb-we-card, .zb-we-fcard');
         for (var j = 0; j < gr.length; j++) if (!gr[j].hidden) visible++;
         g.hidden = visible === 0;
       });
