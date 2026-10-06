@@ -61,7 +61,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
     '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);',
       ' border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }',
-    '.zb-card-title { font-size: 11px; opacity: .6; margin-bottom: 7px; }',
+    '.zb-card-title { font-size: 11px; opacity: .6; margin-bottom: 5px; }',
     '.zb-card .zb-row:last-child, .zb-card .zb-actions:last-child { margin-bottom: 0; }',
     // Collapsible cards (壁纸库): clicking the title folds the body. The
     // grid-rows 1fr→0fr trick animates to any content height smoothly.
@@ -81,8 +81,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
     '.zb-tab:hover { background: rgba(255,255,255,.12); }',
     '.zb-tab[data-active="1"] { background: rgba(122,162,247,.3); border-color: rgba(122,162,247,.6); }',
-    '.zb-row { margin-bottom: 10px; }',
-    '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 4px; opacity: .85; }',
+    '.zb-row { margin-bottom: 6px; }',
+    '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 2px; opacity: .85; }',
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
     '.zb-toggles { display: flex; justify-content: center; gap: 16px; }',
     '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
@@ -124,7 +124,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
       ' outline: none; color-scheme: dark; }',
     '.zb-sched-plan .zb-act { font-size: 12px; }',
-    '.zb-sched-mode { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; opacity: .85; font-size: 11px; }',
+    '.zb-sched-mode { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; opacity: .85; font-size: 11px; }',
     '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
       ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
       ' outline: none; color-scheme: dark; }',
@@ -169,6 +169,12 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' border-radius: 5px; color: inherit; font-size: 12px; padding: 4px 8px; outline: none; }',
     '.zb-we-act { cursor: pointer; background: none; border: none; color: inherit; opacity: .6; font-size: 13px; padding: 0 4px; flex: none; }',
     '.zb-we-act:hover { opacity: 1; }',
+    // View-mode segmented control: group by wallpaper type, or by the user's
+    // own WE browser folders.
+    '.zb-we-mode { display: flex; flex: none; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; overflow: hidden; }',
+    '.zb-we-mode button { background: none; border: none; color: inherit; font-size: 11px; padding: 3px 9px; cursor: pointer; opacity: .55; }',
+    '.zb-we-mode button:hover { opacity: .9; }',
+    '.zb-we-mode button[data-on="1"] { background: rgba(122,162,247,.4); opacity: 1; }',
     '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
     '.zb-we-group { padding: 6px 4px 4px; font-size: 11px; opacity: .6; }',
     '.zb-we-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }',
@@ -207,12 +213,12 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     // groups — a hairline-separated mini header each, sliders paired in a
     // two-column grid so the merged card stays compact.
     '.zb-sec { display: flex; align-items: center; justify-content: space-between; gap: 8px;',
-      ' padding: 7px 2px 3px; margin-top: 6px; border-top: 1px solid rgba(255,255,255,.08);',
+      ' padding: 5px 2px 2px; margin-top: 4px; border-top: 1px solid rgba(255,255,255,.08);',
       ' font-size: 10px; opacity: .55; letter-spacing: 2px; }',
     '.zb-collapse-inner > .zb-sec:first-child { border-top: none; margin-top: 0; padding-top: 2px; }',
     '.zb-sec .zb-sec-on { display: flex; align-items: center; gap: 4px; font-size: 10px;',
       ' letter-spacing: normal; opacity: 1; cursor: pointer; white-space: nowrap; }',
-    '.zb-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }',
+    '.zb-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }',
     '.zb-item .zb-act:hover { opacity: 1; }',
     '.zb-item .zb-act[data-armed="1"] { opacity: 1; color: #f87171; }',
     '#zb-offline { display: flex; flex-direction: column; gap: 6px; align-items: center;',
@@ -821,13 +827,24 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   function openWePop(items) {
     closeWePop();
     var selected = {};
+    var hasFolders = items.some(function (it) { return it.folder; });
+    var weMode = localStorage.getItem('zcode-beautify:we-mode') === 'folder' && hasFolders ? 'folder' : 'type';
     wePop = document.createElement('div');
     wePop.className = 'zb-we-pop';
 
     var head = document.createElement('div');
     head.className = 'zb-we-head';
     var titleEl = document.createElement('span');
-    titleEl.textContent = 'Wallpaper Engine 壁纸库';
+    titleEl.textContent = 'WE 壁纸库';
+    var modeWrap = document.createElement('div');
+    modeWrap.className = 'zb-we-mode';
+    var modeType = document.createElement('button');
+    modeType.textContent = '类型';
+    var modeFolder = document.createElement('button');
+    modeFolder.textContent = '文件夹';
+    modeFolder.hidden = !hasFolders;
+    modeWrap.appendChild(modeType);
+    modeWrap.appendChild(modeFolder);
     var countEl = document.createElement('span');
     countEl.className = 'zb-we-total';
     countEl.textContent = items.length + ' 个 · 点击卡片多选';
@@ -841,7 +858,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     closeBtn.textContent = '✕';
     closeBtn.title = '关闭 (Esc)';
     closeBtn.addEventListener('click', closeWePop);
-    head.appendChild(titleEl); head.appendChild(countEl); head.appendChild(search); head.appendChild(closeBtn);
+    head.appendChild(titleEl); head.appendChild(modeWrap); head.appendChild(countEl);
+    head.appendChild(search); head.appendChild(closeBtn);
     wePop.appendChild(head);
 
     var list = document.createElement('div');
@@ -854,79 +872,132 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       selInfo.textContent = n > 0 ? ('已选 ' + n + ' 项') : '未选择';
       impBtn.disabled = n === 0;
     }
-    [
-      { type: 'scene', label: '场景' },
-      { type: 'video', label: '视频' },
-      { type: 'web', label: '网页 · 暂不支持导入' },
-    ].forEach(function (g) {
-      var gItems = items.filter(function (it) { return it.type === g.type; });
-      if (!gItems.length) return;
-      var wrap = document.createElement('div');
-      var lab = document.createElement('div');
-      lab.className = 'zb-we-group';
-      lab.textContent = g.label + ' · ' + gItems.length;
-      wrap.appendChild(lab);
-      var grid = document.createElement('div');
-      grid.className = 'zb-we-grid';
-      gItems.forEach(function (it) {
-        var card = document.createElement('div');
-        card.className = 'zb-we-card';
-        card.setAttribute('data-title', it.title.toLowerCase());
-        card.setAttribute('data-dir', it.dir);
-        if (!it.importable) card.setAttribute('data-off', '1');
-        card.title = it.title + '\\n' + it.dir + (it.imported ? '\\n(已导入过,再次导入秒完成)' : '');
-        if (it.imported) {
-          var done = document.createElement('span');
-          done.className = 'zb-we-done';
-          done.textContent = '已导入';
-          card.appendChild(done);
-        }
-        var tick = document.createElement('span');
-        tick.className = 'zb-we-tick';
-        tick.textContent = '✓';
-        card.appendChild(tick);
-        if (it.previewUrl) {
-          var img = document.createElement('img');
-          img.loading = 'lazy';
-          // previewUrl is serve-relative (/media/...) — resolve against API or
-          // the img loads against the ZCode app origin and 404s.
-          img.src = mt(API + it.previewUrl);
-          img.alt = '';
-          card.appendChild(img);
-        } else {
-          var ph = document.createElement('div');
-          ph.className = 'zb-we-ph';
-          ph.textContent = '无预览';
-          card.appendChild(ph);
-        }
-        if (!it.importable) {
-          var tag = document.createElement('span');
-          tag.className = 'zb-we-tag';
-          tag.textContent = '网页';
-          card.appendChild(tag);
-        }
-        var t = document.createElement('div');
-        t.className = 'zb-we-name';
-        t.textContent = it.title;
-        card.appendChild(t);
-        card.addEventListener('click', function () {
-          if (!it.importable) return;
-          if (selected[it.dir]) { delete selected[it.dir]; card.removeAttribute('data-sel'); }
-          else { selected[it.dir] = 1; card.setAttribute('data-sel', '1'); }
-          refreshSel();
-        });
-        grid.appendChild(card);
-      });
-      wrap.appendChild(grid);
-      groupEls.push(wrap);
-      list.appendChild(wrap);
-    });
-    if (!items.length) {
-      var empty = document.createElement('div');
-      empty.className = 'zb-we-empty';
-      empty.textContent = '未找到 Wallpaper Engine 壁纸。需要 Steam 创意工坊内容(场景/视频壁纸),或 wallpaper_engine\\\\projects\\\\myprojects 下的自建项目。';
-      list.appendChild(empty);
+    function refreshModeBtns() {
+      modeType.setAttribute('data-on', weMode === 'type' ? '1' : '0');
+      modeFolder.setAttribute('data-on', weMode === 'folder' ? '1' : '0');
     }
+    function setWeMode(m) {
+      if (!hasFolders || weMode === m) return;
+      weMode = m;
+      try { localStorage.setItem('zcode-beautify:we-mode', m); } catch (e) {}
+      refreshModeBtns();
+      renderGroups();
+    }
+    modeType.addEventListener('click', function () { setWeMode('type'); });
+    modeFolder.addEventListener('click', function () { setWeMode('folder'); });
+    refreshModeBtns();
+
+    function buildCard(it) {
+      var card = document.createElement('div');
+      card.className = 'zb-we-card';
+      card.setAttribute('data-title', it.title.toLowerCase());
+      card.setAttribute('data-dir', it.dir);
+      if (!it.importable) card.setAttribute('data-off', '1');
+      if (selected[it.dir]) card.setAttribute('data-sel', '1');
+      card.title = it.title + '\\n' + it.dir + (it.folder ? '\\n📁 ' + it.folder : '') + (it.imported ? '\\n(已导入过,再次导入秒完成)' : '');
+      if (it.imported) {
+        var done = document.createElement('span');
+        done.className = 'zb-we-done';
+        done.textContent = '已导入';
+        card.appendChild(done);
+      }
+      var tick = document.createElement('span');
+      tick.className = 'zb-we-tick';
+      tick.textContent = '✓';
+      card.appendChild(tick);
+      if (it.previewUrl) {
+        var img = document.createElement('img');
+        img.loading = 'lazy';
+        // previewUrl is serve-relative (/media/...) — resolve against API or
+        // the img loads against the ZCode app origin and 404s.
+        img.src = mt(API + it.previewUrl);
+        img.alt = '';
+        card.appendChild(img);
+      } else {
+        var ph = document.createElement('div');
+        ph.className = 'zb-we-ph';
+        ph.textContent = '无预览';
+        card.appendChild(ph);
+      }
+      if (!it.importable) {
+        var tag = document.createElement('span');
+        tag.className = 'zb-we-tag';
+        tag.textContent = '网页';
+        card.appendChild(tag);
+      }
+      var t = document.createElement('div');
+      t.className = 'zb-we-name';
+      t.textContent = it.title;
+      card.appendChild(t);
+      card.addEventListener('click', function () {
+        if (!it.importable) return;
+        if (selected[it.dir]) { delete selected[it.dir]; card.removeAttribute('data-sel'); }
+        else { selected[it.dir] = 1; card.setAttribute('data-sel', '1'); }
+        refreshSel();
+      });
+      return card;
+    }
+    function renderGroups() {
+      groupEls = [];
+      list.textContent = '';
+      var groups;
+      if (weMode === 'folder') {
+        // WE's own browser folders (config.json → browser.folders), with
+        // everything unfiled under WE falling into 未分类 at the end.
+        var titles = [];
+        items.forEach(function (it) {
+          var f = it.folder || '未分类';
+          if (titles.indexOf(f) < 0) titles.push(f);
+        });
+        titles.sort(function (a, b) {
+          return (a === '未分类' ? 1 : 0) - (b === '未分类' ? 1 : 0) || a.localeCompare(b, 'zh');
+        });
+        groups = titles.map(function (t) {
+          return { label: t, list: items.filter(function (it) { return (it.folder || '未分类') === t; }) };
+        });
+      } else {
+        groups = [
+          { label: '场景', list: items.filter(function (it) { return it.type === 'scene'; }) },
+          { label: '视频', list: items.filter(function (it) { return it.type === 'video'; }) },
+          { label: '网页 · 暂不支持导入', list: items.filter(function (it) { return it.type === 'web'; }) },
+        ];
+      }
+      groups.forEach(function (g) {
+        if (!g.list.length) return;
+        var wrap = document.createElement('div');
+        var lab = document.createElement('div');
+        lab.className = 'zb-we-group';
+        lab.textContent = g.label + ' · ' + g.list.length;
+        wrap.appendChild(lab);
+        var grid = document.createElement('div');
+        grid.className = 'zb-we-grid';
+        g.list.forEach(function (it) { grid.appendChild(buildCard(it)); });
+        wrap.appendChild(grid);
+        groupEls.push(wrap);
+        list.appendChild(wrap);
+      });
+      if (!items.length) {
+        var empty = document.createElement('div');
+        empty.className = 'zb-we-empty';
+        empty.textContent = '未找到 Wallpaper Engine 壁纸。需要 Steam 创意工坊内容(场景/视频壁纸),或 wallpaper_engine\\\\projects\\\\myprojects 下的自建项目。';
+        list.appendChild(empty);
+      }
+      applyFilter();
+    }
+    function applyFilter() {
+      var q = search.value.trim().toLowerCase();
+      var cards = list.querySelectorAll('.zb-we-card');
+      for (var i = 0; i < cards.length; i++) {
+        cards[i].hidden = Boolean(q) && cards[i].getAttribute('data-title').indexOf(q) < 0;
+      }
+      groupEls.forEach(function (g) {
+        var visible = 0;
+        var gr = g.querySelectorAll('.zb-we-card');
+        for (var j = 0; j < gr.length; j++) if (!gr[j].hidden) visible++;
+        g.hidden = visible === 0;
+      });
+    }
+    renderGroups();
     wePop.appendChild(list);
 
     // Bottom action bar: multi-select summary + one-shot queued import.
@@ -965,19 +1036,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     document.addEventListener('scroll', weScrollClose, true);
     document.addEventListener('keydown', weEscClose, true);
 
-    search.addEventListener('input', function () {
-      var q = this.value.trim().toLowerCase();
-      var cards = list.querySelectorAll('.zb-we-card');
-      for (var i = 0; i < cards.length; i++) {
-        cards[i].hidden = Boolean(q) && cards[i].getAttribute('data-title').indexOf(q) < 0;
-      }
-      groupEls.forEach(function (g) {
-        var visible = 0;
-        var gr = g.querySelectorAll('.zb-we-card');
-        for (var j = 0; j < gr.length; j++) if (!gr[j].hidden) visible++;
-        g.hidden = visible === 0;
-      });
-    });
+    search.addEventListener('input', applyFilter);
     setTimeout(function () { search.focus(); }, 30);
   }
   $('zb-we-lib').addEventListener('click', function () {

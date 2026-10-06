@@ -25,6 +25,14 @@ export interface WeWallpaper {
   source: "workshop" | "myprojects";
   /** True when this wallpaper's loop already sits in the scene cache. */
   imported?: boolean;
+  /** WE browser folder the user filed this wallpaper under (瀏覽器分組). */
+  folder?: string;
+}
+
+export interface WeFolder {
+  title: string;
+  /** Raw keys from WE config: workshop ids and/or local wallpaper paths. */
+  items: string[];
 }
 
 export interface WeLibraryRoot {
@@ -71,12 +79,77 @@ export function findWeRoots(): WeLibraryRoot[] {
 }
 
 /**
+ * The WE install dir (…/steamapps/common/wallpaper_engine) of any library
+ * that has one — the browser folder tree lives in its config.json. Derived
+ * from workshop roots' sibling path, NOT from myprojects (that dir can be
+ * empty and is filtered out of findWeRoots).
+ */
+function weInstallDirs(): string[] {
+  const dirs = new Set<string>();
+  for (const root of findWeRoots()) {
+    if (root.kind !== "workshop") continue;
+    // <lib>/steamapps/workshop/content/431960 → <lib>/steamapps/common/wallpaper_engine
+    dirs.add(path.resolve(root.dir, "..", "..", "..", "common", "wallpaper_engine"));
+  }
+  // Also libraries that own WE but no workshop content yet.
+  for (const lib of steamLibraryCandidates()) {
+    dirs.add(path.join(lib, "steamapps", "common", "wallpaper_engine"));
+  }
+  return [...dirs].filter((d) => fs.existsSync(path.join(d, "config.json")));
+}
+
+/**
+ * User's browser folders from WE's own config.json
+ * (<install>/config.json → <user>.general.browser.folders): flat array of
+ * { title, items } with subfolders flattened as "parent / child". Missing or
+ * undecodable config yields an empty tree — folder grouping simply turns off.
+ */
+export function listWeFolders(): WeFolder[] {
+  const out: WeFolder[] = [];
+  for (const install of weInstallDirs()) {
+    const config = readJsonSafe(path.join(install, "config.json"));
+    // Top-level keys are per-user (Steam id) plus "?installdirectory" helpers.
+    const userNodes = Object.values(config ?? {}).filter(
+      (v): v is Record<string, unknown> =>
+        Boolean(v) && typeof v === "object" && !Array.isArray(v) && "general" in (v as object)
+    );
+    for (const node of userNodes) {
+      const general = (node as { general?: { browser?: { folders?: unknown } } }).general;
+      const folders = general?.browser?.folders;
+      if (!Array.isArray(folders)) continue;
+      const walk = (list: unknown[], prefix: string): void => {
+        for (const f of list) {
+          if (!f || typeof f !== "object") continue;
+          const fo = f as { title?: unknown; items?: unknown; subfolders?: unknown };
+          const title = typeof fo.title === "string" && fo.title.trim() ? fo.title.trim() : "";
+          if (!title) continue;
+          const full = prefix ? `${prefix} / ${title}` : title;
+          const items = fo.items && typeof fo.items === "object" ? Object.keys(fo.items) : [];
+          out.push({ title: full, items });
+          if (Array.isArray(fo.subfolders)) walk(fo.subfolders, full);
+        }
+      };
+      walk(folders, "");
+    }
+  }
+  return out;
+}
+
+/**
  * One wallpaper per directory. Junk folders (partial workshop downloads,
  * shader caches without project.json of their own) drop out via the type
  * probe; titles fall back to the folder name. CJK-aware sort, importable
- * types first.
+ * types first. Folder assignment comes from WE's own browser folder tree.
  */
 export function listWeWallpapers(): WeWallpaper[] {
+  const folders = listWeFolders();
+  /** dir(lower) / workshop id / local-path key -> folder title */
+  const folderByKey = new Map<string, string>();
+  for (const f of folders) {
+    for (const key of f.items) {
+      if (!folderByKey.has(key)) folderByKey.set(key, f.title);
+    }
+  }
   const items: WeWallpaper[] = [];
   for (const root of findWeRoots()) {
     let entries: string[];
@@ -105,6 +178,18 @@ export function listWeWallpapers(): WeWallpaper[] {
           ? declared
           : PREVIEW_FALLBACKS.find((f) => fs.existsSync(path.join(dir, f)));
       const usable = previewName ? fs.existsSync(path.join(dir, previewName)) : false;
+      // Folder lookup: workshop ids file directly; local wallpapers key by
+      // their absolute path in WE's config (prefix match on the dir).
+      let folder = folderByKey.get(name);
+      if (!folder) {
+        const dirLower = dir.toLowerCase();
+        for (const [key, title] of folderByKey) {
+          if (key.includes("\\") && key.toLowerCase().startsWith(dirLower)) {
+            folder = title;
+            break;
+          }
+        }
+      }
       items.push({
         id: name,
         title,
@@ -113,6 +198,7 @@ export function listWeWallpapers(): WeWallpaper[] {
         previewName: usable ? previewName : undefined,
         importable: type !== "web",
         source: root.kind,
+        folder,
       });
     }
   }

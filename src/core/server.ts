@@ -1414,6 +1414,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             importable: it.importable,
             imported: Boolean(it.imported || (map[it.dir.toLowerCase()] && fs.existsSync(path.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4")))),
             source: it.source,
+            folder: it.folder ?? null,
             previewUrl: it.previewName
               ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}`
               : null,
