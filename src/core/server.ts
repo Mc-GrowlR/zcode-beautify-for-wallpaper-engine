@@ -29,6 +29,7 @@ import { buildPanelScript } from "../panel/panelScript.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
+import { listWeWallpapers, resolveWePreview } from "./weLibrary.js";
 import { getInstallGuide, checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
 import { scenesCacheRoot } from "./cacheManager.js";
@@ -1289,6 +1290,42 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           }
         }
         sendJson(res, 200, { colors, pinned: config.themeColor ?? null });
+        return;
+      }
+
+      // Local Wallpaper Engine library browser (创意工坊 + myprojects): the
+      // panel lists these and imports a picked one through the normal
+      // /api/import-scene pipeline (wallpaper dirs are valid scene inputs).
+      if (req.method === "GET" && url.pathname === "/api/we-library") {
+        const items = listWeWallpapers();
+        sendJson(res, 200, {
+          count: items.length,
+          items: items.map((it) => ({
+            id: it.id,
+            title: it.title,
+            type: it.type,
+            dir: it.dir,
+            importable: it.importable,
+            source: it.source,
+            previewUrl: it.previewName
+              ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}`
+              : null,
+          })),
+        });
+        return;
+      }
+
+      // WE preview thumbnails: s/id/f are resolved against the live
+      // workshop/myprojects roots — no arbitrary path parameter anywhere.
+      if (req.method === "GET" && url.pathname === "/media/we-preview") {
+        const file = resolveWePreview(
+          String(url.searchParams.get("s") ?? ""),
+          String(url.searchParams.get("id") ?? ""),
+          String(url.searchParams.get("f") ?? "")
+        );
+        if (!file || !sendMediaFile(req, res, file)) {
+          sendJson(res, 404, { error: "we preview not found" });
+        }
         return;
       }
 

@@ -153,6 +153,28 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-wp-item[data-cur="1"] { background: rgba(122,162,247,.28); }',
     '.zb-wp-item img { width: 46px; height: 26px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
     '.zb-wp-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    // WE library browser popup: same fixed-on-body scheme as the wallpaper
+    // picker (panel is narrow, so it opens as its own window to the LEFT).
+    '.zb-we-pop { position: fixed; z-index: 2147483647; color: #e8e8ea;',
+      ' background: rgba(16,16,22,.98); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; padding: 8px; width: 340px; }',
+    '.zb-we-head { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 0 2px 6px; }',
+    '.zb-we-head .zb-we-count { opacity: .55; font-size: 10px; flex: none; }',
+    '.zb-we-search { flex: 1; min-width: 0; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);',
+      ' border-radius: 4px; color: inherit; font-size: 11px; padding: 3px 6px; outline: none; }',
+    '.zb-we-act { cursor: pointer; background: none; border: none; color: inherit; opacity: .6; font-size: 12px; padding: 0 3px; flex: none; }',
+    '.zb-we-act:hover { opacity: 1; }',
+    '.zb-we-list { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }',
+    '.zb-we-group { padding: 4px 6px 2px; font-size: 10px; opacity: .55; }',
+    '.zb-we-item { display: flex; align-items: center; gap: 6px; padding: 3px 5px; border-radius: 6px; font-size: 11px; }',
+    '.zb-we-item:hover { background: rgba(255,255,255,.12); }',
+    '.zb-we-item img { width: 46px; height: 26px; object-fit: cover; border-radius: 3px; flex: none; background: #000; }',
+    '.zb-we-thumb-off { width: 46px; height: 26px; border-radius: 3px; flex: none; background: rgba(255,255,255,.08);',
+      ' display: flex; align-items: center; justify-content: center; font-size: 10px; opacity: .5; }',
+    '.zb-we-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    '.zb-we-item .zb-btn { flex: none; font-size: 10px; padding: 2px 8px; }',
+    '.zb-we-item[data-off="1"] { opacity: .45; }',
+    '.zb-we-item[hidden] { display: none; }',
+    '.zb-we-empty { padding: 14px 10px; font-size: 11px; opacity: .7; line-height: 1.6; text-align: center; }',
     '.zb-item { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; }',
     '.zb-item:hover { background: rgba(255,255,255,.1); }',
     '.zb-item[data-current="1"] { background: rgba(122,162,247,.25); }',
@@ -254,6 +276,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="打开文件选择器(可多选):选 .pkg(场景)或 .mp4(视频),选完自动排队导入">📁</button>' +
+    '        <button class="zb-btn zb-icon-btn" id="zb-we-lib" title="浏览本机 Wallpaper Engine 壁纸库(创意工坊/自建项目),点击即可导入">🧩</button>' +
     '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
     '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入</button>' +
     '      </div>' +
@@ -743,6 +766,149 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         $('zb-import').click();
       })
       .catch(function () { btn.textContent = '📁'; status('无法连接美化服务 service unreachable'); });
+  });
+
+  // --- Wallpaper Engine library browser (🧩) -----------------------------------
+  // Lists the machine's local WE wallpapers (workshop + myprojects) with
+  // previews; picking one feeds its directory into the normal import queue.
+  var wePop = null;
+  function closeWePop() {
+    if (!wePop) return;
+    wePop.remove();
+    wePop = null;
+    document.removeEventListener('scroll', weScrollClose, true);
+    document.removeEventListener('keydown', weEscClose, true);
+  }
+  // Scrolling OUTSIDE the popup dismisses it; scrolling its own list must not.
+  var weScrollClose = function (e) {
+    if (wePop && wePop.contains(e.target)) return;
+    closeWePop();
+  };
+  var weEscClose = function (e) {
+    if (e.key === 'Escape') closeWePop();
+  };
+  function openWePop(items) {
+    closeWePop();
+    wePop = document.createElement('div');
+    wePop.className = 'zb-we-pop';
+
+    var head = document.createElement('div');
+    head.className = 'zb-we-head';
+    var titleEl = document.createElement('span');
+    titleEl.textContent = 'Wallpaper Engine 壁纸库';
+    var countEl = document.createElement('span');
+    countEl.className = 'zb-we-count';
+    countEl.textContent = items.length + ' 个';
+    var search = document.createElement('input');
+    search.className = 'zb-we-search';
+    search.type = 'text';
+    search.placeholder = '搜索标题…';
+    search.spellcheck = false;
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'zb-we-act';
+    closeBtn.textContent = '✕';
+    closeBtn.title = '关闭 (Esc)';
+    closeBtn.addEventListener('click', closeWePop);
+    head.appendChild(titleEl); head.appendChild(countEl); head.appendChild(search); head.appendChild(closeBtn);
+    wePop.appendChild(head);
+
+    var list = document.createElement('div');
+    list.className = 'zb-we-list';
+    var groupEls = [];
+    [
+      { type: 'scene', label: '场景' },
+      { type: 'video', label: '视频' },
+      { type: 'web', label: '网页 · 暂不支持导入' },
+    ].forEach(function (g) {
+      var gItems = items.filter(function (it) { return it.type === g.type; });
+      if (!gItems.length) return;
+      var wrap = document.createElement('div');
+      var lab = document.createElement('div');
+      lab.className = 'zb-we-group';
+      lab.textContent = g.label + ' · ' + gItems.length;
+      wrap.appendChild(lab);
+      gItems.forEach(function (it) {
+        var row = document.createElement('div');
+        row.className = 'zb-we-item';
+        row.setAttribute('data-title', it.title.toLowerCase());
+        if (!it.importable) row.setAttribute('data-off', '1');
+        if (it.previewUrl) {
+          var img = document.createElement('img');
+          img.loading = 'lazy';
+          // previewUrl is serve-relative (/media/...) — resolve against API or
+          // the img loads against the ZCode app origin and 404s.
+          img.src = mt(API + it.previewUrl);
+          img.alt = '';
+          row.appendChild(img);
+        } else {
+          var ph = document.createElement('span');
+          ph.className = 'zb-we-thumb-off';
+          ph.textContent = 'WE';
+          row.appendChild(ph);
+        }
+        var t = document.createElement('span');
+        t.className = 'zb-we-title';
+        t.textContent = it.title;
+        t.title = it.title + '\\n' + it.dir;
+        row.appendChild(t);
+        if (it.importable) {
+          var imp = document.createElement('button');
+          imp.className = 'zb-btn';
+          imp.textContent = '导入';
+          imp.title = '渲染并导入为动态壁纸(规格/保留声音跟随上方导入设置)';
+          imp.addEventListener('click', function () {
+            closeWePop();
+            startImportQueue([it.dir]);
+          });
+          row.appendChild(imp);
+        }
+        wrap.appendChild(row);
+      });
+      groupEls.push(wrap);
+      list.appendChild(wrap);
+    });
+    if (!items.length) {
+      var empty = document.createElement('div');
+      empty.className = 'zb-we-empty';
+      empty.textContent = '未找到 Wallpaper Engine 壁纸。需要 Steam 创意工坊内容(场景/视频壁纸),或 wallpaper_engine\\\\projects\\\\myprojects 下的自建项目。';
+      list.appendChild(empty);
+    }
+    wePop.appendChild(list);
+    document.body.appendChild(wePop);
+
+    // Opens to the LEFT of the panel (the panel hugs the right edge).
+    var anchor = $('zb-we-lib').getBoundingClientRect();
+    wePop.style.left = Math.max(8, Math.min(window.innerWidth - 348, anchor.left - 350)) + 'px';
+    wePop.style.top = Math.max(8, Math.min(window.innerHeight - wePop.offsetHeight - 8, anchor.top)) + 'px';
+    document.addEventListener('scroll', weScrollClose, true);
+    document.addEventListener('keydown', weEscClose, true);
+
+    search.addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      var rows = list.querySelectorAll('.zb-we-item');
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].hidden = Boolean(q) && rows[i].getAttribute('data-title').indexOf(q) < 0;
+      }
+      groupEls.forEach(function (g) {
+        var visible = 0;
+        var gr = g.querySelectorAll('.zb-we-item');
+        for (var j = 0; j < gr.length; j++) if (!gr[j].hidden) visible++;
+        g.hidden = visible === 0;
+      });
+    });
+    setTimeout(function () { search.focus(); }, 30);
+  }
+  $('zb-we-lib').addEventListener('click', function () {
+    var btn = this;
+    btn.textContent = '…';
+    apiFetch('/api/we-library')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        btn.textContent = '🧩';
+        if (!d || d.error) { status((d && d.error) || '读取 WE 壁纸库失败'); return; }
+        openWePop(d.items || []);
+      })
+      .catch(function () { btn.textContent = '🧩'; status('无法连接美化服务 service unreachable'); });
   });
   /** Resolves once no import job is running (multi-file queue pacing). */
   function importIdle() {

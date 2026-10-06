@@ -16,6 +16,8 @@ const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
 };
 
 /**
@@ -36,7 +38,11 @@ export function sendMediaFile(
   }
   if (!stat.isFile()) return false; // a directory (or vanished mid-stat) must not become a stream
 
-  const type = MIME[filePath.toLowerCase().split(".").pop() ?? ""] ?? "application/octet-stream";
+  // Keys carry the dot; split() yields the bare extension — prepend it or
+  // every lookup misses and all media ships as application/octet-stream
+  // (renderers sniff it back, but the header is plain wrong).
+  const ext = filePath.toLowerCase().split(".").pop() ?? "";
+  const type = MIME[`.${ext}`] ?? "application/octet-stream";
   const headers: Record<string, string | number> = {
     "Content-Type": type,
     "Accept-Ranges": "bytes",
