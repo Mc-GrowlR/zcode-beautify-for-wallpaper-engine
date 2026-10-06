@@ -42,8 +42,13 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' box-shadow: 0 2px 12px rgba(0,0,0,.35); user-select: none; font-size: 15px; line-height: 1; }',
     '#zb-fab:hover { background: rgba(52,52,60,.85); }',
     '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: 264px; padding: 0 0 10px;',
+      // A panel taller than the window used to overflow past the screen edge;
+      // it now caps at the viewport and scrolls inside (slim scrollbar).
+      ' max-height: calc(100vh - 68px); overflow-y: auto; overscroll-behavior: contain;',
       ' background: rgba(24,24,30,.88); border: 1px solid rgba(255,255,255,.12); border-radius: 12px;',
       ' backdrop-filter: blur(16px); box-shadow: 0 8px 32px rgba(0,0,0,.45); user-select: none; }',
+    '#zb-panel::-webkit-scrollbar { width: 5px; }',
+    '#zb-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
     '#zb-panel[hidden] { display: none; }',
     '#zb-head { padding: 9px 12px; font-weight: 600; cursor: move; border-bottom: 1px solid rgba(255,255,255,.1);',
       ' display: flex; justify-content: space-between; align-items: center; }',
