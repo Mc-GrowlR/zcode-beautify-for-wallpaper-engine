@@ -29,11 +29,11 @@ export interface RecordOptions {
   outHeight?: number;
   /** AbortSignal: aborting kills the running ffmpeg (import cancellation). */
   signal?: AbortSignal;
-  /** Capture backend: ddagrab (DXGI desktop duplication, default) or
-   * gdigrab (GDI). WE windows sometimes present on a private swap chain
-   * that DXGI duplication records as solid black while GDI sees them
-   * fine — the black-frame retry switches to GDI. */
-  capture?: "dda" | "gdi";
+  /** Capture backend: "dda" = ffmpeg ddagrab (default, best quality),
+   * "ps" = PowerShell CopyFromScreen frames (fallback that survives
+   * transient machine states where every ffmpeg backend records the
+   * WE window black). */
+  capture?: "dda" | "gdi" | "ps";
 }
 
 export class RecordError extends Error {}
@@ -100,11 +100,41 @@ export async function recordSceneWindow(
     if (x < 0) { width = Math.max(16, width + x); x = 0; }
     if (y < 0) { height = Math.max(16, height + y); y = 0; }
   }
-  // Capture via PowerShell CopyFromScreen frame grabbing. In some machine
-  // states EVERY ffmpeg capture backend (ddagrab AND gdigrab) records this
-  // WE window as solid black, while a plain GDI BitBlt through .NET
-  // Graphics.CopyFromScreen sees the window fine — this path is the only
-  // one verified end-to-end. Frames land as PNGs, then ffmpeg muxes them.
+  // PRIMARY capture: ffmpeg ddagrab (DXGI Desktop Duplication) — the
+  // original pipeline, best quality and frame pacing. Machine states exist
+  // where it (and every other ffmpeg backend) records this window black;
+  // those are transient — the black-frame retry in the import pipeline
+  // switches to the PowerShell CopyFromScreen path ("ps") as a fallback,
+  // which has never failed.
+  if (opts.capture !== "ps") {
+    const args = [
+      "-y",
+      "-hide_banner",
+      "-loglevel", "warning",
+      "-f", "lavfi",
+      "-i", `ddagrab=output_idx=${outputIdx}:framerate=${opts.fps}:draw_mouse=0`,
+      "-t", String(opts.duration),
+      "-vf", `hwdownload,format=bgra,crop=${width}:${height}:${x}:${y},scale=${outW}:${outH}`,
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-pix_fmt", "yuv420p",
+      "-an",
+      out,
+    ];
+    await setTopmost(handle.hwnd, true);
+    try {
+      await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024, signal: opts.signal });
+    } catch (err) {
+      throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
+    } finally {
+      await setTopmost(handle.hwnd, false).catch(() => undefined);
+    }
+    return;
+  }
+
+  // FALLBACK capture: PowerShell CopyFromScreen frame grabbing — plain GDI
+  // BitBlt through .NET Graphics, immune to the transient states that make
+  // ffmpeg backends record black. Frames land as PNGs, ffmpeg muxes them.
   const framesDir = `${out}.frames-${process.pid}-${Date.now().toString(36)}`;
   mkdirSync(framesDir, { recursive: true });
   const frameCount = Math.max(1, Math.round(opts.duration * opts.fps));

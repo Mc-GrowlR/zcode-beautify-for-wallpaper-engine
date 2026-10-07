@@ -247,7 +247,7 @@ export async function importScene(
       rawPath = path.join(path.dirname(loopPath), `raw-${Date.now().toString(36)}-${process.pid}.mp4`);
       fs.mkdirSync(path.dirname(rawPath), { recursive: true });
       try {
-        await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height, signal }, ffmpegPath);
+        await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height, signal, capture: attempt === 0 ? "dda" : "ps" }, ffmpegPath);
       } finally {
         onProgress("closing");
         await closeSceneWindow(handle).catch(() => undefined);
