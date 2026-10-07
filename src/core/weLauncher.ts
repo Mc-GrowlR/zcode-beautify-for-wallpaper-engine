@@ -135,10 +135,20 @@ export async function openSceneWindow(
 
   // A COLD wallpaper64 ignores -control arguments (it comes up for the Steam
   // check and never acts on them), so a spawn with no running core ends in
-  // "window did not appear within 15s". Bare-start the core first and wait
-  // until it reports running, then send the control command.
+  // "window did not appear within 15s". Warm-up start WITH the control
+  // command: the command is ignored but the core comes up in command mode.
+  // A BARE start (no arguments) instead takes over the desktop wallpaper
+  // and then renders every -playInWindow window pitch black — verified by
+  // experiment; keep the argument list in sync with the spawn below.
+  const controlArgs = [
+    "-control", "openWallpaper",
+    "-file", pkgPath,
+    "-playInWindow", opts.title,
+    "-width", String(opts.width),
+    "-height", String(opts.height),
+  ];
   if (!status.detail?.includes("running")) {
-    const warm = spawn(exe, [], { stdio: "ignore", detached: true });
+    const warm = spawn(exe, controlArgs, { stdio: "ignore", detached: true });
     warm.unref();
     for (let i = 0; i < 15; i++) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -146,13 +156,7 @@ export async function openSceneWindow(
     }
   }
 
-  const proc = spawn(exe, [
-    "-control", "openWallpaper",
-    "-file", pkgPath,
-    "-playInWindow", opts.title,
-    "-width", String(opts.width),
-    "-height", String(opts.height),
-  ], { stdio: "ignore", detached: false, windowsHide: true });
+  const proc = spawn(exe, controlArgs, { stdio: "ignore", detached: false, windowsHide: true });
   proc.unref();
 
   const hwnd = await waitForWindow(opts.title, 15_000);
@@ -221,6 +225,7 @@ async function positionWindow(
 ): Promise<SceneWindowHandle["client"]> {
   const script = `${PS_WINDOW_HELPERS}
 $h = [IntPtr]${hwnd}
+[Native.Win]::ShowWindow($h, 9) | Out-Null  # SW_RESTORE: a minimized window measures -32000
 $x = ${opts.x ?? -1}; $y = ${opts.y ?? -1}
 $w = ${opts.width}; $hh = ${opts.height}
 if ($x -eq -1 -or $y -eq -1) {
@@ -272,4 +277,15 @@ export function reopenWeUi(wallpaperExePath?: string): void {
   if (!wallpaperExePath) return;
   const child = spawn(wallpaperExePath, [], { stdio: 'ignore', detached: true });
   child.unref();
+}
+
+/** Kill every WE process (core + UI). Used when a render came out black:
+ * some core-instance states suppress -playInWindow output for reasons we
+ * cannot observe, and a fresh start is the only reliable reset. */
+export async function killWallpaperAll(): Promise<void> {
+  await exec(
+    'powershell',
+    ['-NoProfile', '-Command', 'Get-Process wallpaper64,wallpaperui,wallpaper32 -ErrorAction SilentlyContinue | Stop-Process -Force'],
+    { timeout: 15000 },
+  ).catch(() => undefined);
 }

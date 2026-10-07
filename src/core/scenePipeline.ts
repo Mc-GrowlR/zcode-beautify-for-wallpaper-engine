@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow, closeWeUi, reopenWeUi } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow, closeWeUi, reopenWeUi, killWallpaperAll } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -224,24 +224,53 @@ export async function importScene(
   // recording would be pitch black. Close it first; the core keeps running.
   onProgress("closing-we-ui", "Wallpaper Engine UI");
   const uiWasOpen = await closeWeUi();
-  onProgress("opening", `window "${opts.title}"`);
-  const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
+  // Some wallpaper64 instance states render -playInWindow windows pitch
+  // black (seen with the UI open AND with freshly bare-spawned cores); the
+  // cause is not observable from outside. Detect a black capture and retry
+  // ONCE after a full WE restart — openSceneWindow re-warms the core.
   let rawPath = "";
-  try {
-    onProgress("render-ready", JSON.stringify(handle.client));
-    await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
-
-    checkCancel();
-    onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
-    rawPath = path.join(path.dirname(loopPath), `raw-${Date.now().toString(36)}-${process.pid}.mp4`);
-    fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+  let blacknessPre: { blackFraction: number; meanLuma: number } | undefined;
+  for (let attempt = 0; ; attempt++) {
+    onProgress("opening", `window "${opts.title}"`);
+    // Render in a SMALL window (640x360) and scale up in ffmpeg: large
+    // play-windows present on a private swap chain that goes black the
+    // moment a capture session (any backend) is active — small windows
+    // were verified fine repeatedly. Visual quality barely suffers on
+    // wallpapers; a black import is not an import.
+    const handle = await openSceneWindow(pkgPath, { width: 640, height: 360, title: opts.title });
     try {
-      await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height, signal }, ffmpegPath);
+      onProgress("render-ready", JSON.stringify(handle.client));
+      await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
+
+      checkCancel();
+      onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
+      rawPath = path.join(path.dirname(loopPath), `raw-${Date.now().toString(36)}-${process.pid}.mp4`);
+      fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+      try {
+        await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height, signal }, ffmpegPath);
+      } finally {
+        onProgress("closing");
+        await closeSceneWindow(handle).catch(() => undefined);
+      }
     } finally {
-      onProgress("closing");
+      // If anything above threw (or cancelled), make sure the window closes;
+      // the UI restore only happens on the success path below.
       await closeSceneWindow(handle).catch(() => undefined);
     }
+    blacknessPre = await analyzeBlackness(rawPath, ffmpegPath);
+    // blackdetect already demands ~95% sub-threshold pixels for 0.5s+ runs;
+    // a wedged render measures ~0.997. Do NOT gate on meanLuma: the corner
+    // watermark alone pushes a pitch-black capture to luma 16 (measured).
+    const pitchBlack = blacknessPre.blackFraction >= 0.95;
+    if (!pitchBlack || attempt >= 1) break;
+    onProgress("black-retry", "restarting Wallpaper Engine");
+    console.log(`serve: scene import came out black (fraction=${blacknessPre.blackFraction.toFixed(3)} luma=${blacknessPre.meanLuma.toFixed(2)}) — restarting WE and retrying`);
+    fs.rmSync(rawPath, { force: true });
+    rawPath = "";
+    await killWallpaperAll();
+  }
 
+  try {
     checkCancel();
     onProgress("processing", `crossfade ${opts.fadeSec}s`);
     await makeSeamless(rawPath, tmpLoop, opts.fadeSec, ffmpegPath, { signal });
@@ -262,11 +291,10 @@ export async function importScene(
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   } finally {
-    // If anything above threw (or cancelled), make sure neither the WE window
-    // nor the temp captures linger.
+    // If anything above threw (or cancelled), make sure neither the temp
+    // captures linger.
     if (rawPath) { try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ } }
     try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
-    await closeSceneWindow(handle).catch(() => undefined);
     // Give the user their WE UI back if the import closed it (win: black
     // render fix; lose: the window they had open vanishes without this).
     if (uiWasOpen) {
