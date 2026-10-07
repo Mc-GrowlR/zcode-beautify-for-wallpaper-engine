@@ -958,6 +958,18 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           hash: typeof body?.hash === "string" ? body.hash : undefined,
           path: typeof body?.path === "string" ? body.path : undefined,
         });
+        // A manual switch is an explicit user choice — stop the playlist so
+        // it doesn't yank the wallpaper away on the next tick. Re-enabling
+        // resumes each plan from its saved position.
+        if (runtimeConfig().rotation?.enabled) {
+          stopRotationTimers();
+          const next = runtimeConfig();
+          if (next.rotation) {
+            next.rotation.enabled = false;
+            saveConfig(persisted(next));
+          }
+          console.log('serve: rotation paused (manual wallpaper switch)');
+        }
         sendJson(res, 200, { ok: true, windows: r.windows, ...publicConfig(runtimeConfig()) });
         return;
       }
