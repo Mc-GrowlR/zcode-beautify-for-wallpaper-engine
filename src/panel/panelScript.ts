@@ -410,6 +410,10 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
     '      </div>' +
     '      <div class="zb-sched-mode" style="margin:6px 0 0"><label title="ZCode 启动屏(加载页)期间不显示壁纸与美化面板,主界面就绪后再出现"><input type="checkbox" id="zb-startup-clean">启动屏时隐藏壁纸与面板</label></div>' +
+    '      <div class="zb-sched-mode" style="margin-top:4px"><span title="壁纸库·动态列表一次最多可见的行数(其余滚动查看)">动态库</span>' +
+    '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" style="width:44px" title="动态壁纸列表最多显示行数">' +
+    '        <span title="壁纸库·图片列表一次最多可见的行数(其余滚动查看)">图片库</span>' +
+    '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" style="width:44px" title="图片壁纸列表最多显示行数">行</div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
@@ -688,6 +692,46 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   }
   var zbScEl = document.getElementById('zb-startup-clean');
   if (zbScEl) zbScEl.addEventListener('change', pushConfig);
+  // Per-library visible row counts (设置 → 配置): stored in localStorage —
+  // pure panel preference, no serve round-trip needed.
+  var zbRowH = 32;
+  var libRows = { scenes: 3, images: 3 };
+  try {
+    var savedRows = JSON.parse(localStorage.getItem('zcode-beautify:lib-rows') || 'null');
+    if (savedRows && typeof savedRows === 'object') {
+      if (savedRows.scenes >= 3 && savedRows.scenes <= 20) libRows.scenes = savedRows.scenes;
+      if (savedRows.images >= 3 && savedRows.images <= 20) libRows.images = savedRows.images;
+    }
+  } catch (e) {}
+  function applyLibRows() {
+    var targets = [['zb-lib-scenes', libRows.scenes], ['zb-lib-images', libRows.images]];
+    for (var i = 0; i < targets.length; i++) {
+      var el = document.getElementById(targets[i][0]);
+      if (!el) continue;
+      var first = el.querySelector('.zb-item');
+      var h = first ? first.offsetHeight : 0;
+      // A hidden pane measures 0 — keep the last REAL measurement so
+      // changing rows from the settings tab stays pixel-accurate.
+      if (h > 5) zbRowH = h;
+      var rowH = zbRowH;
+      el.style.maxHeight = rowH * targets[i][1] + 'px';
+    }
+    var a = document.getElementById('zb-rows-scenes');
+    var b = document.getElementById('zb-rows-images');
+    if (a) a.value = libRows.scenes;
+    if (b) b.value = libRows.images;
+  }
+  ['zb-rows-scenes', 'zb-rows-images'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', function () {
+      var v = Math.max(3, Math.min(20, Math.round(Number(this.value) || 3)));
+      this.value = v;
+      if (this.id === 'zb-rows-scenes') libRows.scenes = v; else libRows.images = v;
+      try { localStorage.setItem('zcode-beautify:lib-rows', JSON.stringify(libRows)); } catch (e) {}
+      applyLibRows();
+    });
+  });
   ['zb-dn-on', 'zb-dn-start', 'zb-dn-end', 'zb-dn-daydim', 'zb-dn-nightdim', 'zb-dn-dayblur', 'zb-dn-nightblur'].forEach(function (id) {
     $(id).addEventListener('change', pushDayNight);
   });
@@ -2228,6 +2272,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     loadLibrary();
     loadStorage();
     loadHistory();
+    // Row height is only measurable once list items exist — re-apply the
+    // per-library row limits after the rebuild settles.
+    setTimeout(function () { if (typeof applyLibRows === 'function') applyLibRows(); }, 350);
   }
   function switchTab(name) {
     var tabs = document.querySelectorAll('.zb-tab');
@@ -2302,6 +2349,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
 
   // Fill in the fit label (and control values) right away, not just on open.
   refresh();
+  setTimeout(applyLibRows, 400);
+  setTimeout(applyLibRows, 1500);
 
   (function () {
     var head = $('zb-head'), panel = $('zb-panel');
