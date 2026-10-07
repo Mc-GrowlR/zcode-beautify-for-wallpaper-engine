@@ -85,7 +85,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 2px; opacity: .85; }',
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
     '.zb-toggles { display: flex; justify-content: center; gap: 16px; }',
-    '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
+    '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; white-space: nowrap; }',
     '.zb-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
       ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); color: inherit; font-size: 12px;',
@@ -283,12 +283,15 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <option value="cover">填满裁剪</option>' +
     '      <option value="contain">完整显示</option>' +
     '      <option value="smart">智能适配</option>' +
-    '    </select><label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label></div>' +
+    '    </select></div>' +
     '    <div class="zb-sec">界面</div>' +
     '    <div class="zb-row zb-toggles">' +
     '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
     '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
+    '    </div>' +
+    '    <div class="zb-row zb-toggles">' +
     '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
+    '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
     '    </div>' +
     '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
     '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
