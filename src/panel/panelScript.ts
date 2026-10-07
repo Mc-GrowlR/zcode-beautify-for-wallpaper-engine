@@ -1084,12 +1084,15 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       card.setAttribute('data-dir', it.dir);
       if (!it.importable) card.setAttribute('data-off', '1');
       if (selected[it.dir]) card.setAttribute('data-sel', '1');
-      // Real-preview chain, best first: source video (video wallpapers) /
-      // recorded loop (already-imported scenes) — both play as <video>;
-      // WE's animated GIF preview (scenes/web as shipped) — plays as <img>.
-      var mp4Url = it.videoUrl || it.loopUrl;
-      if (mp4Url) card.setAttribute('data-video', mp4Url);
+      // Real-preview chain, best first: the wallpaper's OWN material —
+      // source video for video wallpapers, its own WE preview GIF for
+      // scenes — and only then the recorded loop, which is
+      // content-addressed: reposts of the SAME wallpaper share one cache
+      // entry, and leading with it made a folder of reposts all preview
+      // as 'the same video'.
+      if (it.videoUrl) card.setAttribute('data-video', it.videoUrl);
       if (it.animUrl) card.setAttribute('data-anim', it.animUrl);
+      if (it.loopUrl) card.setAttribute('data-loop', it.loopUrl);
       card.title = it.title + '\\n' + it.dir + (it.folder ? '\\n📁 ' + it.folder : '') + (it.imported ? '\\n(已导入过,再次导入秒完成)' : '');
       if (it.imported) {
         var done = document.createElement('span');
@@ -1316,6 +1319,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         // preview would be a render) shows the cover image.
         var vUrl = card.getAttribute('data-video');
         var aUrl = card.getAttribute('data-anim');
+        var lUrl = card.getAttribute('data-loop');
         var live = false;
         try { live = localStorage.getItem('zcode-beautify:we-live') !== '0'; } catch (e) {}
         var prev = document.createElement('div');
@@ -1331,6 +1335,13 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         } else if (aUrl && live) {
           media = document.createElement('img');
           media.src = mt(API + aUrl);
+        } else if (lUrl && live) {
+          media = document.createElement('video');
+          media.muted = true;
+          media.loop = true;
+          media.playsInline = true;
+          media.autoplay = true;
+          media.src = mt(API + lUrl);
         } else {
           media = document.createElement('img');
           media.src = img.src;
