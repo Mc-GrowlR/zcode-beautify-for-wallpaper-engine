@@ -100,28 +100,17 @@ function Measure-Client([IntPtr]$h) {
  * rect has been measured.
  */
 /**
- * The Wallpaper Engine UI (wallpaperui.exe process group) suppresses
- * rendering in -playInWindow windows — imports come out pitch black while
- * the UI is open. Close it (politely, then forcefully) before rendering;
- * the wallpaper64 core keeps running and the user can reopen the UI.
+ * An open Wallpaper Engine UI (wallpaperui.exe) suppresses -playInWindow
+ * rendering — imports would come out pitch black. The plugin no longer
+ * closes the user's UI on its own; callers check this and tell the user.
  */
-export async function closeWeUi(): Promise<boolean> {
-  const count = (await exec('powershell', [
-      '-NoProfile',
-      '-Command',
-      '(Get-Process wallpaperui -ErrorAction SilentlyContinue | Measure-Object).Count',
-    ], { timeout: 10000 }).catch(() => ({ stdout: '0' }))).stdout.trim();
-  if (Number(count) === 0) return false;
-  await exec(
+export async function isWeUiOpen(): Promise<boolean> {
+  const count = (await exec(
     'powershell',
-    [
-      '-NoProfile',
-      '-Command',
-      'Get-Process wallpaperui -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 2; Get-Process wallpaperui -ErrorAction SilentlyContinue | Stop-Process -Force',
-    ],
-    { timeout: 15000 },
-  ).catch(() => undefined);
-  return true;
+    ['-NoProfile', '-Command', '(Get-Process wallpaperui -ErrorAction SilentlyContinue | Measure-Object).Count'],
+    { timeout: 10000 },
+  ).catch(() => ({ stdout: '0' }))).stdout.trim();
+  return Number(count) > 0;
 }
 
 export async function openSceneWindow(
@@ -267,17 +256,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * Reopen the Wallpaper Engine UI after an import closed it. Bare-spawning
- * the exe is what a double-click does: with the core already running it
- * opens the UI window. (-control open proved unreliable after the UI was
- * force-closed.)
- */
-export function reopenWeUi(wallpaperExePath?: string): void {
-  if (!wallpaperExePath) return;
-  const child = spawn(wallpaperExePath, [], { stdio: 'ignore', detached: true });
-  child.unref();
-}
 
 /** Kill every WE process (core + UI). Used when a render came out black:
  * some core-instance states suppress -playInWindow output for reasons we

@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow, closeWeUi, reopenWeUi, killWallpaperAll } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow, isWeUiOpen, killWallpaperAll } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -222,8 +222,11 @@ export async function importScene(
   checkCancel();
   // An open Wallpaper Engine UI suppresses -playInWindow rendering — the
   // recording would be pitch black. Close it first; the core keeps running.
-  onProgress("closing-we-ui", "Wallpaper Engine UI");
-  const uiWasOpen = await closeWeUi();
+  // An open WE UI blacks out the render window; the plugin does NOT touch
+  // the user's UI anymore — bail out with clear guidance instead.
+  if (await isWeUiOpen()) {
+    throw new SceneImportError("检测到 Wallpaper Engine 界面正开着:开着时渲染窗口会黑屏。请先关闭 WE 界面,再重新导入");
+  }
   // Some wallpaper64 instance states render -playInWindow windows pitch
   // black (seen with the UI open AND with freshly bare-spawned cores); the
   // cause is not observable from outside. Detect a black capture and retry
@@ -297,10 +300,6 @@ export async function importScene(
     try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
     // Give the user their WE UI back if the import closed it (win: black
     // render fix; lose: the window they had open vanishes without this).
-    if (uiWasOpen) {
-      const we = await import('./dependencyCheck.js').then((m) => m.checkWallpaperEngine()).catch(() => undefined);
-      if (we && we.path) reopenWeUi(we.path);
-    }
   }
 }
 
