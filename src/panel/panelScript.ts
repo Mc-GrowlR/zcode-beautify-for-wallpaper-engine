@@ -324,7 +324,6 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
     '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入</button>' +
     '      </div>' +
-        
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>…</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
     '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
@@ -1407,7 +1406,15 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     apiFetch('/api/import-status')
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        setProgress(j.running || j.stage === 'done', j.stage); importTimer = null;
+        setProgress(j.running || j.stage === 'done', j.stage);
+        if (j.error) {
+          clearInterval(importTimer); importTimer = null;
+          setProgress(false);
+          showGuide(j.guide || ('导入失败: ' + j.error), Boolean(j.guide));
+          return;
+        }
+        if (!j.running && j.stage === 'done') {
+          clearInterval(importTimer); importTimer = null;
           status(j.result && j.result.fromCache ? '已从缓存载入' : '动态壁纸已应用');
           refresh();
           markLibDirty();
@@ -1719,7 +1726,6 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     fr.readAsText(f);
   });
 
-  // --- import cancel (F4) ---------------------------------------------------
   /** Flip the data-current highlight in place. Rebuilding the whole list on
    *  every apply (loadLibrary) destroys and re-decodes every thumbnail <img>,
    *  which reads as the whole library flickering on each wallpaper switch. */
