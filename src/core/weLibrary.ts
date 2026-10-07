@@ -20,8 +20,6 @@ export interface WeWallpaper {
   dir: string;
   /** Preview image filename inside dir (tokenless media URL is built by serve). */
   previewName?: string;
-  /** Animated preview filename (WE records scene/web wallpapers as GIFs). */
-  previewAnim?: string;
   /** scene/video can be imported; web wallpapers are listed but disabled. */
   importable: boolean;
   source: "workshop" | "myprojects";
@@ -182,9 +180,6 @@ export function listWeWallpapers(): WeWallpaper[] {
           ? declared
           : PREVIEW_FALLBACKS.find((f) => fs.existsSync(path.join(dir, f)));
       const usable = previewName ? fs.existsSync(path.join(dir, previewName)) : false;
-      // WE ships scene/web previews as animated GIFs — that IS the real
-      // look of the wallpaper; prefer it for hover previews.
-      const animName = ['preview.gif'].find((f) => fs.existsSync(path.join(dir, f)));
       // Folder lookup: workshop ids file directly; local wallpapers key by
       // their absolute path in WE's config (prefix match on the dir).
       let folder = folderByKey.get(name);
@@ -214,7 +209,6 @@ export function listWeWallpapers(): WeWallpaper[] {
         dir,
         videoFile,
         previewName: usable ? previewName : undefined,
-        previewAnim: animName,
         importable: type !== "web",
         source: root.kind,
         folder,
