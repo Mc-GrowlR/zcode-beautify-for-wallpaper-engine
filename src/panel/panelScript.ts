@@ -229,9 +229,10 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     // so the initial clamp cannot know the real height) and again clamped
     // to the viewport — hovering the last row must stay fully on screen.
     '.zb-we-hover { position: fixed; z-index: 2147483647; width: 320px; max-height: 78vh;',
-      ' object-fit: contain; border-radius: 8px;',
+      ' border-radius: 8px; overflow: hidden;',
       ' border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
       ' pointer-events: none; }',
+    '.zb-we-hover img, .zb-we-hover video { display: block; width: 100%; max-height: 78vh; object-fit: contain; }',
     '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
     '.zb-we-group { padding: 6px 4px 4px; font-size: 11px; opacity: .6; }',
     '.zb-we-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }',
@@ -415,7 +416,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
     '      </div>' +
     '      <div class="zb-sched-mode" style="margin:6px 0 0"><label title="ZCode 启动屏(加载页)期间不显示壁纸与美化面板,主界面就绪后再出现"><input type="checkbox" id="zb-startup-clean">启动屏时隐藏壁纸与面板</label></div>' +
-    '      <div class="zb-sched-mode" style="margin-top:4px"><span title="壁纸库·动态列表一次最多可见的行数(其余滚动查看)">动态库</span>' +
+    '      <div class="zb-sched-mode" style="margin-top:4px"><label title="悬停 WE 库中的视频壁纸时直接播放其真实画面(而非封面图);场景壁纸仍显示封面"><input type="checkbox" id="zb-we-live">WE 预览播放真实视频</label></div>' +
+'      <div class="zb-sched-mode" style="margin-top:4px"><span title="壁纸库·动态列表一次最多可见的行数(其余滚动查看)">动态库</span>' +
     '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" style="width:44px" title="动态壁纸列表最多显示行数">' +
     '        <span title="壁纸库·图片列表一次最多可见的行数(其余滚动查看)">图片库</span>' +
     '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" style="width:44px" title="图片壁纸列表最多显示行数">行</div>' +
@@ -721,6 +723,13 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       nightBlur: Number($('zb-dn-nightblur').value) || 6
     };
     post('/api/config', { dayNight: dn }, function (d) { if (d && d.error) status(d.error); });
+  }
+  var zbWeLive = document.getElementById('zb-we-live');
+  if (zbWeLive) {
+    try { zbWeLive.checked = localStorage.getItem('zcode-beautify:we-live') !== '0'; } catch (e) {}
+    zbWeLive.addEventListener('change', function () {
+      try { localStorage.setItem('zcode-beautify:we-live', this.checked ? '1' : '0'); } catch (e) {}
+    });
   }
   var zbScEl = document.getElementById('zb-startup-clean');
   if (zbScEl) zbScEl.addEventListener('change', pushConfig);
@@ -1075,6 +1084,12 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       card.setAttribute('data-dir', it.dir);
       if (!it.importable) card.setAttribute('data-off', '1');
       if (selected[it.dir]) card.setAttribute('data-sel', '1');
+      // Real-preview chain, best first: source video (video wallpapers) /
+      // recorded loop (already-imported scenes) — both play as <video>;
+      // WE's animated GIF preview (scenes/web as shipped) — plays as <img>.
+      var mp4Url = it.videoUrl || it.loopUrl;
+      if (mp4Url) card.setAttribute('data-video', mp4Url);
+      if (it.animUrl) card.setAttribute('data-anim', it.animUrl);
       card.title = it.title + '\\n' + it.dir + (it.folder ? '\\n📁 ' + it.folder : '') + (it.imported ? '\\n(已导入过,再次导入秒完成)' : '');
       if (it.imported) {
         var done = document.createElement('span');
@@ -1296,12 +1311,36 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         var img = card.querySelector('img');
         if (!img) return;
         weHoverHide();
-        var prev = document.createElement('img');
+        // Real preview: video wallpapers play their actual footage when the
+        // setting allows it; everything else (and scenes, whose only real
+        // preview would be a render) shows the cover image.
+        var vUrl = card.getAttribute('data-video');
+        var aUrl = card.getAttribute('data-anim');
+        var live = false;
+        try { live = localStorage.getItem('zcode-beautify:we-live') !== '0'; } catch (e) {}
+        var prev = document.createElement('div');
         prev.className = 'zb-we-hover';
+        var media;
+        if (vUrl && live) {
+          media = document.createElement('video');
+          media.muted = true;
+          media.loop = true;
+          media.playsInline = true;
+          media.autoplay = true;
+          media.src = mt(API + vUrl);
+        } else if (aUrl && live) {
+          media = document.createElement('img');
+          media.src = mt(API + aUrl);
+        } else {
+          media = document.createElement('img');
+          media.src = img.src;
+        }
+        media.alt = '';
+        prev.appendChild(media);
         // Vertical placement is derived from the CURRENT box height: centered
         // on the card, clamped to the viewport, pinned to the top when a
         // very tall preview cannot fit at all. Runs once with the estimate
-        // and again on load with the image's real aspect.
+        // and again when the medium is ready with its real aspect.
         var place = function () {
           var r = card.getBoundingClientRect();
           var h = prev.offsetHeight || 180;
@@ -1311,11 +1350,11 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           prev.style.top = Math.round(top) + 'px';
           prev.style.right = Math.max(8, window.innerWidth - r.left + 10) + 'px';
         };
-        prev.onload = place;
-        prev.src = img.src;
-        prev.alt = '';
+        media.onload = place;
+        media.addEventListener('loadedmetadata', place);
         document.body.appendChild(prev);
         place();
+        if (media.tagName === 'VIDEO') media.play().catch(function () {});
       }, 300);
     });
     list.addEventListener('mouseout', function (e) {

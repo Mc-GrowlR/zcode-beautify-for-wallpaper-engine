@@ -20,11 +20,15 @@ export interface WeWallpaper {
   dir: string;
   /** Preview image filename inside dir (tokenless media URL is built by serve). */
   previewName?: string;
+  /** Animated preview filename (WE records scene/web wallpapers as GIFs). */
+  previewAnim?: string;
   /** scene/video can be imported; web wallpapers are listed but disabled. */
   importable: boolean;
   source: "workshop" | "myprojects";
   /** True when this wallpaper's loop already sits in the scene cache. */
   imported?: boolean;
+  /** Source video file for video-type wallpapers (hover plays it live). */
+  videoFile?: string;
   /** WE browser folder the user filed this wallpaper under (瀏覽器分組). */
   folder?: string;
 }
@@ -178,6 +182,9 @@ export function listWeWallpapers(): WeWallpaper[] {
           ? declared
           : PREVIEW_FALLBACKS.find((f) => fs.existsSync(path.join(dir, f)));
       const usable = previewName ? fs.existsSync(path.join(dir, previewName)) : false;
+      // WE ships scene/web previews as animated GIFs — that IS the real
+      // look of the wallpaper; prefer it for hover previews.
+      const animName = ['preview.gif'].find((f) => fs.existsSync(path.join(dir, f)));
       // Folder lookup: workshop ids file directly; local wallpapers key by
       // their absolute path in WE's config (prefix match on the dir).
       let folder = folderByKey.get(name);
@@ -190,12 +197,24 @@ export function listWeWallpapers(): WeWallpaper[] {
           }
         }
       }
+      // video wallpapers carry their footage in the dir root or files/
+      let videoFile;
+      if (type === 'video') {
+        for (const sub of ['', 'files']) {
+          try {
+            const hit = fs.readdirSync(path.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
+            if (hit) { videoFile = path.join(dir, sub, hit); break; }
+          } catch { /* no subfolder */ }
+        }
+      }
       items.push({
         id: name,
         title,
         type,
         dir,
+        videoFile,
         previewName: usable ? previewName : undefined,
+        previewAnim: animName,
         importable: type !== "web",
         source: root.kind,
         folder,
@@ -240,9 +259,10 @@ export function weTitleForPath(p: string): string | undefined {
 export function resolveWePreview(
   source: string,
   id: string,
-  file: string
+  file: string,
+  nameRe: RegExp = PREVIEW_NAME_RE
 ): string | undefined {
-  if (!PREVIEW_NAME_RE.test(file)) return undefined;
+  if (!nameRe.test(file)) return undefined;
   // Same charset as the filename half of PREVIEW_NAME_RE: one path component.
   if (!/^[^\\/:*?"<>|]+$/.test(id)) return undefined;
   const kind = source === "workshop" || source === "myprojects" ? source : undefined;

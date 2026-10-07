@@ -1419,11 +1419,38 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             imported: Boolean(it.imported || (map[it.dir.toLowerCase()] && fs.existsSync(path.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4")))),
             source: it.source,
             folder: it.folder ?? null,
+            animUrl: it.previewAnim
+              ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewAnim)}`
+              : null,
+            loopUrl: (() => {
+              const rec = map[it.dir.toLowerCase()];
+              return rec && fs.existsSync(path.join(scenesCacheRoot(), rec.hash, 'loop.mp4'))
+                ? `/media/scene/${rec.hash}.mp4`
+                : null;
+            })(),
+            videoUrl: it.videoFile
+              ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path.basename(it.videoFile))}`
+              : null,
             previewUrl: it.previewName
               ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}`
               : null,
           })),
         });
+        return;
+      }
+
+      // WE source videos: hover previews play the REAL wallpaper footage
+      // straight from the workshop directory (video-type wallpapers).
+      if (req.method === 'GET' && url.pathname === '/media/we-video') {
+        const vf = resolveWePreview(
+          String(url.searchParams.get('s') ?? ''),
+          String(url.searchParams.get('id') ?? ''),
+          String(url.searchParams.get('f') ?? ''),
+          /^[^/:*?"<>|]+.(mp4|webm)$/i
+        );
+        if (!vf || !sendMediaFile(req, res, vf)) {
+          sendJson(res, 404, { error: 'we video not found' });
+        }
         return;
       }
 
