@@ -22,7 +22,7 @@
  * and +faststart is applied for immediate playback when served over HTTP.
  */
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
@@ -37,12 +37,6 @@ export interface SeamlessOptions {
   seconds?: number;
   /** Downscale so width <= maxWidth (keeps aspect, even heights). Default no scaling. */
   maxWidth?: number;
-  /** Re-encode the OUTPUT at this frame rate (e.g. 24 for the eco spec). */
-  fps?: number;
-  /** Keep the source audio track (ambient-sound wallpapers). Default strips it. */
-  keepAudio?: boolean;
-  /** AbortSignal: aborting kills the running ffmpeg (import cancellation). */
-  signal?: AbortSignal;
 }
 
 export async function makeSeamless(
@@ -60,9 +54,8 @@ export async function makeSeamless(
     throw new LoopError(`Input too short for a ${fadeSec}s crossfade (duration ${fullDuration}s)`);
   }
   // Long inputs are truncated to a middle segment before the crossfade; the
-  // whole file would balloon the cache for minutes-long sources. With only
-  // startAt given, the tail from startAt is the natural segment.
-  const duration = Math.min(fullDuration, options.seconds ?? (options.startAt !== undefined ? fullDuration - options.startAt : fullDuration));
+  // whole file would balloon the cache for minutes-long sources.
+  const duration = Math.min(fullDuration, options.seconds ?? fullDuration);
   const startAt = Math.min(options.startAt ?? 0, fullDuration - duration);
   if (duration <= fadeSec + 1) {
     throw new LoopError(`Truncated input too short for a ${fadeSec}s crossfade (duration ${duration}s)`);
@@ -91,22 +84,19 @@ export async function makeSeamless(
     "-y", "-hide_banner", "-loglevel", "warning",
     // -ss/-t BEFORE -i: they must limit what the FILTERS see (an output-side
     // -t would cap the result while the trims ran on the whole stream).
-    ...(options.startAt !== undefined ? ["-ss", startAt.toFixed(3)] : []),
-    ...(options.seconds !== undefined || options.startAt !== undefined ? ["-t", duration.toFixed(3)] : []),
+    ...(options.startAt ? ["-ss", startAt.toFixed(3)] : []),
+    ...(options.seconds ? ["-t", duration.toFixed(3)] : []),
     "-i", input,
     "-filter_complex", filter,
     "-map", "[out]",
-    ...(options.fps ? ["-r", String(options.fps)] : []),
     "-c:v", "libx264",
     "-crf", "18",
     "-preset", "veryfast",
     "-pix_fmt", "yuv420p",
     "-movflags", "+faststart",
-    // Ambient-sound wallpapers keep a low-bitrate AAC track; "0:a?" tolerates
-    // sources without audio. Everything else stays silent.
-    ...(options.keepAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "96k"] : ["-an"]),
+    "-an",
     output,
-  ], { timeout: 600_000, maxBuffer: 16 * 1024 * 1024, signal: options.signal });
+  ], { timeout: 600_000, maxBuffer: 16 * 1024 * 1024 });
 
   const outputDuration = await probeDuration(output, ffmpeg);
   return { inputDuration: duration, outputDuration };
@@ -131,10 +121,8 @@ export async function loopSeamSsim(file: string, ffmpegPath?: string): Promise<n
     const m = /All:(\d+\.?\d*)/.exec(stderr);
     return m ? Number(m[1]) : -1;
   } finally {
-    // fs.rmSync, not `cmd /c del`: cmd expands %-sequences in paths, which
-    // can delete the wrong target or silently fail and leave these behind.
     for (const f of [tmpLast, tmpFirst]) {
-      try { rmSync(f); } catch { /* temp file */ }
+      try { await exec("cmd", ["/c", "del", "/q", path.resolve(f)], { timeout: 5000 }); } catch { /* temp file */ }
     }
   }
 }

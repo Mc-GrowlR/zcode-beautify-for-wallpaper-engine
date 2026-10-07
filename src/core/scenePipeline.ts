@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow, isWeUiOpen, killWallpaperAll } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -28,10 +28,6 @@ export interface SceneImportOptions {
   fadeSec?: number;
   /** Video imports longer than this are truncated to a middle segment. */
   maxSeconds?: number;
-  /** Cap the loop width (eco spec = 1280). */
-  maxWidth?: number;
-  /** Keep the source audio (ambient-sound wallpapers). */
-  keepAudio?: boolean;
   /** Window title for the temporary WE render window. */
   title?: string;
   maxCacheBytes?: number;
@@ -114,13 +110,8 @@ export async function importScene(
   onProgress: (stage: string, detail?: string) => void = () => undefined,
   options: SceneImportOptions = {},
   ffmpegPath?: string,
-  signal?: AbortSignal
 ): Promise<SceneImportResult> {
   const opts = { ...DEFAULT_SCENE_OPTIONS, ...options };
-  /** Cancellation checkpoint between stages; ffmpeg runs also get the signal. */
-  const checkCancel = (): void => {
-    if (signal?.aborted) throw new SceneImportError("导入已取消");
-  };
 
   onProgress("detect", pkgPath);
   let type = detectWallpaperType(pkgPath);
@@ -154,8 +145,8 @@ export async function importScene(
   if (missing.length > 0) throw new MissingDependencyError(missing);
 
   const hash = isVideo
-    ? await computeHash(pkgPath, { kind: "video", maxWidth: 1920, maxSeconds: opts.maxSeconds, fadeSec: opts.fadeSec })
-    : await computeHash(pkgPath, {
+    ? computeHash(pkgPath, { kind: "video", maxWidth: 1920, maxSeconds: opts.maxSeconds, fadeSec: opts.fadeSec })
+    : computeHash(pkgPath, {
         width: opts.width,
         height: opts.height,
         fps: opts.fps,
@@ -164,9 +155,6 @@ export async function importScene(
       });
   const loopPath = getCachePath(hash);
   const posterPath = path.join(path.dirname(loopPath), "poster.jpg");
-  // Unique temp name: two concurrent imports of the same wallpaper used to
-  // interleave writes into one fixed .tmp.mp4 and publish a truncated loop.
-  const tmpLoop = `${loopPath}.tmp-${process.pid}-${Date.now().toString(36)}.mp4`;
 
   if (hasCache(hash)) {
     onProgress("cache-hit", hash);
@@ -178,7 +166,6 @@ export async function importScene(
   if (isVideo) {
     // Direct video wallpaper: no WE window, no recording — the source IS the
     // footage. Normalize (truncate long clips, cap width), loop, poster, cache.
-    checkCancel();
     onProgress("analyzing", pkgPath);
     const sourceDuration = await probeDuration(pkgPath, ffmpegPath ?? (await checkFfmpeg()).path!);
     const trim =
@@ -187,30 +174,20 @@ export async function importScene(
         : undefined;
     if (trim) onProgress("truncating", `${sourceDuration.toFixed(1)}s -> ${opts.maxSeconds}s`);
 
-    checkCancel();
     onProgress("processing", `crossfade ${opts.fadeSec}s`);
-    try {
-      await makeSeamless(pkgPath, tmpLoop, opts.fadeSec, ffmpegPath, {
-        startAt: trim?.startAt,
-        seconds: trim?.seconds,
-        maxWidth: opts.maxWidth ?? 1920,
-        fps: opts.fps,
-        keepAudio: opts.keepAudio,
-        signal,
-      });
+    const tmpLoop = `${loopPath}.tmp.mp4`;
+    await makeSeamless(pkgPath, tmpLoop, opts.fadeSec, ffmpegPath, {
+      startAt: trim?.startAt,
+      seconds: trim?.seconds,
+      maxWidth: 1920,
+    });
 
-      checkCancel();
-      onProgress("poster");
-      await extractPoster(tmpLoop, posterPath, ffmpegPath);
+    onProgress("poster");
+    await extractPoster(tmpLoop, posterPath, ffmpegPath);
 
-      onProgress("saving", hash);
-      fs.mkdirSync(path.dirname(loopPath), { recursive: true });
-      fs.renameSync(tmpLoop, loopPath);
-    } finally {
-      // A failure (or cancel) must not leave tens of MB of temp behind —
-      // stale temps inflate dirSize and skew the LRU eviction order.
-      try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
-    }
+    onProgress("saving", hash);
+    fs.mkdirSync(path.dirname(loopPath), { recursive: true });
+    fs.renameSync(tmpLoop, loopPath);
 
     const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
@@ -219,66 +196,26 @@ export async function importScene(
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   }
 
-  checkCancel();
-  // An open Wallpaper Engine UI suppresses -playInWindow rendering — the
-  // recording would be pitch black. Close it first; the core keeps running.
-  // An open WE UI blacks out the render window; the plugin does NOT touch
-  // the user's UI anymore — bail out with clear guidance instead.
-  if (await isWeUiOpen()) {
-    throw new SceneImportError("检测到 Wallpaper Engine 界面正开着:开着时渲染窗口会黑屏。请先关闭 WE 界面,再重新导入");
-  }
-  // Some wallpaper64 instance states render -playInWindow windows pitch
-  // black (seen with the UI open AND with freshly bare-spawned cores); the
-  // cause is not observable from outside. Detect a black capture and retry
-  // ONCE after a full WE restart — openSceneWindow re-warms the core.
-  let rawPath = "";
-  let blacknessPre: { blackFraction: number; meanLuma: number } | undefined;
-  for (let attempt = 0; ; attempt++) {
-    onProgress("opening", `window "${opts.title}"`);
-    // Render in a SMALL window (640x360) and scale up in ffmpeg: large
-    // play-windows present on a private swap chain that goes black the
-    // moment a capture session (any backend) is active — small windows
-    // were verified fine repeatedly. Visual quality barely suffers on
-    // wallpapers; a black import is not an import.
-    const handle = await openSceneWindow(pkgPath, { width: 640, height: 360, title: opts.title });
-    try {
-      onProgress("render-ready", JSON.stringify(handle.client));
-      await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
+  onProgress("opening", `window "${opts.title}"`);
+  const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
+  try {
+    onProgress("render-ready", JSON.stringify(handle.client));
+    await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
 
-      checkCancel();
-      onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
-      rawPath = path.join(path.dirname(loopPath), `raw-${Date.now().toString(36)}-${process.pid}.mp4`);
-      fs.mkdirSync(path.dirname(rawPath), { recursive: true });
-      try {
-        await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height, signal, capture: attempt === 0 ? "dda" : "ps" }, ffmpegPath);
-      } finally {
-        onProgress("closing");
-        await closeSceneWindow(handle).catch(() => undefined);
-      }
+    onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
+    const rawPath = path.join(path.dirname(loopPath), `raw-${Date.now()}.mp4`);
+    fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+    try {
+      await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height }, ffmpegPath);
     } finally {
-      // If anything above threw (or cancelled), make sure the window closes;
-      // the UI restore only happens on the success path below.
+      onProgress("closing");
       await closeSceneWindow(handle).catch(() => undefined);
     }
-    blacknessPre = await analyzeBlackness(rawPath, ffmpegPath);
-    // blackdetect already demands ~95% sub-threshold pixels for 0.5s+ runs;
-    // a wedged render measures ~0.997. Do NOT gate on meanLuma: the corner
-    // watermark alone pushes a pitch-black capture to luma 16 (measured).
-    const pitchBlack = blacknessPre.blackFraction >= 0.95;
-    if (!pitchBlack || attempt >= 1) break;
-    onProgress("black-retry", "restarting Wallpaper Engine");
-    console.log(`serve: scene import came out black (fraction=${blacknessPre.blackFraction.toFixed(3)} luma=${blacknessPre.meanLuma.toFixed(2)}) — restarting WE and retrying`);
-    fs.rmSync(rawPath, { force: true });
-    rawPath = "";
-    await killWallpaperAll();
-  }
 
-  try {
-    checkCancel();
     onProgress("processing", `crossfade ${opts.fadeSec}s`);
-    await makeSeamless(rawPath, tmpLoop, opts.fadeSec, ffmpegPath, { signal });
+    const tmpLoop = `${loopPath}.tmp.mp4`;
+    await makeSeamless(rawPath, tmpLoop, opts.fadeSec, ffmpegPath);
 
-    checkCancel();
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
 
@@ -286,7 +223,6 @@ export async function importScene(
     fs.mkdirSync(path.dirname(loopPath), { recursive: true });
     fs.renameSync(tmpLoop, loopPath);
     fs.rmSync(rawPath, { force: true });
-    rawPath = "";
 
     const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
@@ -294,12 +230,8 @@ export async function importScene(
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   } finally {
-    // If anything above threw (or cancelled), make sure neither the temp
-    // captures linger.
-    if (rawPath) { try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ } }
-    try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
-    // Give the user their WE UI back if the import closed it (win: black
-    // render fix; lose: the window they had open vanishes without this).
+    // If anything above threw, make sure the WE window never lingers.
+    await closeSceneWindow(handle).catch(() => undefined);
   }
 }
 

@@ -13,7 +13,7 @@
  * - draw_mouse=0 keeps the cursor out of the loop video.
  */
 
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
@@ -27,34 +27,9 @@ export interface RecordOptions {
   /** Output size; defaults to 1920x1080. */
   outWidth?: number;
   outHeight?: number;
-  /** AbortSignal: aborting kills the running ffmpeg (import cancellation). */
-  signal?: AbortSignal;
-  /** Capture backend: "dda" = ffmpeg ddagrab (default, best quality),
-   * "ps" = PowerShell CopyFromScreen frames (fallback that survives
-   * transient machine states where every ffmpeg backend records the
-   * WE window black). */
-  capture?: "dda" | "gdi" | "ps";
 }
 
 export class RecordError extends Error {}
-
-/** Virtual-screen bounds of every display, in ddagrab enumeration order
- *  (EnumDisplayDevices ordinal). Empty on any failure → primary-only fallback. */
-async function displayLayout(): Promise<Array<{ x: number; y: number; w: number; h: number }>> {
-  const script = `Add-Type -AssemblyName System.Windows.Forms
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$screens = [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { '{0},{1},{2},{3}' -f $_.Bounds.X, $_.Bounds.Y, $_.Bounds.Width, $_.Bounds.Height }
-$screens -join ';'`;
-  try {
-    const { stdout } = await exec("powershell", ["-NoProfile", "-Command", script], { timeout: 15_000 });
-    return stdout.trim().split(";").filter(Boolean).map((s) => {
-      const [x, y, w, h] = s.split(",").map(Number);
-      return { x, y, w, h };
-    });
-  } catch {
-    return [];
-  }
-}
 
 export async function recordSceneWindow(
   handle: SceneWindowHandle,
@@ -71,159 +46,29 @@ export async function recordSceneWindow(
   // rect right before capturing (the window is topmost at this point) instead
   // of trusting the rect from open time.
   const client = await measureClientRect(handle.hwnd, handle.title);
-  let { x, y, width, height } = client;
-  const absX = x, absY = y; // gdigrab wants virtual-desktop coords
-  // ddagrab captures ONE output; the crop coordinates must be relative to
-  // that output. A window on a secondary monitor needs its output_idx and
-  // the origin subtracted, or the crop rect falls outside the captured frame.
-  const displays = await displayLayout();
-  let outputIdx = 0;
-  for (let i = 0; i < displays.length; i++) {
-    const d = displays[i];
-    if (x >= d.x && x < d.x + d.w && y >= d.y && y < d.y + d.h) {
-      outputIdx = i;
-      x -= d.x;
-      y -= d.y;
-      break;
-    }
-  }
-  // Clamp the crop to the chosen display: .NET screen ordinals and ddagrab's
-  // DXGI output ordinals can disagree on hybrid-GPU systems, and a window
-  // straddling two monitors produces an out-of-frame rect — a garbage or
-  // failed capture. Clamped-but-partial beats entirely wrong output.
-  const outW = opts.outWidth ?? 1920;
-  const outH = opts.outHeight ?? 1080;
-  const picked = displays[outputIdx];
-  if (picked) {
-    if (x + width > picked.w) width = Math.max(16, picked.w - x);
-    if (y + height > picked.h) height = Math.max(16, picked.h - y);
-    if (x < 0) { width = Math.max(16, width + x); x = 0; }
-    if (y < 0) { height = Math.max(16, height + y); y = 0; }
-  }
-  // PRIMARY capture: ffmpeg ddagrab (DXGI Desktop Duplication) — the
-  // original pipeline, best quality and frame pacing. Machine states exist
-  // where it (and every other ffmpeg backend) records this window black;
-  // those are transient — the black-frame retry in the import pipeline
-  // switches to the PowerShell CopyFromScreen path ("ps") as a fallback,
-  // which has never failed.
-  if (opts.capture !== "ps") {
-    const args = [
-      "-y",
-      "-hide_banner",
-      "-loglevel", "warning",
-      "-f", "lavfi",
-      "-i", `ddagrab=output_idx=${outputIdx}:framerate=${opts.fps}:draw_mouse=0`,
-      "-t", String(opts.duration),
-      "-vf", `hwdownload,format=bgra,crop=${width}:${height}:${x}:${y},scale=${outW}:${outH}`,
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-pix_fmt", "yuv420p",
-      "-an",
-      out,
-    ];
-    await setTopmost(handle.hwnd, true);
-    try {
-      await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024, signal: opts.signal });
-    } catch (err) {
-      throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
-    } finally {
-      await setTopmost(handle.hwnd, false).catch(() => undefined);
-    }
-    return;
-  }
-
-  // FALLBACK capture: PowerShell CopyFromScreen frame grabbing — plain GDI
-  // BitBlt through .NET Graphics, immune to the transient states that make
-  // ffmpeg backends record black. Frames land as PNGs, ffmpeg muxes them.
-  const framesDir = `${out}.frames-${process.pid}-${Date.now().toString(36)}`;
-  mkdirSync(framesDir, { recursive: true });
-  const frameCount = Math.max(1, Math.round(opts.duration * opts.fps));
-  const delayMs = Math.max(5, Math.floor(1000 / opts.fps) - 15);
-  const winDir = framesDir.replace(/\\/g, "/");
-  const grab = [
-    "Add-Type -AssemblyName System.Drawing",
-    "$h = [IntPtr]" + handle.hwnd,
-    "$n = " + frameCount + "; $delay = " + delayMs,
-    "for ($i = 0; $i -lt $n; $i++) {",
-    "  $r = New-Object RECT_T",
-    "  [WING]::GetWindowRect($h, [ref]$r) | Out-Null",
-    "  $w = $r.Rt - $r.L; $hh = $r.B - $r.T",
-    "  if ($w -gt 0 -and $hh -gt 0) {",
-    "    $bmp = New-Object System.Drawing.Bitmap($w, $hh)",
-    "    $g = [System.Drawing.Graphics]::FromImage($bmp)",
-    "    $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)",
-    "    $bmp.Save((Join-Path '" + winDir + "' ('f{0:d4}.png' -f $i)), [System.Drawing.Imaging.ImageFormat]::Png)",
-    "    $g.Dispose(); $bmp.Dispose()",
-    "  }",
-    "  Start-Sleep -Milliseconds $delay",
-    "}",
-    "Write-Output done",
-  ].join("\n");
-  const psScript = [
-    "Add-Type @'",
-    "using System;",
-    "using System.Runtime.InteropServices;",
-    "public struct RECT_T { public int L, T, Rt, B; }",
-    "public class WING {",
-    '  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT_T r);',
-    '  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int w, int hh, uint f);',
-    "}",
-    "'@",
-    "[WING]::SetWindowPos($h, [IntPtr](-1), 0, 0, 0, 0, 0x0003) | Out-Null # topmost",
-    grab,
-  ].join("\n");
-  try {
-    await setTopmost(handle.hwnd, true);
-    await exec("powershell", ["-NoProfile", "-Command", psScript], {
-      timeout: (opts.duration + 60) * 1000,
-      maxBuffer: 16 * 1024 * 1024,
-      signal: opts.signal,
-    });
-    const mux = [
-      "-y", "-hide_banner", "-loglevel", "warning",
-      "-framerate", String(opts.fps),
-      "-i", path.join(framesDir, "f%04d.png"),
-      "-vf", `scale=${outW}:${outH}`,
-      "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-      "-an", out,
-    ];
-    await exec(ffmpeg, mux, { timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
-  } catch (err) {
-    throw new RecordError(`PowerShell frame capture failed: ${(err as Error).message}`);
-  } finally {
-    await setTopmost(handle.hwnd, false).catch(() => undefined);
-    try { rmSync(framesDir, { recursive: true, force: true }); } catch { /* locked */ }
-  }
-  return;
-}
-
-export async function recordSceneWindowLegacy(
-  handle: SceneWindowHandle,
-  out: string,
-  opts: RecordOptions,
-  ffmpegPath?: string,
-): Promise<void> {
-  // ffmpeg-based capture (gdigrab/ddagrab) — kept for reference; the
-  // PowerShell path above is the verified one on this machine.
-  const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
-  if (!ffmpeg) throw new RecordError("ffmpeg not found — cannot record scene window");
-  const client = await measureClientRect(handle.hwnd, handle.title);
   const { x, y, width, height } = client;
   const outW = opts.outWidth ?? 1920;
   const outH = opts.outHeight ?? 1080;
   const args = [
-    "-y", "-hide_banner", "-loglevel", "warning",
-    "-f", "gdigrab", "-framerate", String(opts.fps), "-draw_mouse", "0", "-i", "desktop",
+    "-y",
+    "-hide_banner",
+    "-loglevel", "warning",
+    "-f", "lavfi",
+    "-i", `ddagrab=output_idx=0:framerate=${opts.fps}:draw_mouse=0`,
     "-t", String(opts.duration),
-    "-vf", `crop=${width}:${height}:${Math.max(0, x)}:${Math.max(0, y)},scale=${outW}:${outH}`,
-    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-    "-an", out,
+    "-vf", `hwdownload,format=bgra,crop=${width}:${height}:${x}:${y},scale=${outW}:${outH}`,
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-pix_fmt", "yuv420p",
+    "-an",
+    out,
   ];
+
   await setTopmost(handle.hwnd, true);
   try {
-    await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024, signal: opts.signal });
+    await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024 });
   } catch (err) {
-    throw new RecordError(`ffmpeg capture failed: ${(err as Error).message}`);
+    throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
   } finally {
     await setTopmost(handle.hwnd, false).catch(() => undefined);
   }
@@ -262,8 +107,7 @@ export async function analyzeBlackness(file: string, ffmpegPath?: string): Promi
   const durationSec = Number(/Duration: (\d+):(\d+):([\d.]+)/.exec(stderr)?.slice(1).reduce((acc, v) => acc * 60 + Number(v), 0) ?? 0);
   const blackRanges = [...stderr.matchAll(/black_start:[\d.]+ black_end:([\d.]+) black_duration:([\d.]+)/g)];
   const blackSec = blackRanges.reduce((sum, m) => sum + Number(m[2]), 0);
-  // Unparsable duration (probe failure) must read "unknown", not "100% black".
-  const blackFraction = durationSec > 0 ? blackSec / durationSec : -1;
+  const blackFraction = durationSec > 0 ? blackSec / durationSec : 1;
 
   const meanLuma = await meanLumaOf(file, ffmpeg);
   return { blackFraction, meanLuma, durationSec };

@@ -284,8 +284,6 @@ interface ImportJob {
   detail?: string;
   error?: string;
   guide?: string;
-  /** Live controller for /api/import-cancel (F4). */
-  abort?: AbortController;
   result?: { loopPath: string; posterPath: string; hash: string; fromCache: boolean };
 }
 
@@ -788,24 +786,18 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         const scenePath = typeof body?.path === "string" ? body.path.trim() : "";
         // Import spec: "eco" records/encodes at 720p24 directly (no ⚡ pass
         // needed later); "std" (default) keeps the classic 1080p30.
-        const spec = body?.spec === "eco" ? "eco" : "std";
-        const sceneOpts: { width?: number; height?: number; fps?: number; maxWidth?: number; maxSeconds?: number; keepAudio?: boolean } =
-          typeof body?.maxSeconds === "number" && body.maxSeconds >= 5 && body.maxSeconds <= 60 ? { maxSeconds: body.maxSeconds } : {};
-        if (spec === "eco") Object.assign(sceneOpts, { width: 1280, height: 720, fps: 24, maxWidth: 1280 });
-        if (body?.keepAudio === true) sceneOpts.keepAudio = true;
         if (!scenePath) throw new Error("path is required");
         if (importJob.running) {
           sendJson(res, 409, { error: "another import is already running", stage: importJob.stage });
           return;
         }
-        const abort = new AbortController();
-        importJob = { running: true, stage: "starting", abort };
+        importJob = { running: true, stage: "starting" };
         // Fire-and-forget: the panel polls /api/import-status for progress;
         // /api/import-cancel aborts the controller (kills ffmpeg, cleans up).
         void importScene(scenePath, (stage, detail) => {
           importJob.stage = stage;
           importJob.detail = detail;
-        }, sceneOpts, undefined, abort.signal)
+        })
           .then(async (result: SceneImportResult) => {
             importJob = {
               running: false,
@@ -874,16 +866,6 @@ export async function startServe(opts: ServeOptions): Promise<void> {
             };
           });
         sendJson(res, 200, { ok: true, started: true });
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/api/import-cancel") {
-        if (importJob.running && importJob.abort) {
-          importJob.abort.abort();
-          sendJson(res, 200, { ok: true, message: "已请求取消" });
-        } else {
-          sendJson(res, 200, { ok: false, error: "没有进行中的导入" });
-        }
         return;
       }
 

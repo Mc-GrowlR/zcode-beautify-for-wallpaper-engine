@@ -324,14 +324,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="text" id="zb-scene-path" placeholder="粘贴 .pkg/.mp4/目录路径,回车导入" spellcheck="false">' +
     '        <button class="zb-btn" id="zb-import" title="渲染并录制场景壁纸,生成无缝循环动态背景">导入</button>' +
     '      </div>' +
-    '      <div class="zb-sched-mode" style="margin-bottom:4px">' +
-    '        <span title="省电=直接录/压成 720p24(GPU 解码省约 60%);标准=1080p30">规格</span>' +
-    '        <select id="zb-spec" style="flex:1"><option value="std">标准 1080p</option><option value="eco">省电 720p</option></select>' +
-    '        <label title="视频文件导入时保留声音(雨声/篝火等氛围壁纸);场景录制本身无声"><input type="checkbox" id="zb-keep-audio">🔊</label>' +
-    '      </div>' +
-    '      <div class="zb-import-row" style="margin:0 0 4px">' +
-    '        <button class="zb-btn zb-grow" id="zb-import-cancel" hidden title="中止正在进行的导入,清理临时文件">✕ 取消导入</button>' +
-    '      </div>' +
+        
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>…</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
     '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
@@ -1403,7 +1396,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     var p = $('zb-scene-path').value.trim();
     if (!p) { status('请先粘贴场景壁纸路径'); return; }
     showGuide('', false);
-    post('/api/import-scene', { path: p, spec: $('zb-spec').value, keepAudio: $('zb-keep-audio').checked }, function (d) {
+    post('/api/import-scene', { path: p }, function (d) {
       if (d && d.error) { status(d.error); return; }
       setProgress(true, 'starting');
       if (importTimer) clearInterval(importTimer);
@@ -1414,16 +1407,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     apiFetch('/api/import-status')
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        setProgress(j.running || j.stage === 'done', j.stage);
-        $('zb-import-cancel').hidden = !j.running;
-        if (j.error) {
-          clearInterval(importTimer); importTimer = null;
-          setProgress(false);
-          showGuide(j.guide || ('导入失败: ' + j.error), Boolean(j.guide));
-          return;
-        }
-        if (!j.running && j.stage === 'done') {
-          clearInterval(importTimer); importTimer = null;
+        setProgress(j.running || j.stage === 'done', j.stage); importTimer = null;
           status(j.result && j.result.fromCache ? '已从缓存载入' : '动态壁纸已应用');
           refresh();
           markLibDirty();
@@ -1736,9 +1720,6 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   });
 
   // --- import cancel (F4) ---------------------------------------------------
-  $('zb-import-cancel').addEventListener('click', function () {
-    post('/api/import-cancel', {}, function (d) { status(d && d.ok ? '已请求取消…' : (d && d.error) || '没有进行中的导入'); });
-  });
   /** Flip the data-current highlight in place. Rebuilding the whole list on
    *  every apply (loadLibrary) destroys and re-decodes every thumbnail <img>,
    *  which reads as the whole library flickering on each wallpaper switch. */
