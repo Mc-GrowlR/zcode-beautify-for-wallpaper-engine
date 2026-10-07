@@ -112,7 +112,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
     '.zb-tab:hover { background: rgba(255,255,255,.12); }',
     '.zb-tab[data-active="1"] { background: rgba(122,162,247,.3); border-color: rgba(122,162,247,.6); }',
-    '#zb-tab-main.zb-pane-in, #zb-tab-sched.zb-pane-in { animation: zb-pane-in 150ms ease; }',
+    '#zb-tab-main.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in { animation: zb-pane-in 150ms ease; }',
     '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
     '.zb-row { margin-bottom: 6px; }',
     '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 2px; opacity: .85; }',
@@ -307,53 +307,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '    <div id="zb-tabs">' +
     '      <button class="zb-tab" data-tab="main">壁纸</button>' +
     '      <button class="zb-tab" data-tab="sched">定时播放</button>' +
+    '      <button class="zb-tab" data-tab="settings">设置</button>' +
     '    </div>' +
     '    <div id="zb-tab-main">' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-display"><div class="zb-card-title">显示调节 <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
-    '    <div class="zb-sec">画面</div>' +
-    '    <div class="zb-g2">' +
-    '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
-    '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"></div>' +
-    '    </div>' +
-    '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体" style="flex:1">' +
-    '      <option value="cover">填满裁剪</option>' +
-    '      <option value="contain">完整显示</option>' +
-    '      <option value="smart">智能适配</option>' +
-    '    </select></div>' +
-    '    <div class="zb-sec">界面</div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
-    '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
-    '    </div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
-    '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
-    '    </div>' +
-    '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-sec">聊天界面</div>' +
-    '    <div class="zb-g2">' +
-    '    <div class="zb-row"><label title="对话列背后的额外压暗,消息文字浮在其上不受影响"><span>聊天区暗度</span><span id="zb-chat-dim-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="窗口顶部向下渐隐遮罩的浓度"><span>遮罩上端</span><span id="zb-chat-top-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="窗口底部向上渐隐遮罩的浓度(输入框附近)"><span>遮罩下端</span><span id="zb-chat-bot-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="整窗白色薄纱浓度,暗色壁纸下提升文字可读性"><span>大容器偏白</span><span id="zb-chat-frost-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"></div>' +
-    '    </div>' +
-    '    <div class="zb-sec">昼夜护眼 <label title="按时间段自动切换两套显示参数" class="zb-sec-on"><input type="checkbox" id="zb-dn-on">按时段自动调暗</label></div>' +
-    '      <div class="zb-sched-mode"><span>白天</span><input type="time" id="zb-dn-start" style="flex:1">' +
-    '        <span style="opacity:.5">至</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
-    '      <div class="zb-sched-mode"><span>白天压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
-    '        <span>模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
-    '      <div class="zb-sched-mode"><span>夜间压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
-    '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
-    '      </div></div>' +
-    '    </div>' +
     '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center"><span>最近使用 <button class="zb-act" id="zb-stats" title="壁纸累计展示时长排行">📊</button></span> <span class="zb-fold">▾</span></div>' +
     '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-lib-list" id="zb-history" style="max-height:192px"></div>' +
@@ -397,6 +353,53 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="file" id="zb-file" accept="image/*" hidden>' +
     '      </div>' +
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
+    '      </div></div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-settings" hidden>' +
+    '    <div class="zb-card zb-collapsible" id="zb-card-display"><div class="zb-card-title">显示调节 <span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-sec">画面</div>' +
+    '    <div class="zb-g2">' +
+    '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
+    '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
+    '      <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"></div>' +
+    '    </div>' +
+    '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体" style="flex:1">' +
+    '      <option value="cover">填满裁剪</option>' +
+    '      <option value="contain">完整显示</option>' +
+    '      <option value="smart">智能适配</option>' +
+    '    </select></div>' +
+    '    <div class="zb-sec">界面</div>' +
+    '    <div class="zb-row zb-toggles">' +
+    '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
+    '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
+    '    </div>' +
+    '    <div class="zb-row zb-toggles">' +
+    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
+    '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
+    '    </div>' +
+    '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
+    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-sec">聊天界面</div>' +
+    '    <div class="zb-g2">' +
+    '    <div class="zb-row"><label title="对话列背后的额外压暗,消息文字浮在其上不受影响"><span>聊天区暗度</span><span id="zb-chat-dim-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="窗口顶部向下渐隐遮罩的浓度"><span>遮罩上端</span><span id="zb-chat-top-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="窗口底部向上渐隐遮罩的浓度(输入框附近)"><span>遮罩下端</span><span id="zb-chat-bot-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"></div>' +
+    '    <div class="zb-row"><label title="整窗白色薄纱浓度,暗色壁纸下提升文字可读性"><span>大容器偏白</span><span id="zb-chat-frost-val">0.00</span></label>' +
+    '      <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"></div>' +
+    '    </div>' +
+    '    <div class="zb-sec">昼夜护眼 <label title="按时间段自动切换两套显示参数" class="zb-sec-on"><input type="checkbox" id="zb-dn-on">按时段自动调暗</label></div>' +
+    '      <div class="zb-sched-mode"><span>白天</span><input type="time" id="zb-dn-start" style="flex:1">' +
+    '        <span style="opacity:.5">至</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
+    '      <div class="zb-sched-mode"><span>白天压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
+    '        <span>模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
+    '      <div class="zb-sched-mode"><span>夜间压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
+    '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
     '      </div></div>' +
     '    </div>' +
     '    <div class="zb-card" id="zb-card-config"><div class="zb-card-title">配置</div>' +
@@ -2231,9 +2234,10 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].setAttribute('data-active', tabs[i].getAttribute('data-tab') === name ? '1' : '0');
     }
-    var pane = $(name === 'main' ? 'zb-tab-main' : 'zb-tab-sched');
+    var pane = $(name === 'main' ? 'zb-tab-main' : name === 'sched' ? 'zb-tab-sched' : 'zb-tab-settings');
     $('zb-tab-main').hidden = name !== 'main';
     $('zb-tab-sched').hidden = name !== 'sched';
+    $('zb-tab-settings').hidden = name !== 'settings';
     // Silk: a short fade-and-rise so the pane change reads as one motion.
     pane.classList.remove('zb-pane-in');
     void pane.offsetWidth;
@@ -2252,7 +2256,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   function activateSavedTab() {
     var saved = 'main';
     try { saved = localStorage.getItem('zcode-beautify:tab') || 'main'; } catch (e) {}
-    switchTab(saved === 'sched' ? 'sched' : 'main');
+    switchTab(saved === 'sched' || saved === 'settings' ? saved : 'main');
   }
 
   // --- simple mode (简洁版) ---------------------------------------------------
