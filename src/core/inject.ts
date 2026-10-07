@@ -114,6 +114,8 @@ export interface BeautifyConfig {
   themeColor?: string;
   /** Zone-refined chat-area masks (聊天界面); absent = all zero. */
   chatLook?: Partial<ChatLookConfig>;
+  /** Hide wallpaper+panel during ZCode's startup screen (default true). */
+  startupClean?: boolean;
   /** Day/night look schedule (护眼): two dim/blur presets switching by time. */
   dayNight?: {
     enabled: boolean;
@@ -153,6 +155,8 @@ export interface BuiltPayload {
   videoVolume: number;
   /** Zone-refined chat-area masks (聊天界面), normalized 0-100. */
   chatLook?: ChatLookConfig;
+  /** Defer mounting until the ZCode startup screen is gone (default true). */
+  startupClean?: boolean;
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -255,6 +259,7 @@ html, body { background: transparent !important; }
     kenBurns,
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config.chatLook),
+    startupClean: config.startupClean !== false,
   };
 }
 

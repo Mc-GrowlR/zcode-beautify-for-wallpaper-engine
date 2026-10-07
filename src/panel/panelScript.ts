@@ -11,11 +11,12 @@
 
 export const PANEL_ROOT_ID = "zcode-beautify-panel-root";
 
-export function buildPanelScript(apiPort: number, apiToken = ""): string {
+export function buildPanelScript(apiPort: number, apiToken = "", startupClean = true): string {
   const api = `http://127.0.0.1:${apiPort}`;
   return `(function(){
   var API = ${JSON.stringify(api)};
   var TOKEN = ${JSON.stringify(apiToken)};
+  var STARTUP_CLEAN = ${JSON.stringify(startupClean !== false)};
   /** Authenticated fetch: every API call carries the per-start token.
    * Non-2xx responses REJECT — a 401 body like {"error":...} otherwise
    * parses as valid data (undefined fields) and quietly poisons every
@@ -79,6 +80,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '#zb-panel[hidden] { display: none; }',
     '#zb-head { padding: 9px 12px; font-weight: 600; cursor: move; border-bottom: 1px solid rgba(255,255,255,.1);',
       ' display: flex; justify-content: space-between; align-items: center; }',
+    '.zb-head-btn { font-size: 10px; font-weight: 400; padding: 2px 8px; border-radius: 5px; cursor: pointer;',
+      ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.2); color: inherit; }',
+    '.zb-head-btn:hover { background: rgba(122,162,247,.35); }',
+    '.zb-head-btn[data-on="1"] { background: rgba(122,162,247,.5); border-color: rgba(122,162,247,.9); }',
+    '#zcode-beautify-panel-root[data-simple="1"] #zb-card-history, #zcode-beautify-panel-root[data-simple="1"] #zb-card-config, #zcode-beautify-panel-root[data-simple="1"] #zb-tabs { display: none; }',
     '#zb-body { padding: 10px 12px 0; }',
     '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
     '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);',
@@ -106,12 +112,15 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
     '.zb-tab:hover { background: rgba(255,255,255,.12); }',
     '.zb-tab[data-active="1"] { background: rgba(122,162,247,.3); border-color: rgba(122,162,247,.6); }',
+    '#zb-tab-main.zb-pane-in, #zb-tab-sched.zb-pane-in { animation: zb-pane-in 150ms ease; }',
+    '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
     '.zb-row { margin-bottom: 6px; }',
     '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 2px; opacity: .85; }',
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
     '.zb-toggles { display: flex; justify-content: center; gap: 16px; }',
     '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; white-space: nowrap; }',
     '.zb-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }',
+    '.zb-cfg-row .zb-btn { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
       ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); color: inherit; font-size: 12px;',
       ' white-space: nowrap; flex: 0 1 auto; }',
@@ -137,10 +146,12 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-lib-list { max-height: 110px; overflow: auto; }',
     // Hover peek: a bigger wallpaper preview that opens to the LEFT of the
     // panel when the cursor rests on any thumbnail-bearing item.
-    '#zb-hover-preview { position: fixed; z-index: 2147483646; width: 200px; border-radius: 8px;',
+    '#zb-hover-preview { position: fixed; z-index: 2147483646; width: 320px; border-radius: 8px;',
     '  border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
     '  overflow: hidden; pointer-events: none; }',
-    '#zb-hover-preview img { display: block; width: 100%; max-height: 300px; object-fit: cover; }',
+    '#zb-hover-preview img { display: block; width: 100%; max-height: 240px; object-fit: cover; }',
+    '#zb-hover-preview video { display: block; width: 100%; max-height: 240px; object-fit: contain; background: #000; }',
+    '#zb-hover-preview .zb-hv-off { display: none; }',
     '#zb-hover-preview[hidden] { display: none; }',
     '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
     '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
@@ -213,6 +224,9 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       ' margin-bottom: 4px; border-radius: 6px; cursor: pointer; font-size: 11px; background: rgba(255,255,255,.06);',
       ' border: 1px solid rgba(255,255,255,.12); color: inherit; }',
     '.zb-we-back:hover { background: rgba(255,255,255,.12); }',
+    '.zb-we-hover { position: fixed; z-index: 2147483646; width: 320px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
+      ' pointer-events: none; }',
     '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
     '.zb-we-group { padding: 6px 4px 4px; font-size: 11px; opacity: .6; }',
     '.zb-we-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }',
@@ -283,7 +297,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   root.innerHTML =
     '<div id="zb-fab" title="ZCode Beautify">🎨</div>' +
     '<div id="zb-panel" hidden>' +
-    '  <div id="zb-head"><span>ZCode Beautify</span></div>' +
+    '  <div id="zb-head"><span>ZCode Beautify</span><button id="zb-simple" class="zb-head-btn" title="简洁模式:隐藏标签页与最近使用/配置卡,显示调节折叠">简洁</button></div>' +
     '  <div id="zb-offline" hidden>' +
     '    <div>⚠ 美化服务未运行,面板不可用</div>' +
     '    <div class="zb-hint">在插件目录执行 <code>node dist/cli.js serve --detach</code> 启动</div>' +
@@ -385,15 +399,14 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
     '      </div></div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">配置</div>' +
-    '      <div class="zb-actions">' +
-    '        <button class="zb-btn" id="zb-cfg-export" title="导出当前壁纸/外观/播放方案为 JSON 文件">⬇ 导出配置</button>' +
-    '        <button class="zb-btn" id="zb-cfg-import" title="从导出的 JSON 文件恢复配置">⬆ 导入配置</button>' +
+    '    <div class="zb-card" id="zb-card-config"><div class="zb-card-title">配置</div>' +
+    '      <div class="zb-actions zb-cfg-row">' +
+    '        <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原外观</button>' +
+    '        <button class="zb-btn" id="zb-cfg-export" title="导出当前壁纸/外观/播放方案为 JSON 文件">⬇ 导出</button>' +
+    '        <button class="zb-btn" id="zb-cfg-import" title="从导出的 JSON 文件恢复配置">⬆ 导入</button>' +
     '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
     '      </div>' +
-    '    </div>' +
-    '    <div class="zb-row zb-actions">' +
-    '      <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原默认外观</button>' +
+    '      <div class="zb-sched-mode" style="margin:6px 0 0"><label title="ZCode 启动屏(加载页)期间不显示壁纸与美化面板,主界面就绪后再出现"><input type="checkbox" id="zb-startup-clean">启动屏时隐藏壁纸与面板</label></div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
@@ -441,7 +454,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '    </div>' +
     '  </div>' +
     '</div>' +
-    '<div id="zb-hover-preview" hidden><img alt=""></div>' +
+    '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>' +
     '<div id="zb-status"></div>';
   document.body.appendChild(root);
 
@@ -472,13 +485,37 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   function hideHoverPreview() {
     if (zbHoverTimer) { clearTimeout(zbHoverTimer); zbHoverTimer = null; }
     var box = $('zb-hover-preview');
-    if (box) box.hidden = true;
+    if (box) {
+      box.hidden = true;
+      var v = box.querySelector('video');
+      if (v) { v.pause(); }
+    }
   }
   function showHoverPreview(thumb) {
     var box = $('zb-hover-preview');
     if (!box) return;
-    var big = box.querySelector('img');
-    if (big.getAttribute('src') !== thumb.getAttribute('src')) big.src = thumb.src;
+    // Scene wallpapers get a LIVE preview: the loop video streams from serve,
+    // so hovering plays the actual wallpaper instead of an enlarged poster.
+    // Everything else (image library, playlists without a row key) keeps the
+    // enlarged image.
+    var item = thumb.closest('.zb-item');
+    var key = item ? (item.getAttribute('data-key') || '') : '';
+    var isScene = /^[a-f0-9]{32}$/.test(key);
+    var vid = box.querySelector('video');
+    var img = box.querySelector('img');
+    if (isScene) {
+      var src = mt(API + '/media/scene/' + key + '.mp4');
+      if (vid.getAttribute('src') !== src) vid.src = src;
+      vid.classList.remove('zb-hv-off');
+      img.classList.add('zb-hv-off');
+      vid.play().catch(function () {});
+    } else {
+      vid.pause();
+      vid.removeAttribute('src');
+      vid.classList.add('zb-hv-off');
+      img.classList.remove('zb-hv-off');
+      if (img.getAttribute('src') !== thumb.getAttribute('src')) img.src = thumb.src;
+    }
     box.hidden = false;
     var r = thumb.getBoundingClientRect();
     box.style.left = 'auto';
@@ -525,6 +562,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         monet: $('zb-monet').checked,
         wallpaperVisible: $('zb-vis').checked,
         kenBurns: $('zb-kb').checked,
+        startupClean: (document.getElementById('zb-startup-clean') || {}).checked !== false,
         videoVolume: Number($('zb-vol').value)
       }, function (d) { status(d && d.windows > 0 ? '已应用 applied' : '已保存(ZCode 未连接)'); });
     }, 300);
@@ -553,7 +591,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
-      $('zb-reset').textContent = '还原默认外观';
+      $('zb-reset').textContent = '还原外观';
       $('zb-reset').setAttribute('data-mode', 'reset');
       beat(true);
     } else {
@@ -598,17 +636,19 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         var cl = c.chatLook || {};
         setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0);
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
+        var sc = document.getElementById('zb-startup-clean');
+        if (sc) sc.checked = c.startupClean !== false;
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
-          resetBtn.textContent = '还原默认外观';
+          resetBtn.textContent = '还原外观';
           resetBtn.setAttribute('data-mode', 'reset');
           resetBtn.title = '移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)';
         } else if (c.hasBackup) {
-          resetBtn.textContent = '恢复我的壁纸';
+          resetBtn.textContent = '恢复壁纸';
           resetBtn.setAttribute('data-mode', 'restore');
           resetBtn.title = '从备份恢复你之前的壁纸与配色';
         } else {
-          resetBtn.textContent = '还原默认外观';
+          resetBtn.textContent = '还原外观';
           resetBtn.setAttribute('data-mode', 'reset');
           resetBtn.title = '当前已是默认外观';
         }
@@ -643,6 +683,8 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     };
     post('/api/config', { dayNight: dn }, function (d) { if (d && d.error) status(d.error); });
   }
+  var zbScEl = document.getElementById('zb-startup-clean');
+  if (zbScEl) zbScEl.addEventListener('change', pushConfig);
   ['zb-dn-on', 'zb-dn-start', 'zb-dn-end', 'zb-dn-daydim', 'zb-dn-nightdim', 'zb-dn-dayblur', 'zb-dn-nightblur'].forEach(function (id) {
     $(id).addEventListener('change', pushDayNight);
   });
@@ -793,8 +835,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           try { localStorage.setItem('zcode-beautify:current-key', d.wallpaperPath); } catch (e) {}
           markCurrent(d.wallpaperPath);
         }
-        loadLibrary();
-        loadHistory();
+        markLibDirty();
       });
     };
     fr.readAsDataURL(f);
@@ -845,13 +886,16 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   // Lists the machine's local WE wallpapers (workshop + myprojects) with
   // previews; picking one feeds its directory into the normal import queue.
   var wePop = null;
+  /** Set while the WE popup is open: hides its hover preview. */
+  var weHoverHide = null;
   function closeWePop() {
     // Sweep EVERY .zb-we-pop on <body>: after a serve restart the panel
     // script is re-evaluated and this closure's wePop is null again, while
     // the previous panel's popup element still sits in the DOM — clearing
     // only our own reference would leave that stale popup shadowing
     // querySelector('body > .zb-we-pop') and breaking the next open.
-    var pops = document.querySelectorAll('body > .zb-we-pop');
+    if (weHoverHide) weHoverHide();
+    var pops = document.querySelectorAll('body > .zb-we-pop, body > .zb-we-hover');
     for (var i = 0; i < pops.length; i++) pops[i].remove();
     wePop = null;
     document.removeEventListener('wheel', weScrollClose, true);
@@ -1149,6 +1193,40 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
 
     search.addEventListener('input', applyFilter);
     setTimeout(function () { search.focus(); }, 30);
+
+    // Hover preview: rest on a card 300ms and a large version of its
+    // preview appears beside the popup (WE preview GIFs animate there).
+    weHoverHide = function () {
+      if (weHoverTimer) { clearTimeout(weHoverTimer); weHoverTimer = null; }
+      var p = document.querySelector('body > .zb-we-hover');
+      if (p) p.remove();
+    };
+    var weHoverTimer = null;
+    list.addEventListener('mouseover', function (e) {
+      var card = e.target && e.target.closest ? e.target.closest('.zb-we-card') : null;
+      if (!card) return;
+      weHoverHide();
+      weHoverTimer = setTimeout(function () {
+        weHoverTimer = null;
+        var img = card.querySelector('img');
+        if (!img) return;
+        weHoverHide();
+        var prev = document.createElement('img');
+        prev.className = 'zb-we-hover';
+        prev.src = img.src;
+        prev.alt = '';
+        document.body.appendChild(prev);
+        var r = card.getBoundingClientRect();
+        prev.style.top = Math.max(8, Math.min(window.innerHeight - prev.offsetHeight - 8, r.top + r.height / 2 - prev.offsetHeight / 2)) + 'px';
+        prev.style.right = Math.max(8, window.innerWidth - r.left + 10) + 'px';
+      }, 300);
+    });
+    list.addEventListener('mouseout', function (e) {
+      var card = e.target && e.target.closest ? e.target.closest('.zb-we-card') : null;
+      if (!card) return;
+      if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+      weHoverHide();
+    });
   }
   $('zb-we-lib').addEventListener('click', function () {
     var btn = this;
@@ -1180,7 +1258,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     status('已选 ' + paths.length + ' 个,开始排队导入…');
     var i = 0;
     var next = function () {
-      if (i >= paths.length) { status('队列完成:' + paths.length + ' 个'); loadLibrary(); loadStorage(); return; }
+      if (i >= paths.length) { status('队列完成:' + paths.length + ' 个'); markLibDirty(); return; }
       $('zb-scene-path').value = paths[i];
       i++;
       status('导入 ' + i + '/' + paths.length + '…');
@@ -1220,7 +1298,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           clearInterval(importTimer); importTimer = null;
           status(j.result && j.result.fromCache ? '已从缓存载入' : '动态壁纸已应用');
           refresh();
-          loadHistory();
+          markLibDirty();
         }
       })
       .catch(function () { /* transient */ });
@@ -1294,7 +1372,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   $('zb-img-sort').addEventListener('click', function () {
     imgSort = imgSort === 'time' ? 'name' : 'time';
     applyLibQuery();
-    loadLibrary();
+    markLibDirty();
   });
   $('zb-open-images').addEventListener('click', function () {
     post('/api/open-folder', { target: 'images' }, function () { status('已在资源管理器打开'); });
@@ -1343,7 +1421,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         if (!d || !d.ok) failed++;
         if (--pending === 0) {
           enterBatchMode(false);
-          loadLibrary();
+          markLibDirty();
           status(failed ? ('部分未删除:' + failed + ' 条(使用中的需先切换)') : ('已删除 ' + (paths.length - failed) + ' 张'));
         }
       });
@@ -1377,8 +1455,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       if (!d || !d.ok) { status('压缩失败:' + ((d && d.error) || '服务未连接')); return; }
       var mb = (d.savedBytes || 0) / 1048576;
       status('已压缩 ' + d.done + ' 个' + (d.skipped ? '(跳过 ' + d.skipped + ' 个使用中)' : '') + ' 省 ' + mb.toFixed(1) + ' MB');
-      loadLibrary();
-      loadStorage();
+      markLibDirty();
     });
   });
   $('zb-purge').addEventListener('click', function () {
@@ -1392,8 +1469,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     btn.removeAttribute('data-armed');
     post('/api/scenes-purge', {}, function (d) {
       status(d && d.ok ? '已清理 ' + (d.removed || 0) + ' 项缓存' : '清理失败');
-      loadLibrary();
-      loadStorage();
+      markLibDirty();
     });
   });
 
@@ -1422,7 +1498,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
               if (r && r.error) { status(r.error); return; }
               try { localStorage.setItem('zcode-beautify:current-key', it.hash ? it.hash : it.path); } catch (e) {}
               markCurrent(it.hash ? it.hash : it.path);
-              loadHistory();
+              markLibDirty();
             });
           });
           el.appendChild(img);
@@ -1447,15 +1523,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       })
       .catch(function () { /* offline */ });
   }
-  $('zb-fab').addEventListener('click', function () {
-    if (panelOpen()) {
-      if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
-    } else if (rotStateTimer) {
-      clearInterval(rotStateTimer); rotStateTimer = null;
-    }
-  }, { capture: true });
-  var fabOrig = $('zb-fab');
-  rotStateTimer = zbEvery(pollRotState, 1000); // panel may already be open on re-inject
+  // The rot-state poller starts/stops in the MAIN click handler below — a
+  // capture-phase variant ran BEFORE the panel toggled, so "open" read as
+  // "closed" and killed the interval the moment the panel opened, freezing
+  // the status line ("第 N/M 张 · Xs" never changed).
+  rotStateTimer = panelOpen() ? zbEvery(pollRotState, 1000) : null;
 
   // --- usage-time ranking (📊) ----------------------------------------------
   $('zb-stats').addEventListener('click', function () {
@@ -1527,8 +1599,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         if (d && d.error) { status(d.error); return; }
         status('配置已导入并应用');
         refresh();
-        loadLibrary();
-        loadHistory();
+        markLibDirty();
         loadRotation();
       });
     };
@@ -1566,7 +1637,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     star.addEventListener('click', function (e) {
       e.stopPropagation();
       post('/api/favorite', { on: !favorite, hash: applyBody.hash, path: applyBody.path }, function (d) {
-        if (d && d.ok) loadLibrary();
+        if (d && d.ok) markLibDirty();
       });
     });
     row.appendChild(star);
@@ -1589,7 +1660,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
         try { localStorage.setItem('zcode-beautify:current-key', key); } catch (e) {}
         status('已应用 applied');
         markCurrent(key);
-        loadHistory();
+        markLibDirty();
       });
     });
     row.appendChild(labelEl);
@@ -1605,10 +1676,10 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           post('/api/library-rename', { kind: kind, hash: applyBody.hash, path: applyBody.path, name: input.value.trim() },
             function (r) {
               if (r && r.error) { status(r.error); }
-              loadLibrary();
+              markLibDirty();
             });
         } else {
-          loadLibrary();
+          markLibDirty();
         }
       };
       input.addEventListener('keydown', function (e) {
@@ -1640,7 +1711,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
           try { localStorage.removeItem('zcode-beautify:current-key'); } catch (e) {}
         }
         status('已删除 deleted');
-        loadLibrary();
+        markLibDirty();
       });
     });
     row.appendChild(del);
@@ -2140,16 +2211,39 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   });
 
   // --- tabs (壁纸 / 定时播放) ------------------------------------------------
+  // Library/history rebuilds are DIRTY-driven: re-rendering the lists on
+  // every tab switch recreated every <img> and the panel flashed black
+  // while they decoded. switchTab now only refreshes control VALUES; the
+  // DOM rebuilds happen when something actually changed the data.
+  var zbLibDirty = true;
+  function markLibDirty() {
+    zbLibDirty = true;
+    if (!$('zb-tab-main').hidden) { reloadMainLists(); }
+  }
+  function reloadMainLists() {
+    zbLibDirty = false;
+    loadLibrary();
+    loadStorage();
+    loadHistory();
+  }
   function switchTab(name) {
     var tabs = document.querySelectorAll('.zb-tab');
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].setAttribute('data-active', tabs[i].getAttribute('data-tab') === name ? '1' : '0');
     }
+    var pane = $(name === 'main' ? 'zb-tab-main' : 'zb-tab-sched');
     $('zb-tab-main').hidden = name !== 'main';
     $('zb-tab-sched').hidden = name !== 'sched';
+    // Silk: a short fade-and-rise so the pane change reads as one motion.
+    pane.classList.remove('zb-pane-in');
+    void pane.offsetWidth;
+    pane.classList.add('zb-pane-in');
     try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
     if (name === 'sched') loadRotation();
-    else { refresh(); loadLibrary(); loadStorage(); loadHistory(); }
+    else {
+      refresh();
+      if (zbLibDirty) reloadMainLists();
+    }
   }
   $('zb-tabs').addEventListener('click', function (e) {
     var b = e.target && e.target.closest ? e.target.closest('.zb-tab') : null;
@@ -2160,6 +2254,27 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     try { saved = localStorage.getItem('zcode-beautify:tab') || 'main'; } catch (e) {}
     switchTab(saved === 'sched' ? 'sched' : 'main');
   }
+
+  // --- simple mode (简洁版) ---------------------------------------------------
+  // Hides the tabs, the 最近使用 and 配置 cards, and collapses the display
+  // card — one tap to a minimal "pick a wallpaper" panel, tap again to
+  // restore the user's own fold states.
+  var zbSimple = false;
+  try { zbSimple = localStorage.getItem('zcode-beautify:simple') === '1'; } catch (e) {}
+  function applySimple(on) {
+    zbSimple = on;
+    root.setAttribute('data-simple', on ? '1' : '0');
+    $('zb-simple').setAttribute('data-on', on ? '1' : '0');
+    $('zb-simple').textContent = on ? '完整' : '简洁';
+    var disp = document.getElementById('zb-card-display');
+    if (disp) disp.classList.toggle('zb-collapsed', on);
+    try { localStorage.setItem('zcode-beautify:simple', on ? '1' : '0'); } catch (e) {}
+  }
+  $('zb-simple').addEventListener('click', function (e) {
+    e.stopPropagation(); // the head is the drag handle
+    applySimple(!zbSimple);
+  });
+  applySimple(zbSimple);
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
@@ -2173,9 +2288,11 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       }
       activateSavedTab();
       beat(true);
+      if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
     } else {
       hideHoverPreview(); // thumbnails vanish under the closed panel
       if (root.getAttribute('data-offline') !== '1') beat(false);
+      if (rotStateTimer) { clearInterval(rotStateTimer); rotStateTimer = null; }
     }
   });
 
@@ -2225,13 +2342,25 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   // The registration replays at document creation where <body> does not exist
   // yet — document.body.appendChild would throw and the panel would never
   // come back after a reload. Wait for the parser (a few ms at most).
-  if (document.body) runPanel();
-  else {
-    var zbPanelWait = function() {
-      if (document.body) runPanel();
-      else setTimeout(zbPanelWait, 20);
-    };
-    zbPanelWait();
-  }
+  var zbStartupOn = function() {
+    if (!document.body) return false;
+    var cls = document.body.className || '';
+    return /zcode-startup/.test(cls) && !/ready/.test(cls);
+  };
+  var zbMount = function() { runPanel(); };
+  var zbPanelWait = function() {
+    if (!document.body) { setTimeout(zbPanelWait, 20); return; }
+    // The startup screen shows loading art — mounting the FAB/panel on top
+    // of it looks broken; hold off until the app marks itself ready.
+    if (STARTUP_CLEAN && zbStartupOn()) {
+      var mo = new MutationObserver(function() {
+        if (!zbStartupOn()) { mo.disconnect(); zbMount(); }
+      });
+      mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      return;
+    }
+    zbMount();
+  };
+  zbPanelWait();
 })();`;
 }

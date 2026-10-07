@@ -130,6 +130,8 @@ export interface InjectionPayload {
   videoVolume?: number;
   /** Zone-refined chat-area masks (聊天界面); absent = all zero. */
   chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number };
+  /** Defer mounting until the ZCode startup screen finished (default true). */
+  startupClean?: boolean;
 }
 
 /**
@@ -161,7 +163,17 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
-  var runBootstrap = function() {
+  var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
+  // The startup screen phase (body carries zcode-startup-* but not yet
+  // -ready) shows the loading art — a wallpaper layer and the panel FAB on
+  // top of it look broken. With startupClean the whole bootstrap (and the
+  // panel) waits for the ready class; without it everything mounts at once.
+  var inStartupScreen = function() {
+    if (!document.body) return true;
+    var cls = document.body.className || '';
+    return /zcode-startup/.test(cls) && !/ready/.test(cls);
+  };
+  var runBootstrapBody = function() {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
@@ -601,6 +613,19 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     localStorage.setItem(MARKER + ':css', ${JSON.stringify(payload.css)});
     localStorage.setItem(MARKER + ':wallpaper', ${JSON.stringify(payload.wallpaperDataUri ?? "")});
   } catch (e) {}
+  };
+  var runBootstrap = function() {
+    if (!STARTUP_CLEAN || !inStartupScreen()) { runBootstrapBody(); return; }
+    if (window.__zcodeBeautify.startupMO) return; // a waiter is already armed
+    var mo = new MutationObserver(function() {
+      if (!inStartupScreen()) {
+        mo.disconnect();
+        window.__zcodeBeautify.startupMO = null;
+        runBootstrapBody();
+      }
+    });
+    window.__zcodeBeautify.startupMO = mo;
+    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   };
   // The addScriptToEvaluateOnNewDocument registration replays at document
   // creation, where documentElement is still null — appending the style or

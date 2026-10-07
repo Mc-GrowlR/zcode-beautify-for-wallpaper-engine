@@ -219,6 +219,7 @@ function publicConfig(config: BeautifyConfig) {
     themeColor: config.themeColor ?? null,
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
+    startupClean: config.startupClean !== false,
     fit: config.fit,
     wallpaperSet: Boolean(config.wallpaperPath && fs.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
@@ -237,6 +238,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.monet === "boolean") out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (typeof body?.kenBurns === "boolean") out.kenBurns = body.kenBurns;
+  if (typeof body?.startupClean === "boolean") out.startupClean = body.startupClean;
   if (typeof body?.videoVolume === "number" && body.videoVolume >= 0 && body.videoVolume <= 100) out.videoVolume = Math.round(body.videoVolume);
   if (body?.themeColor === null) out.themeColor = undefined;
   else if (typeof body?.themeColor === "string" && /^#[0-9a-fA-F]{6}$/.test(body.themeColor)) out.themeColor = body.themeColor;
@@ -332,6 +334,7 @@ async function holdSession(
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
+    startupClean: payload.startupClean,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -344,7 +347,7 @@ async function holdSession(
     console.error(`serve: theme bootstrap threw — ${JSON.stringify(bootEval.exceptionDetails).slice(0, 400)}`);
   }
 
-  const panelScript = buildPanelScript(apiPort, mediaToken);
+  const panelScript = buildPanelScript(apiPort, mediaToken, config.startupClean !== false);
   await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
   // Runtime.evaluate does NOT reject when the script itself throws — surface
   // exceptionDetails or a broken panel fails silently ("injected" in the log).
@@ -369,6 +372,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
+    startupClean: payload.startupClean,
   });
   let ok = 0;
   for (const [id, session] of held) {
