@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow, isWeUiOpen } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -194,14 +194,6 @@ export async function importScene(
 
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash, blackness, fromCache: false };
-  }
-
-  // An open WE UI blacks out the render window. The plugin never touches the
-  // user's UI — bail out with clear guidance instead of a black recording.
-  if (await isWeUiOpen()) {
-    throw new SceneImportError(
-      "检测到 Wallpaper Engine 界面正开着——渲染窗口会黑屏。请先关闭 WE 界面,再重新导入",
-    );
   }
 
   onProgress("opening", `window "${opts.title}"`);
