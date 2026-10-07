@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow, closeWeUi } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow, closeWeUi, reopenWeUi } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -223,7 +223,7 @@ export async function importScene(
   // An open Wallpaper Engine UI suppresses -playInWindow rendering — the
   // recording would be pitch black. Close it first; the core keeps running.
   onProgress("closing-we-ui", "Wallpaper Engine UI");
-  await closeWeUi();
+  const uiWasOpen = await closeWeUi();
   onProgress("opening", `window "${opts.title}"`);
   const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
   let rawPath = "";
@@ -267,6 +267,12 @@ export async function importScene(
     if (rawPath) { try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ } }
     try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
     await closeSceneWindow(handle).catch(() => undefined);
+    // Give the user their WE UI back if the import closed it (win: black
+    // render fix; lose: the window they had open vanishes without this).
+    if (uiWasOpen) {
+      const we = await import('./dependencyCheck.js').then((m) => m.checkWallpaperEngine()).catch(() => undefined);
+      if (we && we.path) reopenWeUi(we.path);
+    }
   }
 }
 
