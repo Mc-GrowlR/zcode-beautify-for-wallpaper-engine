@@ -129,8 +129,22 @@ export async function openSceneWindow(
   opts: SceneWindowOptions,
   wallpaperExePath?: string,
 ): Promise<SceneWindowHandle> {
-  const exe = wallpaperExePath ?? (await checkWallpaperEngine()).path;
+  const status = await checkWallpaperEngine();
+  const exe = wallpaperExePath ?? status.path;
   if (!exe) throw new SceneWindowError("Wallpaper Engine not found — cannot open scene window");
+
+  // A COLD wallpaper64 ignores -control arguments (it comes up for the Steam
+  // check and never acts on them), so a spawn with no running core ends in
+  // "window did not appear within 15s". Bare-start the core first and wait
+  // until it reports running, then send the control command.
+  if (!status.detail?.includes("running")) {
+    const warm = spawn(exe, [], { stdio: "ignore", detached: true });
+    warm.unref();
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if ((await checkWallpaperEngine()).detail?.includes("running")) break;
+    }
+  }
 
   const proc = spawn(exe, [
     "-control", "openWallpaper",
