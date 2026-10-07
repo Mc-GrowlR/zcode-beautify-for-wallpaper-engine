@@ -80,11 +80,6 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '#zb-panel[hidden] { display: none; }',
     '#zb-head { padding: 9px 12px; font-weight: 600; cursor: move; border-bottom: 1px solid rgba(255,255,255,.1);',
       ' display: flex; justify-content: space-between; align-items: center; }',
-    '.zb-head-btn { font-size: 10px; font-weight: 400; padding: 2px 8px; border-radius: 5px; cursor: pointer;',
-      ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.2); color: inherit; }',
-    '.zb-head-btn:hover { background: rgba(122,162,247,.35); }',
-    '.zb-head-btn[data-on="1"] { background: rgba(122,162,247,.5); border-color: rgba(122,162,247,.9); }',
-    '#zcode-beautify-panel-root[data-simple="1"] #zb-card-history, #zcode-beautify-panel-root[data-simple="1"] #zb-card-config, #zcode-beautify-panel-root[data-simple="1"] #zb-tabs { display: none; }',
     '#zb-body { padding: 10px 12px 0; }',
     '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
     '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);',
@@ -303,7 +298,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   root.innerHTML =
     '<div id="zb-fab" title="ZCode Beautify">🎨</div>' +
     '<div id="zb-panel" hidden>' +
-    '  <div id="zb-head"><span>ZCode Beautify</span><button id="zb-simple" class="zb-head-btn" title="简洁模式:隐藏标签页与最近使用/配置卡,显示调节折叠">简洁</button></div>' +
+    '  <div id="zb-head"><span>ZCode Beautify</span></div>' +
     '  <div id="zb-offline" hidden>' +
     '    <div>⚠ 美化服务未运行,面板不可用</div>' +
     '    <div class="zb-hint">在插件目录执行 <code>node dist/cli.js serve --detach</code> 启动</div>' +
@@ -2393,27 +2388,6 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     try { saved = localStorage.getItem('zcode-beautify:tab') || 'main'; } catch (e) {}
     switchTab(saved === 'sched' || saved === 'settings' ? saved : 'main');
   }
-
-  // --- simple mode (简洁版) ---------------------------------------------------
-  // Hides the tabs, the 最近使用 and 配置 cards, and collapses the display
-  // card — one tap to a minimal "pick a wallpaper" panel, tap again to
-  // restore the user's own fold states.
-  var zbSimple = false;
-  try { zbSimple = localStorage.getItem('zcode-beautify:simple') === '1'; } catch (e) {}
-  function applySimple(on) {
-    zbSimple = on;
-    root.setAttribute('data-simple', on ? '1' : '0');
-    $('zb-simple').setAttribute('data-on', on ? '1' : '0');
-    $('zb-simple').textContent = on ? '完整' : '简洁';
-    var disp = document.getElementById('zb-card-display');
-    if (disp) disp.classList.toggle('zb-collapsed', on);
-    try { localStorage.setItem('zcode-beautify:simple', on ? '1' : '0'); } catch (e) {}
-  }
-  $('zb-simple').addEventListener('click', function (e) {
-    e.stopPropagation(); // the head is the drag handle
-    applySimple(!zbSimple);
-  });
-  applySimple(zbSimple);
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
