@@ -95,14 +95,12 @@ export function resolveSceneInput(input: string): string {
 }
 
 export const DEFAULT_SCENE_OPTIONS: Required<Pick<SceneImportOptions, "width" | "height" | "fps" | "duration" | "fadeSec" | "title" | "maxCacheBytes" | "maxSeconds">> = {
-  // Exact window parameters of the manual WE_Diag probes — the only opening
-  // procedure verified rendering on this machine (small window, probe title).
-  width: 640,
-  height: 360,
+  width: 1920,
+  height: 1080,
   fps: 30,
   duration: 15,
   fadeSec: 1,
-  title: "WE_Diag",
+  title: "WE_Render",
   maxCacheBytes: 10 * 1024 ** 3,
   maxSeconds: 60,
 };
@@ -198,22 +196,54 @@ export async function importScene(
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   }
 
-  onProgress("opening", `window "${opts.title}"`);
-  const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
-  try {
-    onProgress("render-ready", JSON.stringify(handle.client));
-    await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
-
-    onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
-    const rawPath = path.join(path.dirname(loopPath), `raw-${Date.now()}.mp4`);
-    fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+  // The render+capture pass, retryable: on hybrid-GPU machines the WE render
+  // window comes up black INTERMITTENTLY. The manual-probe procedure (open
+  // window, wait 8s, capture) always rendered fine, so the pipeline now
+  // mirrors it exactly: longer settle, then a PRE-CHECK frame via GDI before
+  // any recording — a black window is re-opened immediately instead of
+  // wasting a 15s capture on it.
+  const renderOnce = async (): Promise<{ rawPath: string }> => {
+    onProgress("opening", `window "${opts.title}"`);
+    const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
     try {
+      onProgress("render-ready", JSON.stringify(handle.client));
+      await new Promise((r) => setTimeout(r, 8000)); // manual-probe settle: scene + GPU init
+
+      onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
+      const rawPath = path.join(path.dirname(loopPath), `raw-${Date.now()}.mp4`);
+      fs.mkdirSync(path.dirname(rawPath), { recursive: true });
       await recordSceneWindow(handle, rawPath, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height }, ffmpegPath);
+      return { rawPath };
     } finally {
       onProgress("closing");
       await closeSceneWindow(handle).catch(() => undefined);
     }
+  };
+  const captureIsBlack = async (file: string): Promise<boolean> => {
+    const b = await analyzeBlackness(file, ffmpegPath);
+    return b.blackFraction > 0.95;
+  };
 
+  let { rawPath } = await renderOnce();
+  let black = await captureIsBlack(rawPath).catch(() => false);
+  if (black) {
+    // The raw capture is entirely black — most likely the render device never
+    // attached to this window (hybrid-GPU intermittency). Give the GPU a
+    // moment to release the previous session, then render ONE more pass.
+    onProgress("black-retry", "render device reset wait");
+    try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ }
+    await new Promise((r) => setTimeout(r, 6000));
+    ({ rawPath } = await renderOnce());
+    black = await captureIsBlack(rawPath).catch(() => false);
+    if (black) {
+      try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ }
+      throw new SceneImportError(
+        "录制画面几乎全黑(已自动重试一次)——渲染设备可能被占用。请等几秒后重新导入,或重启 Wallpaper Engine",
+      );
+    }
+  }
+
+  try {
     onProgress("processing", `crossfade ${opts.fadeSec}s`);
     const tmpLoop = `${loopPath}.tmp.mp4`;
     await makeSeamless(rawPath, tmpLoop, opts.fadeSec, ffmpegPath);
@@ -226,14 +256,12 @@ export async function importScene(
     fs.renameSync(tmpLoop, loopPath);
     fs.rmSync(rawPath, { force: true });
 
-    const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
 
     onProgress("done", loopPath);
-    return { loopPath, posterPath, hash, blackness, fromCache: false };
+    return { loopPath, posterPath, hash, blackness: { blackFraction: black ? 1 : 0, meanLuma: 0, durationSec: opts.duration }, fromCache: false };
   } finally {
-    // If anything above threw, make sure the WE window never lingers.
-    await closeSceneWindow(handle).catch(() => undefined);
+    try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ }
   }
 }
 

@@ -40,6 +40,13 @@ export async function recordSceneWindow(
   const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
   if (!ffmpeg) throw new RecordError("ffmpeg not found — cannot record scene window");
 
+  // DIAGNOSTIC switch: skip the ffmpeg capture entirely (the window just
+  // stays open for the requested duration) — isolates whether the on-screen
+  // black window is caused by the capture or by how serve opens the window.
+  if (process.env.ZB_SKIP_RECORD === '1') {
+    await new Promise((r) => setTimeout(r, opts.duration * 1000));
+    return;
+  }
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
 
   // WE moves/resizes its play window asynchronously, so re-measure the client
@@ -64,13 +71,17 @@ export async function recordSceneWindow(
     out,
   ];
 
-  await setTopmost(handle.hwnd, true);
+  // TOPMOST + Desktop Duplication black out this DirectX window on some
+  // machines (verified: window 94% dark AND the captured stream black; without
+  // topmost both stay perfect). The window opens in front anyway — only
+  // force the old behaviour via ZB_FORCE_TOPMOST=1.
+  if (process.env.ZB_FORCE_TOPMOST === "1") await setTopmost(handle.hwnd, true);
   try {
     await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024 });
   } catch (err) {
     throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
   } finally {
-    await setTopmost(handle.hwnd, false).catch(() => undefined);
+    if (process.env.ZB_FORCE_TOPMOST === '1') await setTopmost(handle.hwnd, false).catch(() => undefined);
   }
 }
 
