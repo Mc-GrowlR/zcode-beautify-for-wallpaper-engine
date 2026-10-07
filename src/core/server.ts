@@ -151,15 +151,15 @@ function weImportsFile(): string {
   return path.join(dataDir(), "we-imports.json");
 }
 
-function loadWeImports(): Record<string, { hash: string }> {
+function loadWeImports(): Record<string, { hash: string; seed?: boolean }> {
   try {
-    return JSON.parse(fs.readFileSync(weImportsFile(), "utf8")) as Record<string, { hash: string }>;
+    return JSON.parse(fs.readFileSync(weImportsFile(), "utf8")) as Record<string, { hash: string; seed?: boolean }>;
   } catch {
     return {};
   }
 }
 
-function saveWeImports(map: Record<string, { hash: string }>): void {
+function saveWeImports(map: Record<string, { hash: string; seed?: boolean }>): void {
   try {
     fs.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
   } catch {
@@ -1395,15 +1395,20 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           const key = it.dir.toLowerCase();
           if (map[key]) continue;
           const exact = [...sceneNames.entries()].filter(([n]) => n === cleanTitle(it.title));
-          if (exact.length === 1 && exact[0][1].length === 1) {
-            map[key] = { hash: exact[0][1][0] };
+          // An exact name match only counts when that scene name is carried
+          // by EXACTLY ONE workshop title: reposts share names (eight
+          // projects titled 阿比 all exact-matched one cache entry and every
+          // one previewed as 'imported' with the same loop).
+          if (exact.length === 1 && exact[0][1].length === 1
+            && items.filter((x) => cleanTitle(x.title) === exact[0][0]).length === 1) {
+            map[key] = { hash: exact[0][1][0], seed: true };
             dirty = true;
             continue;
           }
           const contains = [...sceneNames.entries()].filter(([n]) => it.title.includes(n));
           if (contains.length === 1 && contains[0][1].length === 1
             && items.filter((x) => x.title.includes(contains[0][0])).length === 1) {
-            map[key] = { hash: contains[0][1][0] };
+            map[key] = { hash: contains[0][1][0], seed: true };
             dirty = true;
           }
         }
