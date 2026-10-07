@@ -113,7 +113,7 @@ export async function openSceneWindow(
     "-playInWindow", opts.title,
     "-width", String(opts.width),
     "-height", String(opts.height),
-  ], { stdio: "ignore", detached: false, windowsHide: true });
+  ], { stdio: "ignore", detached: true, windowsHide: true });
   proc.unref();
 
   const hwnd = await waitForWindow(opts.title, 15_000);
@@ -121,7 +121,12 @@ export async function openSceneWindow(
     throw new SceneWindowError(`Window "${opts.title}" did not appear within 15s`);
   }
 
-  const client = await positionWindow(hwnd, opts);
+  // NO SetWindowPos repositioning: every manual probe (open via the same
+  // command, wait, capture) rendered fine, while the pipeline that moved the
+  // window right after creation came up black on this hybrid-GPU machine.
+  // The recorder crops by the MEASURED client rect, so the window can simply
+  // stay wherever WE placed it.
+  const client = await measureClientRect(hwnd, opts.title);
   return { title: opts.title, hwnd, client, proc };
 }
 

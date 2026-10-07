@@ -197,15 +197,17 @@ export async function importScene(
   }
 
   // The render+capture pass, retryable: on hybrid-GPU machines the WE render
-  // window comes up black INTERMITTENTLY (no stable trigger found — UI state,
-  // topmost, window size, ddagrab concurrency all ruled out by experiment).
-  // One retry after letting the render device settle clears it in practice.
+  // window comes up black INTERMITTENTLY. The manual-probe procedure (open
+  // window, wait 8s, capture) always rendered fine, so the pipeline now
+  // mirrors it exactly: longer settle, then a PRE-CHECK frame via GDI before
+  // any recording — a black window is re-opened immediately instead of
+  // wasting a 15s capture on it.
   const renderOnce = async (): Promise<{ rawPath: string }> => {
     onProgress("opening", `window "${opts.title}"`);
     const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
     try {
       onProgress("render-ready", JSON.stringify(handle.client));
-      await new Promise((r) => setTimeout(r, 3000)); // let the scene settle
+      await new Promise((r) => setTimeout(r, 8000)); // manual-probe settle: scene + GPU init
 
       onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
       const rawPath = path.join(path.dirname(loopPath), `raw-${Date.now()}.mp4`);
