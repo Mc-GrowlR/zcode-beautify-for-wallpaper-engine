@@ -146,7 +146,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '.zb-lib-list { max-height: 110px; overflow: auto; }',
     // Hover peek: a bigger wallpaper preview that opens to the LEFT of the
     // panel when the cursor rests on any thumbnail-bearing item.
-    '#zb-hover-preview { position: fixed; z-index: 2147483646; width: 320px; border-radius: 8px;',
+    '#zb-hover-preview { position: fixed; z-index: 2147483647; width: 320px; border-radius: 8px;',
     '  border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
     '  overflow: hidden; pointer-events: none; }',
     '#zb-hover-preview img { display: block; width: 100%; max-height: 240px; object-fit: cover; }',
@@ -224,7 +224,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       ' margin-bottom: 4px; border-radius: 6px; cursor: pointer; font-size: 11px; background: rgba(255,255,255,.06);',
       ' border: 1px solid rgba(255,255,255,.12); color: inherit; }',
     '.zb-we-back:hover { background: rgba(255,255,255,.12); }',
-    '.zb-we-hover { position: fixed; z-index: 2147483646; width: 320px; border-radius: 8px;',
+    '.zb-we-hover { position: fixed; z-index: 2147483647; width: 320px; border-radius: 8px;',
       ' border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
       ' pointer-events: none; }',
     '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
@@ -489,7 +489,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   // the panel. The 260ms delay keeps a cursor merely sweeping past quiet.
   var ZB_HOVER_SEL = '.zb-item .zb-item-img, .zb-wp-item img, .zb-wp-btn img';
   var zbHoverTimer = null;
+  var zbHvPending = 0;
   function hideHoverPreview() {
+    zbHvPending++;
     if (zbHoverTimer) { clearTimeout(zbHoverTimer); zbHoverTimer = null; }
     var box = $('zb-hover-preview');
     if (box) {
@@ -498,31 +500,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       if (v) { v.pause(); }
     }
   }
-  function showHoverPreview(thumb) {
-    var box = $('zb-hover-preview');
-    if (!box) return;
-    // Scene wallpapers get a LIVE preview: the loop video streams from serve,
-    // so hovering plays the actual wallpaper instead of an enlarged poster.
-    // Everything else (image library, playlists without a row key) keeps the
-    // enlarged image.
-    var item = thumb.closest('.zb-item');
-    var key = item ? (item.getAttribute('data-key') || '') : '';
-    var isScene = /^[a-f0-9]{32}$/.test(key);
-    var vid = box.querySelector('video');
-    var img = box.querySelector('img');
-    if (isScene) {
-      var src = mt(API + '/media/scene/' + key + '.mp4');
-      if (vid.getAttribute('src') !== src) vid.src = src;
-      vid.classList.remove('zb-hv-off');
-      img.classList.add('zb-hv-off');
-      vid.play().catch(function () {});
-    } else {
-      vid.pause();
-      vid.removeAttribute('src');
-      vid.classList.add('zb-hv-off');
-      img.classList.remove('zb-hv-off');
-      if (img.getAttribute('src') !== thumb.getAttribute('src')) img.src = thumb.src;
-    }
+  function zbHvReveal(box, thumb) {
     box.hidden = false;
     var r = thumb.getBoundingClientRect();
     box.style.left = 'auto';
@@ -532,22 +510,71 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     if (top + box.offsetHeight > window.innerHeight - 8) top = window.innerHeight - box.offsetHeight - 8;
     box.style.top = Math.round(top) + 'px';
   }
-  document.addEventListener('mouseover', function (e) {
+  function showHoverPreview(thumb) {
+    var box = $('zb-hover-preview');
+    if (!box) return;
+    // Scene wallpapers get a LIVE preview: the loop video streams from serve,
+    // so hovering plays the actual wallpaper instead of an enlarged poster.
+    // Everything else (image library, playlists without a row key) keeps the
+    // enlarged image. Swapping src while visible showed the PREVIOUS item
+    // until the new one decoded (the flicker) — content is swapped while
+    // hidden and the box revealed only when the new medium is ready; a
+    // same-src re-hover reveals immediately.
+    var item = thumb.closest('.zb-item');
+    var key = item ? (item.getAttribute('data-key') || '') : '';
+    var isScene = /^[a-f0-9]{32}$/.test(key);
+    var vid = box.querySelector('video');
+    var img = box.querySelector('img');
+    zbHvPending++;
+    var myTicket = zbHvPending;
+    var reveal = function () {
+      if (myTicket !== zbHvPending) return; // a newer hover superseded us
+      vid.classList.toggle('zb-hv-off', !isScene);
+      img.classList.toggle('zb-hv-off', isScene);
+      if (isScene) vid.play().catch(function () {});
+      zbHvReveal(box, thumb);
+    };
+    if (isScene) {
+      var src = mt(API + '/media/scene/' + key + '.mp4');
+      var vReady = function () { vid.removeEventListener('loadeddata', vReady); reveal(); };
+      if (vid.getAttribute('src') === src && vid.readyState >= 2) { reveal(); return; }
+      box.hidden = true; // old content must not flash while the new loads
+      vid.pause();
+      vid.src = src;
+      vid.addEventListener('loadeddata', vReady);
+      setTimeout(function () { if (myTicket === zbHvPending && box.hidden) reveal(); }, 1200);
+    } else {
+      var iSrc = thumb.getAttribute('src') || thumb.src;
+      if (img.getAttribute('src') === iSrc && img.complete && img.naturalWidth > 0) { reveal(); return; }
+      box.hidden = true;
+      vid.pause();
+      vid.removeAttribute('src');
+      img.onload = function () { img.onload = null; reveal(); };
+      img.onerror = function () { img.onerror = null; reveal(); };
+      img.src = iSrc;
+      setTimeout(function () { if (myTicket === zbHvPending && box.hidden) reveal(); }, 1200);
+    }
+  }
+  var zbHvOver = function (e) {
+    if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('mouseover', zbHvOver); return; }
     var t = e.target;
     if (!t || !t.closest) return;
     var thumb = t.closest(ZB_HOVER_SEL);
     if (!thumb || thumb.tagName !== 'IMG') return;
     if (zbHoverTimer) clearTimeout(zbHoverTimer);
     zbHoverTimer = setTimeout(function () { zbHoverTimer = null; showHoverPreview(thumb); }, 260);
-  });
-  document.addEventListener('mouseout', function (e) {
+  };
+  document.addEventListener('mouseover', zbHvOver);
+  var zbHvOut = function (e) {
+    if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('mouseout', zbHvOut); return; }
     var t = e.target;
     if (!t || !t.closest) return;
     var thumb = t.closest(ZB_HOVER_SEL);
     if (!thumb) return;
     if (e.relatedTarget && thumb.contains(e.relatedTarget)) return;
     hideHoverPreview();
-  });
+  };
+  document.addEventListener('mouseout', zbHvOut);
   window.addEventListener('scroll', hideHoverPreview, true);
 
   // Local live preview; the server re-injects the authoritative CSS right after.
@@ -694,6 +721,11 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   if (zbScEl) zbScEl.addEventListener('change', pushConfig);
   // Per-library visible row counts (设置 → 配置): stored in localStorage —
   // pure panel preference, no serve round-trip needed.
+  // Hover delegation is DOCUMENT-level and cannot be swept like intervals —
+  // handlers from previous panel generations keep firing after a serve
+  // restart re-evaluates this script. Each generation mints a token; stale
+  // handlers see a foreign token, unbind themselves and step aside.
+  var zbHvGen = (window.__zbHvGen = (window.__zbHvGen || 0) + 1);
   var zbRowH = 32;
   var libRows = { scenes: 3, images: 3 };
   try {
@@ -818,6 +850,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         });
         if (!pop.children.length) pop.textContent = '当前壁纸没有可用色板';
         document.body.appendChild(pop);
+      (function () { var wep = document.querySelector('body > .zb-we-pop'); if (wep) document.body.appendChild(wep); })(); // keep the WE window on top (equal z)
         var btn = $('zb-pin').getBoundingClientRect();
         pop.style.left = Math.max(8, Math.min(btn.left, window.innerWidth - 216)) + 'px';
         pop.style.width = '208px';
@@ -1604,6 +1637,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           pop.appendChild(row);
         });
         document.body.appendChild(pop);
+      (function () { var wep = document.querySelector('body > .zb-we-pop'); if (wep) document.body.appendChild(wep); })(); // keep the WE window on top (equal z)
         var btn = $('zb-stats').getBoundingClientRect();
         pop.style.left = Math.max(8, Math.min(btn.left, window.innerWidth - 216)) + 'px';
         pop.style.width = '208px';
@@ -1890,6 +1924,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         groupLists.push(glist);
       });
       document.body.appendChild(pop);
+      (function () { var wep = document.querySelector('body > .zb-we-pop'); if (wep) document.body.appendChild(wep); })(); // keep the WE window on top (equal z)
       // Fixed placement anchored to the button: opens above it when the full
       // two-column list fits; below otherwise, shrinking the group windows
       // proportionally when the viewport runs out of room.
