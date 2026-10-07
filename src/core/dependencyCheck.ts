@@ -27,7 +27,7 @@ export interface DependencyStatus {
   detail?: string;
 }
 
-const WE_EXE_RELATIVE = path.join("wallpaper_engine", "wallpaper64.exe");
+const WE_EXE_RELATIVE = path.join("steamapps", "common", "wallpaper_engine", "wallpaper64.exe");
 /** ffmpeg major version that introduced the ddagrab filter. */
 const MIN_FFMPEG_MAJOR = 5;
 

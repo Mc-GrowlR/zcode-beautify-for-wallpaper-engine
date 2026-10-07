@@ -1090,6 +1090,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       // content-addressed: reposts of the SAME wallpaper share one cache
       // entry, and leading with it made a folder of reposts all preview
       // as 'the same video'.
+      card.setAttribute('data-wid', it.id);
+      card.setAttribute('data-wsrc', it.source);
+      if (it.type === 'scene') card.setAttribute('data-scene', '1');
       if (it.videoUrl) card.setAttribute('data-video', it.videoUrl);
       if (it.animUrl) card.setAttribute('data-anim', it.animUrl);
       if (it.loopUrl) card.setAttribute('data-loop', it.loopUrl);
@@ -1342,6 +1345,23 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           media.playsInline = true;
           media.autoplay = true;
           media.src = mt(API + lUrl);
+        } else if (card.getAttribute('data-scene') === '1' && live) {
+          // Scene wallpaper without its own material: try the on-demand
+          // generated preview (recorded in the background on first hover);
+          // until it exists this 404s and falls back to the cover image.
+          media = document.createElement('video');
+          media.muted = true;
+          media.loop = true;
+          media.playsInline = true;
+          media.autoplay = true;
+          media.src = mt(API + '/media/we-prev/' + card.getAttribute('data-wid') + '.mp4');
+          media.addEventListener('error', function () {
+            var im2 = document.createElement('img');
+            im2.src = img.src;
+            im2.onload = function () { place(); };
+            prev.replaceChild(im2, media);
+            im2.onerror = function () { im2.remove(); };
+          });
         } else {
           media = document.createElement('img');
           media.src = img.src;
@@ -1366,6 +1386,18 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         document.body.appendChild(prev);
         place();
         if (media.tagName === 'VIDEO') media.play().catch(function () {});
+        // After resting on a scene card, ask serve to record a preview in
+        // the background (deduped per session; existing mp4s answer ready).
+        if (card.getAttribute('data-scene') === '1' && live) {
+          var wid = card.getAttribute('data-wid');
+          if (!window.__zbPrevAsked) window.__zbPrevAsked = {};
+          setTimeout(function () {
+            if (!window.__zbPrevAsked[wid]) {
+              window.__zbPrevAsked[wid] = 1;
+              post('/api/we-preview-gen', { s: card.getAttribute('data-wsrc') || 'workshop', id: wid }, function () {});
+            }
+          }, 1200);
+        }
       }, 300);
     });
     list.addEventListener('mouseout', function (e) {

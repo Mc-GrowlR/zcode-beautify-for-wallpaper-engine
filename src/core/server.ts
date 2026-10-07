@@ -30,6 +30,7 @@ import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
 import { listWeWallpapers, resolveWePreview, weDirForPath, weTitleForPath } from "./weLibrary.js";
+import { generateScenePreview } from "./wePreview.js";
 import { getInstallGuide, checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
 import { scenesCacheRoot } from "./cacheManager.js";
@@ -168,6 +169,33 @@ function saveWeImports(map: Record<string, { hash: string; seed?: boolean }>): v
 }
 
 /** Cached scene display names -> hashes; skips hash8 fallback names. */
+interface PreviewJob { id: string; pkg: string }
+const previewQueue: PreviewJob[] = [];
+let previewBusy = false;
+/** Serial worker; yields to import jobs (one WE render window at a time). */
+async function runPreviewQueue(): Promise<void> {
+  if (previewBusy) return;
+  previewBusy = true;
+  try {
+    while (previewQueue.length > 0) {
+      for (let w = 0; w < 600 && importJob.running; w++) await new Promise((r) => setTimeout(r, 1000));
+      if (importJob.running) { previewQueue.length = 0; break; }
+      const job = previewQueue.shift();
+      if (!job) break;
+      const out = path.join(dataDir(), "we-previews", job.id + ".mp4");
+      if (fs.existsSync(out)) continue;
+      try {
+        console.log(`serve: generating scene preview ${job.id}`);
+        await generateScenePreview(job.pkg, out);
+      } catch (err) {
+        console.log(`serve: scene preview failed (${job.id}) — ${(err as Error).message}`);
+      }
+    }
+  } finally {
+    previewBusy = false;
+  }
+}
+
 function cachedSceneNames(): Map<string, string[]> {
   const names = new Map<string, string[]>();
   try {
@@ -877,6 +905,37 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         return;
       }
 
+      if (req.method === "POST" && url.pathname === "/api/we-preview-gen") {
+        const body = JSON.parse(await readBody(req));
+        const s0 = typeof body?.s === "string" ? body.s : "";
+        const id0 = typeof body?.id === "string" ? body.id : "";
+        if (!/^[^\\/:*?"<>|]+$/.test(id0) || (s0 !== "workshop" && s0 !== "myprojects")) {
+          sendJson(res, 400, { error: "bad request" });
+          return;
+        }
+        const out = path.join(dataDir(), "we-previews", id0 + ".mp4");
+        if (fs.existsSync(out)) { sendJson(res, 200, { ready: true }); return; }
+        if (previewQueue.some((j) => j.id === id0)) { sendJson(res, 200, { queued: true }); return; }
+        // find the wallpaper dir + pkg
+        const item = listWeWallpapers().find((w) => w.source === s0 && w.id === id0);
+        if (!item || item.type !== "scene") { sendJson(res, 404, { error: "scene not found" }); return; }
+        let pkg = "";
+        try {
+          const proj = JSON.parse(fs.readFileSync(path.join(item.dir, "project.json"), "utf8")) as { file?: string };
+          if (typeof proj.file === "string" && /\.pkg$/i.test(proj.file)) pkg = path.join(item.dir, proj.file);
+        } catch { /* fall through */ }
+        if (!pkg) {
+          try {
+            pkg = path.join(item.dir, fs.readdirSync(item.dir).find((e) => /\.pkg$/i.test(e)) ?? "");
+          } catch { /* none */ }
+        }
+        if (!pkg || !fs.existsSync(pkg)) { sendJson(res, 404, { error: "no scene.pkg" }); return; }
+        previewQueue.push({ id: id0, pkg });
+        void runPreviewQueue();
+        sendJson(res, 200, { queued: true, ahead: previewQueue.length });
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/api/import-cancel") {
         if (importJob.running && importJob.abort) {
           importJob.abort.abort();
@@ -1441,6 +1500,15 @@ export async function startServe(opts: ServeOptions): Promise<void> {
               : null,
           })),
         });
+        return;
+      }
+
+      // Generated scene previews (悬停时后台录的小视频)
+      if (req.method === "GET" && url.pathname.startsWith("/media/we-prev/")) {
+        const m = /^\/media\/we-prev\/([^\\/:*?"<>|]+)\.mp4$/.exec(url.pathname)?.[1];
+        if (!m) { sendJson(res, 400, { error: "bad preview path" }); return; }
+        const file = path.join(dataDir(), "we-previews", m + ".mp4");
+        if (!sendMediaFile(req, res, file)) sendJson(res, 404, { error: "preview not generated" });
         return;
       }
 
