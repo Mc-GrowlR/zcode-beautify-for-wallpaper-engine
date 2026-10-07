@@ -224,7 +224,12 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       ' margin-bottom: 4px; border-radius: 6px; cursor: pointer; font-size: 11px; background: rgba(255,255,255,.06);',
       ' border: 1px solid rgba(255,255,255,.12); color: inherit; }',
     '.zb-we-back:hover { background: rgba(255,255,255,.12); }',
-    '.zb-we-hover { position: fixed; z-index: 2147483647; width: 320px; border-radius: 8px;',
+    // Natural-aspect preview: width fixed, height follows the image. The
+    // position is recomputed on load (an unsized <img> measures 0px tall,
+    // so the initial clamp cannot know the real height) and again clamped
+    // to the viewport — hovering the last row must stay fully on screen.
+    '.zb-we-hover { position: fixed; z-index: 2147483647; width: 320px; max-height: 78vh;',
+      ' object-fit: contain; border-radius: 8px;',
       ' border: 1px solid rgba(255,255,255,.18); box-shadow: 0 8px 28px rgba(0,0,0,.55); background: #000;',
       ' pointer-events: none; }',
     '.zb-we-list { max-height: 430px; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }',
@@ -1293,12 +1298,24 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         weHoverHide();
         var prev = document.createElement('img');
         prev.className = 'zb-we-hover';
+        // Vertical placement is derived from the CURRENT box height: centered
+        // on the card, clamped to the viewport, pinned to the top when a
+        // very tall preview cannot fit at all. Runs once with the estimate
+        // and again on load with the image's real aspect.
+        var place = function () {
+          var r = card.getBoundingClientRect();
+          var h = prev.offsetHeight || 180;
+          var top = r.top + r.height / 2 - h / 2;
+          if (top + h > window.innerHeight - 8) top = window.innerHeight - h - 8;
+          if (top < 8) top = 8;
+          prev.style.top = Math.round(top) + 'px';
+          prev.style.right = Math.max(8, window.innerWidth - r.left + 10) + 'px';
+        };
+        prev.onload = place;
         prev.src = img.src;
         prev.alt = '';
         document.body.appendChild(prev);
-        var r = card.getBoundingClientRect();
-        prev.style.top = Math.max(8, Math.min(window.innerHeight - prev.offsetHeight - 8, r.top + r.height / 2 - prev.offsetHeight / 2)) + 'px';
-        prev.style.right = Math.max(8, window.innerWidth - r.left + 10) + 'px';
+        place();
       }, 300);
     });
     list.addEventListener('mouseout', function (e) {
