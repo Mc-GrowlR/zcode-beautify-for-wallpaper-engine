@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow, isWeUiOpen } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -196,6 +196,14 @@ export async function importScene(
     return { loopPath, posterPath, hash, blackness, fromCache: false };
   }
 
+  // An open WE UI blacks out the render window. The plugin never touches the
+  // user's UI — bail out with clear guidance instead of a black recording.
+  if (await isWeUiOpen()) {
+    throw new SceneImportError(
+      "检测到 Wallpaper Engine 界面正开着——渲染窗口会黑屏。请先关闭 WE 界面,再重新导入",
+    );
+  }
+
   onProgress("opening", `window "${opts.title}"`);
   const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
   try {
@@ -219,12 +227,21 @@ export async function importScene(
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
 
+    // Black-frame gate: a suppressed render (WE UI open, GPU hiccup) must
+    // not be published as a "successful" loop — fail with guidance instead.
+    const blackness = await analyzeBlackness(tmpLoop, ffmpegPath);
+    if (blackness.blackFraction > 0.95) {
+      try { fs.rmSync(tmpLoop, { force: true }); } catch { /* locked */ }
+      throw new SceneImportError(
+        "录制画面几乎全黑——通常是 Wallpaper Engine 界面正开着或渲染被抑制。请关闭 WE 界面后重新导入",
+      );
+    }
+
     onProgress("saving", hash);
     fs.mkdirSync(path.dirname(loopPath), { recursive: true });
     fs.renameSync(tmpLoop, loopPath);
     fs.rmSync(rawPath, { force: true });
 
-    const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
 
     onProgress("done", loopPath);

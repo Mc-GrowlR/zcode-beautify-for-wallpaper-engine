@@ -222,3 +222,23 @@ function parseClientRect(stdout: string, title: string): SceneWindowHandle["clie
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+/**
+ * An open Wallpaper Engine UI (wallpaperui.exe process group) suppresses
+ * rendering in -playInWindow windows — they come up pitch black. Detector
+ * only; callers decide what to tell the user. Never touches the UI.
+ */
+export async function isWeUiOpen(): Promise<boolean> {
+  const count = (
+    await exec(
+      "powershell",
+      [
+        "-NoProfile",
+        "-Command",
+        "(Get-Process wallpaperui -ErrorAction SilentlyContinue | Measure-Object).Count",
+      ],
+      { timeout: 10_000 },
+    ).catch(() => ({ stdout: "0" }))
+  ).stdout.trim();
+  return Number(count) > 0;
+}
