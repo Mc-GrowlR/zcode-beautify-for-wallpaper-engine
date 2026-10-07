@@ -99,6 +99,24 @@ function Measure-Client([IntPtr]$h) {
  * to it. Resolves only after the window exists, is positioned, and its client
  * rect has been measured.
  */
+/**
+ * The Wallpaper Engine UI (wallpaperui.exe process group) suppresses
+ * rendering in -playInWindow windows — imports come out pitch black while
+ * the UI is open. Close it (politely, then forcefully) before rendering;
+ * the wallpaper64 core keeps running and the user can reopen the UI.
+ */
+export async function closeWeUi(): Promise<void> {
+  await exec(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      'Get-Process wallpaperui -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }; Start-Sleep 2; Get-Process wallpaperui -ErrorAction SilentlyContinue | Stop-Process -Force',
+    ],
+    { timeout: 15000 },
+  ).catch(() => undefined);
+}
+
 export async function openSceneWindow(
   pkgPath: string,
   opts: SceneWindowOptions,

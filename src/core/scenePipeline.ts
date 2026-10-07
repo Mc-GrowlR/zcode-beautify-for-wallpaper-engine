@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow, closeWeUi } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -220,6 +220,10 @@ export async function importScene(
   }
 
   checkCancel();
+  // An open Wallpaper Engine UI suppresses -playInWindow rendering — the
+  // recording would be pitch black. Close it first; the core keeps running.
+  onProgress("closing-we-ui", "Wallpaper Engine UI");
+  await closeWeUi();
   onProgress("opening", `window "${opts.title}"`);
   const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
   let rawPath = "";
