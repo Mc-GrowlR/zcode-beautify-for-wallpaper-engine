@@ -16,11 +16,17 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   return `(function(){
   var API = ${JSON.stringify(api)};
   var TOKEN = ${JSON.stringify(apiToken)};
-  /** Authenticated fetch: every API call carries the per-start token. */
+  /** Authenticated fetch: every API call carries the per-start token.
+   * Non-2xx responses REJECT — a 401 body like {"error":...} otherwise
+   * parses as valid data (undefined fields) and quietly poisons every
+   * consumer (the 轮播状态 "未启用" ghost came exactly from there). */
   function apiFetch(path, opts) {
     opts = opts || {};
     opts.headers = Object.assign({ 'X-Beautify-Token': TOKEN }, opts.headers || {});
-    return fetch(API + path, opts);
+    return fetch(API + path, opts).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + path);
+      return r;
+    });
   }
   /** Media URLs (<img>/<video> cannot send headers) authenticate via ?t=. */
   function mt(url) { return TOKEN ? url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + TOKEN : url; }
@@ -37,6 +43,22 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   // next openWePop.
   var stalePops = document.querySelectorAll('body > .zb-we-pop');
   for (var spi = 0; spi < stalePops.length; spi++) stalePops[spi].remove();
+  // Kill the PREVIOUS panel generation's intervals: every serve restart
+  // re-evaluates this script, and old closures kept polling forever with
+  // their dead tokens — each 401 body parsed as data and fought the new
+  // panel (the 轮播状态 line flipped to 未启用 once a second). All panel
+  // intervals register through zbEvery so this sweep reaches them.
+  if (window.__zbTimers) {
+    for (var zti = 0; zti < window.__zbTimers.length; zti++) {
+      try { clearInterval(window.__zbTimers[zti]); } catch (e) {}
+    }
+  }
+  window.__zbTimers = [];
+  var zbEvery = function (fn, ms) {
+    var id = setInterval(fn, ms);
+    window.__zbTimers.push(id);
+    return id;
+  };
 
   var css = [
     '#zcode-beautify-panel-root, #zcode-beautify-panel-root * { box-sizing: border-box; font-family: system-ui, sans-serif; }',
@@ -71,12 +93,15 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
     '.zb-collapse-wrap > .zb-collapse-inner { overflow: hidden; min-height: 0; }',
     '.zb-collapsed .zb-collapse-wrap { grid-template-rows: 0fr; }',
     '.zb-collapsed .zb-card-title { padding-bottom: 0; }',
-    '.zb-fold { width: 20px; height: 16px; border-radius: 5px; background: rgba(255,255,255,.09);',
+    '.zb-fold { width: 22px; height: 18px; border-radius: 5px; background: rgba(255,255,255,.09);',
       ' border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center;',
-      ' font-size: 9px; line-height: 1; color: inherit; flex: none;',
-      ' transition: transform .15s ease, background .15s ease; }',
+      ' font-size: 10px; line-height: 1; color: inherit; flex: none;',
+      ' transition: transform .15s ease, background .15s ease, border-color .15s ease; }',
     '.zb-collapsible .zb-card-title:hover .zb-fold { background: rgba(122,162,247,.35); border-color: rgba(122,162,247,.6); }',
-    '.zb-collapsed .zb-fold { transform: rotate(-90deg); }',
+    // Collapsed = arrow rotated right AND the chip lights up blue — the
+    // direction alone was too subtle to tell collapsed cards apart.
+    '.zb-collapsed .zb-fold { transform: rotate(-90deg); background: rgba(122,162,247,.5);',
+      ' border-color: rgba(122,162,247,.9); color: #d6e2ff; }',
     '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
       ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
     '.zb-tab:hover { background: rgba(255,255,255,.12); }',
@@ -512,7 +537,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   function panelOpen() { return !$('zb-panel').hidden; }
   /** Re-check the service: while the panel is open, and always while offline. */
   function beat(on) {
-    if (on && !beatTimer) beatTimer = setInterval(refresh, 4000);
+    if (on && !beatTimer) beatTimer = zbEvery(refresh, 4000);
     if (!on && beatTimer) { clearInterval(beatTimer); beatTimer = null; }
   }
 
@@ -1140,7 +1165,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   /** Resolves once no import job is running (multi-file queue pacing). */
   function importIdle() {
     return new Promise(function (resolve) {
-      var t = setInterval(function () {
+      var t = zbEvery(function () {
         apiFetch('/api/import-status')
           .then(function (r) { return r.json(); })
           .then(function (j) {
@@ -1176,7 +1201,7 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
       if (d && d.error) { status(d.error); return; }
       setProgress(true, 'starting');
       if (importTimer) clearInterval(importTimer);
-      importTimer = setInterval(pollImport, 600);
+      importTimer = zbEvery(pollImport, 600);
     });
   });
   function pollImport() {
@@ -1424,13 +1449,13 @@ export function buildPanelScript(apiPort: number, apiToken = ""): string {
   }
   $('zb-fab').addEventListener('click', function () {
     if (panelOpen()) {
-      if (!rotStateTimer) { pollRotState(); rotStateTimer = setInterval(pollRotState, 1000); }
+      if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
     } else if (rotStateTimer) {
       clearInterval(rotStateTimer); rotStateTimer = null;
     }
   }, { capture: true });
   var fabOrig = $('zb-fab');
-  rotStateTimer = setInterval(pollRotState, 1000); // panel may already be open on re-inject
+  rotStateTimer = zbEvery(pollRotState, 1000); // panel may already be open on re-inject
 
   // --- usage-time ranking (📊) ----------------------------------------------
   $('zb-stats').addEventListener('click', function () {
