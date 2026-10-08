@@ -202,11 +202,32 @@ export async function importScene(
   // mirrors it exactly: longer settle, then a PRE-CHECK frame via GDI before
   // any recording — a black window is re-opened immediately instead of
   // wasting a 15s capture on it.
+  // WE must receive the .pkg FILE, never the wallpaper directory (user-found
+  // root cause: a directory -file opens a black window on this machine; the
+  // probes that always rendered passed the pkg file). Resolve it once:
+  let pkgFile = pkgPath;
+  try {
+    if (fs.statSync(pkgPath).isDirectory()) {
+      let declared: string | undefined;
+      try {
+        declared = (JSON.parse(fs.readFileSync(path.join(pkgPath, "project.json"), "utf8")) as { file?: string }).file;
+      } catch { /* fall back to the first .pkg in the dir */ }
+      const name =
+        declared && /\.pkg$/i.test(declared) && fs.existsSync(path.join(pkgPath, declared))
+          ? declared
+          : fs.readdirSync(pkgPath).find((e) => /\.pkg$/i.test(e));
+      if (!name) throw new SceneImportError(`No scene.pkg inside: ${pkgPath}`);
+      pkgFile = path.join(pkgPath, name);
+    }
+  } catch (err) {
+    if (err instanceof SceneImportError) throw err;
+    /* non-directory path or unreadable — pass through as-is */
+  }
   const renderOnce = async (): Promise<{ rawPath: string }> => {
     onProgress("fresh-core", "restarting Wallpaper Engine");
     await ensureFreshCore();
     onProgress("opening", `window "${opts.title}"`);
-    const handle = await openSceneWindow(pkgPath, { width: opts.width, height: opts.height, title: opts.title });
+    const handle = await openSceneWindow(pkgFile, { width: opts.width, height: opts.height, title: opts.title });
     try {
       onProgress("render-ready", JSON.stringify(handle.client));
       await new Promise((r) => setTimeout(r, 8000)); // manual-probe settle: scene + GPU init
