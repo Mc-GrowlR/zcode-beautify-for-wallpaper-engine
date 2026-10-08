@@ -116,6 +116,8 @@ export interface BeautifyConfig {
   chatLook?: Partial<ChatLookConfig>;
   /** Hide wallpaper+panel during ZCode's startup screen (default true). */
   startupClean?: boolean;
+  /** Import resolution: "auto" follows the wallpaper project size, else WxH. */
+  importRes?: { mode: string; width?: number; height?: number };
   /** Day/night look schedule (护眼): two dim/blur presets switching by time. */
   dayNight?: {
     enabled: boolean;

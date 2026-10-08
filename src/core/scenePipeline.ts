@@ -14,7 +14,7 @@ import path from "node:path";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { execFileP } from "./exec.js";
 import { checkWallpaperEngine, checkFfmpeg } from "./dependencyCheck.js";
-import { openSceneWindow, closeSceneWindow, ensureFreshCore, windowIsBlack, SceneWindowBlackError } from "./weLauncher.js";
+import { openSceneWindow, closeSceneWindow, windowIsBlack, SceneWindowBlackError } from "./weLauncher.js";
 import { recordSceneWindow, analyzeBlackness } from "./recorder.js";
 import { makeSeamless, probeDuration } from "./loopProcessor.js";
 import { computeHash, getCachePath, hasCache, touchCache, enforceLimit } from "./cacheManager.js";
@@ -224,17 +224,15 @@ export async function importScene(
     /* non-directory path or unreadable — pass through as-is */
   }
   const renderOnce = async (): Promise<{ rawPath: string }> => {
-    onProgress("fresh-core", "restarting Wallpaper Engine");
-    await ensureFreshCore();
     onProgress("opening", `window "${opts.title}"`);
     const handle = await openSceneWindow(pkgFile, { width: opts.width, height: opts.height, title: opts.title });
     try {
       onProgress("render-ready", JSON.stringify(handle.client));
-      await new Promise((r) => setTimeout(r, 8000)); // manual-probe settle: scene + GPU init
+      await new Promise((r) => setTimeout(r, 4000)); // let the scene settle
       // WINDOW PRE-CHECK: capture the live window via GDI before committing
       // to a 15s recording. A near-uniform frame (tiny PNG) means the render
-      // never attached — bail NOW and let the retry restart a fresh core,
-      // instead of wasting a full capture on a window that stays black.
+      // never attached — bail NOW and reopen, instead of wasting a full
+      // capture on a window that stays black.
       const preBlack = await windowIsBlack(opts.title);
       if (preBlack === true) {
         throw new SceneWindowBlackError("窗口渲染未附着(预检帧全黑)");
@@ -255,33 +253,25 @@ export async function importScene(
     return b.blackFraction > 0.95;
   };
 
-  // Up to 3 passes, each with a fresh independent core. A pre-check black
-  // window or a black recording restarts the whole core+window; the loop
-  // turns the intermittency into a few extra seconds instead of a failure.
+  // Up to 2 passes on the SAME running WE core (the black root cause was the
+  // directory -file, now fixed — no core restart needed). A pre-check black
+  // window or a black recording just reopens the window once.
   let rawPath = "";
   let black = true;
-  let lastErr: unknown = null;
-  for (let pass = 0; pass < 3 && black; pass++) {
-    try {
-      lastErr = null;
-      const out = await renderOnce();
-      rawPath = out.rawPath;
-      black = await captureIsBlack(rawPath).catch(() => false);
-      if (black) {
-        onProgress(`black-retry-${pass + 1}`, "core restart + reopen");
-        try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ }
-        await new Promise((r) => setTimeout(r, 4000));
-      }
-    } catch (err) {
-      if (!(err instanceof SceneWindowBlackError)) throw err;
-      lastErr = err;
-      onProgress(`black-retry-${pass + 1}`, "pre-check black, core restart");
+  for (let pass = 0; pass < 2 && black; pass++) {
+    const out = await renderOnce();
+    rawPath = out.rawPath;
+    black = await captureIsBlack(rawPath).catch(() => false);
+    if (black) {
+      onProgress(`black-retry-${pass + 1}`, "reopen window");
+      try { fs.rmSync(rawPath, { force: true }); } catch { /* locked */ }
+      await new Promise((r) => setTimeout(r, 3000));
     }
   }
   if (black) {
     try { if (rawPath) fs.rmSync(rawPath, { force: true }); } catch { /* locked */ }
     throw new SceneImportError(
-      `录制画面全黑(已自动重启 WE 核心重试 ${lastErr ? "3" : "2"} 次)——请稍候重试或重启 Wallpaper Engine`,
+      "录制画面全黑(已自动重开窗口重试)——请稍候重试或重启 Wallpaper Engine",
     );
   }
 

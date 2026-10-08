@@ -13,7 +13,7 @@
  * - draw_mouse=0 keeps the cursor out of the loop video.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
@@ -31,6 +31,88 @@ export interface RecordOptions {
 
 export class RecordError extends Error {}
 
+/**
+ * BACKGROUND capture via PrintWindow(PW_RENDERFULLCONTENT): the DWM-
+ * composited window surface is copied into a GDI bitmap, so the window
+ * renders into the capture even when fully OCCLUDED — no topmost, no
+ * Desktop Duplication, nothing on-screen changes while recording. Frames
+ * are grabbed in a single PowerShell loop (frame-paced by a Stopwatch)
+ * and encoded from the BMP sequence afterwards.
+ */
+async function recordWindowBackground(
+  handle: SceneWindowHandle,
+  out: string,
+  opts: Required<Pick<RecordOptions, "duration" | "fps" | "outWidth" | "outHeight">>,
+  ffmpeg: string,
+): Promise<void> {
+  const seqDir = path.join(path.dirname(path.resolve(out)), `seq-${process.pid}-${Date.now().toString(36)}`);
+  mkdirSync(seqDir, { recursive: true });
+  const frameMs = Math.max(20, Math.round(1000 / opts.fps));
+  const script = `
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class PW {
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+}
+'@
+$target = [IntPtr]${handle.hwnd}
+$r = New-Object PW+RECT
+[PW]::GetClientRect($target, [ref]$r) | Out-Null
+$w = $r.R - $r.L; $h = $r.B - $r.T
+if ($w -le 0 -or $h -le 0) { Write-Output "0"; exit 1 }
+$dir = '${seqDir.replace(/\\/g, "\\\\") }'
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$n = 0
+while ($sw.ElapsedMilliseconds -lt ${opts.duration * 1000}) {
+  $targetMs = [math]::Floor(($sw.ElapsedMilliseconds + $frameMs) / $frameMs) * $frameMs
+  # frame-pace to the requested cadence
+  while ($sw.ElapsedMilliseconds -lt $targetMs) { Start-Sleep -Milliseconds 1 }
+  $bmp = New-Object System.Drawing.Bitmap($w, $h)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $hdc = $g.GetHdc()
+  [PW]::PrintWindow($target, $hdc, 2) | Out-Null   # PW_RENDERFULLCONTENT
+  $g.ReleaseHdc($hdc); $g.Dispose()
+  $bmp.Save((Join-Path $dir ('f_{0:d6}.bmp' -f $n)), [System.Drawing.Imaging.ImageFormat]::Bmp)
+  $bmp.Dispose()
+  $n++
+}
+$sw.Stop()
+Write-Output $n`;
+  let frames = 0;
+  try {
+    const { stdout } = await exec("powershell", ["-NoProfile", "-Command", script], {
+      timeout: (opts.duration + 40) * 1000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    frames = Number(stdout.trim().split(/\r?\n/).pop() ?? "0");
+  } catch (err) {
+    throw new RecordError(`PrintWindow capture failed: ${(err as Error).message}`);
+  } finally {
+    // sequence files are removed no matter what happens to the encode
+  }
+  if (frames < 10) throw new RecordError(`PrintWindow captured too few frames (${frames})`);
+  const outW = opts.outWidth ?? 1920;
+  const outH = opts.outHeight ?? 1080;
+  try {
+    await exec(ffmpeg, [
+      "-y", "-hide_banner", "-loglevel", "warning",
+      "-framerate", String(opts.fps),
+      "-i", path.join(seqDir, "f_%06d.bmp"),
+      "-vf", `scale=${outW}:${outH}`,
+      "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-an",
+      out,
+    ], { timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+  } catch (err) {
+    throw new RecordError(`frame-sequence encode failed: ${(err as Error).message}`);
+  } finally {
+    rmSync(seqDir, { recursive: true, force: true });
+  }
+}
+
 export async function recordSceneWindow(
   handle: SceneWindowHandle,
   out: string,
@@ -39,19 +121,26 @@ export async function recordSceneWindow(
 ): Promise<void> {
   const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
   if (!ffmpeg) throw new RecordError("ffmpeg not found — cannot record scene window");
-
-  // DIAGNOSTIC switch: skip the ffmpeg capture entirely (the window just
-  // stays open for the requested duration) — isolates whether the on-screen
-  // black window is caused by the capture or by how serve opens the window.
-  if (process.env.ZB_SKIP_RECORD === '1') {
-    await new Promise((r) => setTimeout(r, opts.duration * 1000));
-    return;
-  }
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
 
-  // WE moves/resizes its play window asynchronously, so re-measure the client
-  // rect right before capturing (the window is topmost at this point) instead
-  // of trusting the rect from open time.
+  // DEFAULT PATH: background PrintWindow capture (occlusion-proof, nothing
+  // forced on-screen). Falls back to the ddagrab desktop capture below only
+  // when PrintWindow yields nothing (e.g. driver blocks full-content redirect).
+  try {
+    await recordWindowBackground(handle, out, {
+      duration: opts.duration,
+      fps: opts.fps,
+      outWidth: opts.outWidth ?? 1920,
+      outHeight: opts.outHeight ?? 1080,
+    }, ffmpeg);
+    return;
+  } catch (err) {
+    if (!(err instanceof RecordError)) throw err;
+    // fall through to ddagrab
+  }
+
+  // ddagrab captures the COMPOSITED DESKTOP, so the window must stay
+  // topmost for the duration (legacy fallback path only).
   const client = await measureClientRect(handle.hwnd, handle.title);
   const { x, y, width, height } = client;
   const outW = opts.outWidth ?? 1920;
@@ -71,17 +160,13 @@ export async function recordSceneWindow(
     out,
   ];
 
-  // TOPMOST + Desktop Duplication black out this DirectX window on some
-  // machines (verified: window 94% dark AND the captured stream black; without
-  // topmost both stay perfect). The window opens in front anyway — only
-  // force the old behaviour via ZB_FORCE_TOPMOST=1.
-  if (process.env.ZB_FORCE_TOPMOST === "1") await setTopmost(handle.hwnd, true);
+  await setTopmost(handle.hwnd, true);
   try {
     await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024 });
   } catch (err) {
     throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
   } finally {
-    if (process.env.ZB_FORCE_TOPMOST === '1') await setTopmost(handle.hwnd, false).catch(() => undefined);
+    await setTopmost(handle.hwnd, false).catch(() => undefined);
   }
 }
 

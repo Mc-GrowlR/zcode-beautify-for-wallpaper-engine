@@ -408,6 +408,10 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" style="width:44px" title="动态壁纸列表最多显示行数">' +
     '        <span title="壁纸库·图片列表一次最多可见的行数(其余滚动查看)">图片库</span>' +
     '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" style="width:44px" title="图片壁纸列表最多显示行数">行</div>' +
+'      <div class="zb-sched-mode" style="margin-top:4px"><span title="场景壁纸录制输出的分辨率;默认=壁纸项目自带尺寸">录制分辨率</span>' +
+    '        <select id="zb-import-res" style="flex:1"><option value="auto">默认(跟随壁纸)</option><option value="1920x1080">1920×1080</option><option value="1280x720">1280×720(省电)</option><option value="custom">自定义…</option></select>' +
+    '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" style="width:52px" hidden>' +
+    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" style="width:52px" hidden></div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
@@ -711,6 +715,41 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     };
     post('/api/config', { dayNight: dn }, function (d) { if (d && d.error) status(d.error); });
   }
+  // Import resolution (录制分辨率): persisted in localStorage, sent with
+  // every import POST; "auto" lets serve follow the wallpaper project size.
+  var zbResSel = document.getElementById('zb-import-res');
+  var zbResW = document.getElementById('zb-res-w');
+  var zbResH = document.getElementById('zb-res-h');
+  function resCustomVisible() {
+    var on = zbResSel.value === 'custom';
+    zbResW.hidden = !on; zbResH.hidden = !on;
+  }
+  function resPayload() {
+    var mode = zbResSel.value;
+    var p = { mode: mode };
+    if (mode === 'custom') {
+      p.width = Math.max(256, Math.min(3840, Number(zbResW.value) || 1920));
+      p.height = Math.max(144, Math.min(2160, Number(zbResH.value) || 1080));
+    }
+    return p;
+  }
+  function resPersist() {
+    try { localStorage.setItem('zcode-beautify:import-res', JSON.stringify(resPayload())); } catch (e) {}
+  }
+  if (zbResSel) {
+    try {
+      var savedRes = JSON.parse(localStorage.getItem('zcode-beautify:import-res') || 'null');
+      if (savedRes && savedRes.mode) {
+        zbResSel.value = savedRes.mode === 'custom' || /^\d+x\d+$/.test(savedRes.mode) ? savedRes.mode : 'auto';
+        if (savedRes.width) zbResW.value = savedRes.width;
+        if (savedRes.height) zbResH.value = savedRes.height;
+      }
+    } catch (e) {}
+    resCustomVisible();
+    zbResSel.addEventListener('change', function () { resCustomVisible(); resPersist(); });
+    zbResW.addEventListener('change', resPersist);
+    zbResH.addEventListener('change', resPersist);
+  }
   var zbWeLive = document.getElementById('zb-we-live');
   if (zbWeLive) {
     try { zbWeLive.checked = localStorage.getItem('zcode-beautify:we-live') !== '0'; } catch (e) {}
@@ -929,11 +968,15 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     'cache-hit': '缓存命中', done: '完成', error: '失败'
   };
   var importTimer = null;
+  // Batch progress ("第 i/N 个") shown alongside the per-import stage while a
+  // multi-file queue runs; null for single imports.
+  var batchInfo = null;
   function setProgress(on, stage, fromCache) {
     var box = $('zb-progress');
     box.hidden = !on;
     if (on) {
       var label = STAGE_LABELS[stage] || stage || '…';
+      if (batchInfo) label += ' (第 ' + batchInfo.i + '/' + batchInfo.n + ' 个)';
       // The pipeline stages advance in order; map them onto a smooth bar.
       var order = ['starting', 'detect', 'deps', 'opening', 'render-ready', 'recording', 'closing', 'processing', 'poster', 'saving', 'done'];
       var pct = stage === 'done' ? 100 : (stage === 'cache-hit' ? 100 : 8 + 88 * Math.max(0, order.indexOf(stage)) / (order.length - 1));
@@ -1376,11 +1419,16 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   /** Serial import queue for multi-selected files (one job at a time). */
   function startImportQueue(paths) {
     status('已选 ' + paths.length + ' 个,开始排队导入…');
+    batchInfo = { i: 0, n: paths.length };
     var i = 0;
     var next = function () {
-      if (i >= paths.length) { status('队列完成:' + paths.length + ' 个'); markLibDirty(); return; }
+      if (i >= paths.length) {
+        batchInfo = null;
+        status('队列完成:' + paths.length + ' 个'); markLibDirty(); return;
+      }
       $('zb-scene-path').value = paths[i];
       i++;
+      batchInfo.i = i;
       status('导入 ' + i + '/' + paths.length + '…');
       $('zb-import').click();
       void importIdle().then(next);
@@ -1395,7 +1443,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     var p = $('zb-scene-path').value.trim();
     if (!p) { status('请先粘贴场景壁纸路径'); return; }
     showGuide('', false);
-    post('/api/import-scene', { path: p }, function (d) {
+    post('/api/import-scene', { path: p, importRes: zbResSel ? resPayload() : undefined }, function (d) {
       if (d && d.error) { status(d.error); return; }
       setProgress(true, 'starting');
       if (importTimer) clearInterval(importTimer);

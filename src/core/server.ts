@@ -220,6 +220,7 @@ function publicConfig(config: BeautifyConfig) {
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
     startupClean: config.startupClean !== false,
+    importRes: config.importRes ?? { mode: "auto" },
     fit: config.fit,
     wallpaperSet: Boolean(config.wallpaperPath && fs.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
@@ -239,6 +240,16 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (typeof body?.kenBurns === "boolean") out.kenBurns = body.kenBurns;
   if (typeof body?.startupClean === "boolean") out.startupClean = body.startupClean;
+  // Import resolution (录制分辨率): "auto" follows the wallpaper project's own
+  // size; otherwise fixed WxH.
+  const ir = body?.importRes;
+  if (ir && typeof ir === "object") {
+    out.importRes = {
+      mode: ir.mode === "custom" || /\d+x\d+/.test(String(ir.mode ?? "")) ? ir.mode : "auto",
+      width: typeof ir.width === "number" && ir.width >= 256 && ir.width <= 3840 ? Math.round(ir.width) : undefined,
+      height: typeof ir.height === "number" && ir.height >= 144 && ir.height <= 2160 ? Math.round(ir.height) : undefined,
+    };
+  }
   if (typeof body?.videoVolume === "number" && body.videoVolume >= 0 && body.videoVolume <= 100) out.videoVolume = Math.round(body.videoVolume);
   if (body?.themeColor === null) out.themeColor = undefined;
   else if (typeof body?.themeColor === "string" && /^#[0-9a-fA-F]{6}$/.test(body.themeColor)) out.themeColor = body.themeColor;
@@ -792,12 +803,37 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           return;
         }
         importJob = { running: true, stage: "starting" };
+        // Import resolution: resolve BEFORE the job runs — "auto" reads the
+        // wallpaper project's own general.properties size (WE scene default),
+        // anything else is a fixed WxH from the settings.
+        const resSetting = { ...(runtimeConfig().importRes ?? { mode: "auto" }), ...(typeof body?.importRes === "object" ? body.importRes : {}) };
+        let resW: number | undefined, resH: number | undefined;
+        try {
+          const m = /^(\d+)x(\d+)$/.exec(String(resSetting.mode ?? "auto"));
+          if (resSetting.mode === "custom" && resSetting.width && resSetting.height) {
+            resW = resSetting.width; resH = resSetting.height;
+          } else if (m) {
+            resW = Number(m[1]); resH = Number(m[2]);
+          } else {
+            // auto: project.json general.properties.width/height
+            const dir = (() => {
+            try { return fs.statSync(scenePath).isDirectory() ? scenePath : path.dirname(scenePath); } catch { return scenePath; }
+          })();
+          const probe = JSON.parse(fs.readFileSync(path.join(dir, "project.json"), "utf8")) as any;
+            const w = Number(probe?.general?.properties?.width);
+            const h = Number(probe?.general?.properties?.height);
+            if (w >= 256 && w <= 3840) resW = Math.round(w);
+            if (h >= 144 && h <= 2160) resH = Math.round(h);
+          }
+        } catch { /* auto without a readable project falls back to defaults */ }
+        const sceneOpts: { width?: number; height?: number } = {};
+        if (resW && resH) { sceneOpts.width = resW; sceneOpts.height = resH; }
         // Fire-and-forget: the panel polls /api/import-status for progress;
         // /api/import-cancel aborts the controller (kills ffmpeg, cleans up).
         void importScene(scenePath, (stage, detail) => {
           importJob.stage = stage;
           importJob.detail = detail;
-        })
+        }, sceneOpts)
           .then(async (result: SceneImportResult) => {
             importJob = {
               running: false,
