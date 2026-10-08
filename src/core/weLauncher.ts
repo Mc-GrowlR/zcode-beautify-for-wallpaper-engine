@@ -152,8 +152,9 @@ export async function ensureFreshCore(wallpaperExePath?: string): Promise<void> 
 
 /**
  * True when the given window's live pixels are (near-)uniform — the black
- * render. Uses PrintWindow(PW_RENDERFULLCONTENT) like the recorder, so the
- * pre-check stays accurate even while the window sits BEHIND ZCode (a screen
+ * render. Uses PrintWindow(PW_CLIENTONLY|PW_RENDERFULLCONTENT) exactly like
+ * the recorder (client-only, so the title bar never brightens the probe),
+ * which stays accurate even while the window sits BEHIND ZCode (a screen
  * CopyFromScreen here would capture whatever covers the window instead).
  * Returns null when the window cannot be captured (treated as "not black").
  */
@@ -178,7 +179,7 @@ public class ZB2 {
     $bmp = New-Object System.Drawing.Bitmap($w, $h)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $hdc = $g.GetHdc()
-    [ZB2]::PrintWindow($p.MainWindowHandle, $hdc, 2) | Out-Null
+    [ZB2]::PrintWindow($p.MainWindowHandle, $hdc, 3) | Out-Null
     $g.ReleaseHdc($hdc); $g.Dispose()
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)

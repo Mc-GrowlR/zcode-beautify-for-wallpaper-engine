@@ -1,16 +1,18 @@
 /**
- * Screen capture of the Wallpaper Engine scene window via ffmpeg ddagrab
- * (Desktop Duplication API), the only capture path proven to record DirectX
- * scene content reliably (docs/spike-notes.md).
+ * Screen capture of the Wallpaper Engine scene window via PrintWindow
+ * (PW_CLIENTONLY | PW_RENDERFULLCONTENT): the DWM-composited window surface
+ * is copied into a GDI bitmap, so the scene records even while the window is
+ * fully occluded — no topmost, no Desktop Duplication, nothing on-screen
+ * changes while recording. Frames are grabbed in a single PowerShell loop
+ * (frame-paced by a Stopwatch) and encoded from the PNG sequence afterwards.
  *
  * Hard-won constraints encoded here:
- * - ddagrab captures the composited desktop, so the target window MUST be
- *   topmost for the duration of the recording (restored afterwards).
- * - `crop` silently no-ops on d3d11 hardware frames: the chain must be
- *   ddagrab -> hwdownload,format=bgra -> crop -> scale.
- * - The crop rect is the client rect measured by the launcher AFTER
- *   positioning (outer-window rects would record the title bar).
- * - draw_mouse=0 keeps the cursor out of the loop video.
+ * - flags must include PW_CLIENTONLY: flag 2 alone renders the WHOLE window
+ *   (title bar included) into the client-sized bitmap — the title bar ended
+ *   up baked into imported loops.
+ * - the bitmap is sized to the client rect measured via GetClientRect, so
+ *   client-only output fits it exactly (no offset, no clipped bottom).
+ * - draw_mouse equivalent for free: PrintWindow never sees the cursor.
  */
 
 import { mkdirSync, rmSync } from "node:fs";
@@ -74,7 +76,7 @@ while ($sw.ElapsedMilliseconds -lt ${opts.duration * 1000}) {
   $bmp = New-Object System.Drawing.Bitmap($w, $h)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $hdc = $g.GetHdc()
-  [PW]::PrintWindow($target, $hdc, 2) | Out-Null   # PW_RENDERFULLCONTENT
+  [PW]::PrintWindow($target, $hdc, 3) | Out-Null   # PW_CLIENTONLY|PW_RENDERFULLCONTENT
   $g.ReleaseHdc($hdc); $g.Dispose()
   $bmp.Save((Join-Path $dir ('f_{0:d6}.png' -f $n)), [System.Drawing.Imaging.ImageFormat]::Png)
   $bmp.Dispose()
