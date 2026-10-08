@@ -41,6 +41,8 @@ export interface SceneWindowHandle {
 }
 
 export class SceneWindowError extends Error {}
+/** Raised by the pipeline pre-check (not a user-facing failure). */
+export class SceneWindowBlackError extends Error {}
 
 const PS_WINDOW_HELPERS = `
 # ddagrab captures PHYSICAL pixels; without DPI awareness PowerShell returns
@@ -93,6 +95,97 @@ function Measure-Client([IntPtr]$h) {
   ,@($pt.X, $pt.Y, ($cr.Right - $cr.Left), ($cr.Bottom - $cr.Top))
 }
 `;
+
+/**
+ * Kills any running Wallpaper Engine and starts a FRESH core instance.
+ *
+ * The long-running core degrades over repeated playInWindow cycles — windows
+ * come up black (forever, not late), and eventually stop appearing at all.
+ * Every probe run right after a core restart rendered fine, so imports now
+ * begin from a clean core every time. The desktop wallpaper is NOT affected
+ * (it is not played by WE); an open WE UI dies with the core — that is
+ * accepted: the UI is exactly what accelerates the degradation.
+ */
+export async function ensureFreshCore(wallpaperExePath?: string): Promise<void> {
+  const exe = wallpaperExePath ?? (await checkWallpaperEngine()).path;
+  if (!exe) throw new SceneWindowError("Wallpaper Engine not found");
+
+  // Kill the old core and CONFIRM it is fully gone: wallpaper64 is
+  // single-instance, so a not-yet-dead old core turns the freshly started
+  // exe into a mere -control forwarder that exits — leaving the degraded
+  // core in charge and the next window black.
+  const countCores = async (): Promise<number> => {
+    const out = await exec(
+      "powershell",
+      ["-NoProfile", "-Command", "(Get-Process wallpaper64 -ErrorAction SilentlyContinue | Measure-Object).Count"],
+      { timeout: 10_000 },
+    ).catch(() => ({ stdout: "-1" }));
+    return Number(out.stdout.trim());
+  };
+  for (let i = 0; i < 12 && (await countCores()) > 0; i++) {
+    if (i === 0) {
+      await exec(
+        "powershell",
+        ["-NoProfile", "-Command", "Get-Process wallpaper64 -ErrorAction SilentlyContinue | Stop-Process -Force"],
+        { timeout: 15_000 },
+      ).catch(() => undefined);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+
+  // The core MUST be started in an independent environment. Spawning it
+  // directly from serve (a wscript-hidden, console-less chain) produces a
+  // core whose render windows come up BLACK — while the identical sequence
+  // from a normal shell renders fine (verified end-to-end). Start-Process
+  // breaks the inheritance and gives the core a clean environment of its own.
+  await exec(
+    "powershell",
+    ["-NoProfile", "-Command", `Start-Process -FilePath '${exe.replace(/'/g, "''")}'`],
+    { timeout: 15_000 },
+  ).catch(() => undefined);
+  // Flat warm-up: process-alive is NOT readiness (a young core accepts
+  // -control but its renderer still yields black frames for several more
+  // seconds on this hybrid-GPU machine).
+  await new Promise((r) => setTimeout(r, 15_000));
+}
+
+/**
+ * True when the given window's live pixels are (near-)uniform — the black
+ * render. GDI CopyFromScreen, tiny PNG ≈ no content. Returns null when the
+ * window cannot be captured (treated as "not black" by callers).
+ */
+export async function windowIsBlack(title: string): Promise<boolean | null> {
+  const script = `
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$p = Get-Process | Where-Object { $_.MainWindowTitle -eq '${title.replace(/'/g, "''")}' } | Select-Object -First 1
+if ($p) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class ZB { [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out R r); public struct R { public int L, T, Rt, B; } }
+'@
+  $r = New-Object ZB+R
+  [ZB]::GetWindowRect($p.MainWindowHandle, [ref]$r) | Out-Null
+  $w = $r.Rt - $r.L; $h = $r.B - $r.T
+  if ($w -gt 0 -and $h -gt 0) {
+    $bmp = New-Object System.Drawing.Bitmap($w, $h)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    Write-Output $ms.Length
+  } else { Write-Output -1 }
+} else { Write-Output -1 }`;
+  try {
+    const { stdout } = await exec("powershell", ["-NoProfile", "-Command", script], { timeout: 15_000 });
+    const bytes = Number(stdout.trim());
+    if (!Number.isFinite(bytes) || bytes < 0) return null;
+    return bytes < 30000; // a rendered 640x360+ frame is 150KB+; black is <30KB
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Opens `pkgPath` in a dedicated Wallpaper Engine window and returns a handle
