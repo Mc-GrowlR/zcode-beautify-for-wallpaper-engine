@@ -152,28 +152,37 @@ export async function ensureFreshCore(wallpaperExePath?: string): Promise<void> 
 
 /**
  * True when the given window's live pixels are (near-)uniform — the black
- * render. GDI CopyFromScreen, tiny PNG ≈ no content. Returns null when the
- * window cannot be captured (treated as "not black" by callers).
+ * render. Uses PrintWindow(PW_RENDERFULLCONTENT) like the recorder, so the
+ * pre-check stays accurate even while the window sits BEHIND ZCode (a screen
+ * CopyFromScreen here would capture whatever covers the window instead).
+ * Returns null when the window cannot be captured (treated as "not black").
  */
 export async function windowIsBlack(title: string): Promise<boolean | null> {
   const script = `
-Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Add-Type -AssemblyName System.Drawing
 $p = Get-Process | Where-Object { $_.MainWindowTitle -eq '${title.replace(/'/g, "''")}' } | Select-Object -First 1
 if ($p) {
   Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public class ZB { [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out R r); public struct R { public int L, T, Rt, B; } }
+public class ZB2 {
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+}
 '@
-  $r = New-Object ZB+R
-  [ZB]::GetWindowRect($p.MainWindowHandle, [ref]$r) | Out-Null
-  $w = $r.Rt - $r.L; $h = $r.B - $r.T
+  $r = New-Object ZB2+RECT
+  [ZB2]::GetClientRect($p.MainWindowHandle, [ref]$r) | Out-Null
+  $w = $r.R - $r.L; $h = $r.B - $r.T
   if ($w -gt 0 -and $h -gt 0) {
     $bmp = New-Object System.Drawing.Bitmap($w, $h)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size)
+    $hdc = $g.GetHdc()
+    [ZB2]::PrintWindow($p.MainWindowHandle, $hdc, 2) | Out-Null
+    $g.ReleaseHdc($hdc); $g.Dispose()
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
     Write-Output $ms.Length
   } else { Write-Output -1 }
 } else { Write-Output -1 }`;
@@ -181,7 +190,7 @@ public class ZB { [DllImport("user32.dll")] public static extern bool GetWindowR
     const { stdout } = await exec("powershell", ["-NoProfile", "-Command", script], { timeout: 15_000 });
     const bytes = Number(stdout.trim());
     if (!Number.isFinite(bytes) || bytes < 0) return null;
-    return bytes < 30000; // a rendered 640x360+ frame is 150KB+; black is <30KB
+    return bytes < 30000; // a rendered frame is 150KB+; black is <30KB
   } catch {
     return null;
   }
@@ -214,12 +223,21 @@ export async function openSceneWindow(
     throw new SceneWindowError(`Window "${opts.title}" did not appear within 15s`);
   }
 
-  // NO SetWindowPos repositioning: every manual probe (open via the same
-  // command, wait, capture) rendered fine, while the pipeline that moved the
-  // window right after creation came up black on this hybrid-GPU machine.
-  // The recorder crops by the MEASURED client rect, so the window can simply
-  // stay wherever WE placed it.
+  // NO SetWindowPos repositioning (size/move): every manual probe rendered
+  // fine, while the pipeline that moved the window right after creation came
+  // up black on this hybrid-GPU machine. The recorder crops by the MEASURED
+  // client rect, so the window stays wherever WE placed it.
   const client = await measureClientRect(hwnd, opts.title);
+  // Z-ORDER ONLY: sink the render window to the BOTTOM of the stack so it
+  // never covers the user's work — capture is PrintWindow-based and works
+  // fully occluded (HWND_BOTTOM after pointer = 1; flags 0x3 = NOMOVE|NOSIZE
+  // and no activation). The window is visible only for the instant between
+  // WE creating it and this call.
+  await exec("powershell", [
+    "-NoProfile", "-Command",
+    `Add-Type -Namespace N -Name Z -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);'
+[N.Z]::SetWindowPos([IntPtr]${hwnd}, [IntPtr]1, 0, 0, 0, 0, 0x0003) | Out-Null`,
+  ], { timeout: 10_000 }).catch(() => undefined);
   return { title: opts.title, hwnd, client, proc };
 }
 

@@ -17,7 +17,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
-import { measureClientRect, type SceneWindowHandle } from "./weLauncher.js";
+import { type SceneWindowHandle } from "./weLauncher.js";
 
 const exec = execFileP;
 
@@ -64,7 +64,7 @@ $r = New-Object PW+RECT
 [PW]::GetClientRect($target, [ref]$r) | Out-Null
 $w = $r.R - $r.L; $h = $r.B - $r.T
 if ($w -le 0 -or $h -le 0) { Write-Output "0"; exit 1 }
-$dir = '${seqDir.replace(/\\/g, "\\\\") }'
+$dir = '${seqDir.replace(/\\/g, "\\\\")}'
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $n = 0
 while ($sw.ElapsedMilliseconds -lt ${opts.duration * 1000}) {
@@ -76,7 +76,7 @@ while ($sw.ElapsedMilliseconds -lt ${opts.duration * 1000}) {
   $hdc = $g.GetHdc()
   [PW]::PrintWindow($target, $hdc, 2) | Out-Null   # PW_RENDERFULLCONTENT
   $g.ReleaseHdc($hdc); $g.Dispose()
-  $bmp.Save((Join-Path $dir ('f_{0:d6}.bmp' -f $n)), [System.Drawing.Imaging.ImageFormat]::Bmp)
+  $bmp.Save((Join-Path $dir ('f_{0:d6}.png' -f $n)), [System.Drawing.Imaging.ImageFormat]::Png)
   $bmp.Dispose()
   $n++
 }
@@ -101,7 +101,7 @@ Write-Output $n`;
     await exec(ffmpeg, [
       "-y", "-hide_banner", "-loglevel", "warning",
       "-framerate", String(opts.fps),
-      "-i", path.join(seqDir, "f_%06d.bmp"),
+      "-i", path.join(seqDir, "f_%06d.png"),
       "-vf", `scale=${outW}:${outH}`,
       "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-an",
       out,
@@ -123,51 +123,17 @@ export async function recordSceneWindow(
   if (!ffmpeg) throw new RecordError("ffmpeg not found — cannot record scene window");
   mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
 
-  // DEFAULT PATH: background PrintWindow capture (occlusion-proof, nothing
-  // forced on-screen). Falls back to the ddagrab desktop capture below only
-  // when PrintWindow yields nothing (e.g. driver blocks full-content redirect).
-  try {
-    await recordWindowBackground(handle, out, {
-      duration: opts.duration,
-      fps: opts.fps,
-      outWidth: opts.outWidth ?? 1920,
-      outHeight: opts.outHeight ?? 1080,
-    }, ffmpeg);
-    return;
-  } catch (err) {
-    if (!(err instanceof RecordError)) throw err;
-    // fall through to ddagrab
-  }
-
-  // ddagrab captures the COMPOSITED DESKTOP, so the window must stay
-  // topmost for the duration (legacy fallback path only).
-  const client = await measureClientRect(handle.hwnd, handle.title);
-  const { x, y, width, height } = client;
-  const outW = opts.outWidth ?? 1920;
-  const outH = opts.outHeight ?? 1080;
-  const args = [
-    "-y",
-    "-hide_banner",
-    "-loglevel", "warning",
-    "-f", "lavfi",
-    "-i", `ddagrab=output_idx=0:framerate=${opts.fps}:draw_mouse=0`,
-    "-t", String(opts.duration),
-    "-vf", `hwdownload,format=bgra,crop=${width}:${height}:${x}:${y},scale=${outW}:${outH}`,
-    "-c:v", "libx264",
-    "-preset", "ultrafast",
-    "-pix_fmt", "yuv420p",
-    "-an",
-    out,
-  ];
-
-  await setTopmost(handle.hwnd, true);
-  try {
-    await exec(ffmpeg, args, { timeout: (opts.duration + 30) * 1000, maxBuffer: 16 * 1024 * 1024 });
-  } catch (err) {
-    throw new RecordError(`ffmpeg ddagrab capture failed: ${(err as Error).message}`);
-  } finally {
-    await setTopmost(handle.hwnd, false).catch(() => undefined);
-  }
+  // The ONLY capture path: background PrintWindow (PW_RENDERFULLCONTENT) —
+  // occlusion-proof, nothing forced on-screen, no z-order games. There is
+  // deliberately NO ddagrab fallback: it requires a topmost window, which
+  // defeats the whole design. A PrintWindow failure surfaces as an error and
+  // the pipeline's black-gate retry simply reopens the window.
+  await recordWindowBackground(handle, out, {
+    duration: opts.duration,
+    fps: opts.fps,
+    outWidth: opts.outWidth ?? 1920,
+    outHeight: opts.outHeight ?? 1080,
+  }, ffmpeg);
 }
 
 export interface BlacknessReport {
@@ -226,13 +192,3 @@ async function meanLumaOf(file: string, ffmpeg: string): Promise<number> {
   }
 }
 
-async function setTopmost(hwnd: number, topmost: boolean): Promise<void> {
-  // -1 = HWND_TOPMOST, -2 = HWND_NOTOPMOST; SWP_NOMOVE(0x2) | SWP_NOSIZE(0x1)
-  // — do NOT touch position/size, only the z-order.
-  const after = topmost ? -1 : -2;
-  await exec("powershell", [
-    "-NoProfile", "-Command",
-    `Add-Type -Namespace N -Name W -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);'
-[N.W]::SetWindowPos([IntPtr]${hwnd}, [IntPtr]${after}, 0, 0, 0, 0, 0x0003)`,
-  ], { timeout: 10_000 });
-}
