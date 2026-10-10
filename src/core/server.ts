@@ -310,6 +310,28 @@ const held = new Map<string, HeldSession>();
 const scrubbedUpdaters = new Set<string>();
 
 /**
+ * Panel-only scrub for the update window in showOnUpdater mode: the wallpaper
+ * stays, but no FAB/panel/popups — including ones a stale registration
+ * replays. Companion to scrubTarget (which removes EVERYTHING).
+ */
+async function scrubPanelArtifacts(target: { webSocketDebuggerUrl?: string }): Promise<void> {
+  if (!target.webSocketDebuggerUrl) return;
+  const conn = await CdpConnection.connect(target.webSocketDebuggerUrl);
+  try {
+    await conn.send("Runtime.evaluate", {
+      expression: `(function(){
+        var p = document.getElementById('zcode-beautify-panel-root'); if (p) p.remove();
+        document.querySelectorAll('body > .zb-we-pop').forEach(function(e){e.remove();});
+        try{(window.__zbTimers||[]).forEach(function(t){clearInterval(t)});window.__zbTimers=[];}catch(_){}
+      })()`,
+      returnByValue: true,
+    });
+  } finally {
+    conn.close();
+  }
+}
+
+/**
  * Idempotent scrub for windows we deliberately do NOT beautify (the update
  * dialog): removes every node/style this plugin ever mounted plus panel
  * intervals, so nothing from an earlier injection — or from an
@@ -354,7 +376,8 @@ async function registerScript(
 async function holdSession(
   target: { id: string; webSocketDebuggerUrl?: string },
   config: BeautifyConfig,
-  apiPort: number
+  apiPort: number,
+  opts: { panel?: boolean } = {}
 ): Promise<void> {
   if (!target.webSocketDebuggerUrl) return;
   const conn = await CdpConnection.connect(target.webSocketDebuggerUrl);
@@ -383,6 +406,13 @@ async function holdSession(
   const bootEval = await conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
   if (bootEval?.exceptionDetails) {
     console.error(`serve: theme bootstrap threw — ${JSON.stringify(bootEval.exceptionDetails).slice(0, 400)}`);
+  }
+
+  // The update-status window gets the wallpaper but never the panel — there
+  // is nothing to interact with on a download-progress page.
+  if (opts.panel === false) {
+    held.set(target.id, session);
+    return;
   }
 
   const panelScript = buildPanelScript(apiPort, mediaToken, config.startupClean !== false);
@@ -461,22 +491,41 @@ async function poll(config: BeautifyConfig, apiPort: number): Promise<void> {
       }
     }
     for (const t of targets) {
-      // The update-status window stays stock unless the user opted in. Drop
-      // any session held while the option was on, and scrub what an earlier
-      // injection left behind (every tick — cheap, and beats replays).
-      if (isUpdaterTarget(t) && config.showOnUpdater !== true) {
-        if (held.has(t.id)) {
-          held.get(t.id)!.conn.close();
-          held.delete(t.id);
-        }
-        try {
-          await scrubTarget(t);
-          if (!scrubbedUpdaters.has(t.id)) {
-            scrubbedUpdaters.add(t.id);
-            console.log(`serve: update-status window (${t.id.slice(0, 8)}) left stock — wallpaper/panel scrubbed (opt back in via settings)`);
+      if (isUpdaterTarget(t)) {
+        if (config.showOnUpdater === true) {
+          // Wallpaper-only mode: bootstrap is injected, the panel never is.
+          // Scrub panel artifacts every tick so nothing (including a stale
+          // registration replaying after a reload) resurrects the FAB.
+          if (!held.has(t.id)) {
+            try {
+              await holdSession(t, config, apiPort, { panel: false });
+              console.log(`serve: update-status window (${t.id.slice(0, 8)}) beautified — wallpaper only, no panel`);
+            } catch {
+              /* retry next tick */
+            }
           }
-        } catch {
-          scrubbedUpdaters.delete(t.id);
+          try {
+            await scrubPanelArtifacts(t);
+          } catch {
+            /* next tick retries */
+          }
+        } else {
+          // Default: the update window stays completely stock. Drop any
+          // session held while the option was on, and scrub what an earlier
+          // injection left behind (every tick — cheap, and beats replays).
+          if (held.has(t.id)) {
+            held.get(t.id)!.conn.close();
+            held.delete(t.id);
+          }
+          try {
+            await scrubTarget(t);
+            if (!scrubbedUpdaters.has(t.id)) {
+              scrubbedUpdaters.add(t.id);
+              console.log(`serve: update-status window (${t.id.slice(0, 8)}) left stock — wallpaper/panel scrubbed (opt back in via settings)`);
+            }
+          } catch {
+            scrubbedUpdaters.delete(t.id);
+          }
         }
         continue;
       }
