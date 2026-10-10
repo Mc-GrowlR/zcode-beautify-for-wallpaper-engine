@@ -35,6 +35,15 @@ export function pickRendererTargets(targets: CdpTarget[]): CdpTarget[] {
   return main.length > 0 ? main : pages.filter((t) => !t.url.includes("devtools://"));
 }
 
+/**
+ * ZCode's update-status window (download/install progress dialog): the same
+ * renderer page with `windowKind=update-status` in the query. Beautifying it
+ * is opt-in (config.showOnUpdater) — by default the plugin leaves it stock.
+ */
+export function isUpdaterTarget(t: { url?: string }): boolean {
+  return typeof t.url === "string" && t.url.includes("windowKind=update-status");
+}
+
 export class CdpConnection {
   private ws: WebSocket;
   private nextId = 1;

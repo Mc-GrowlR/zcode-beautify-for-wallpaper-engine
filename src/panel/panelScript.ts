@@ -403,6 +403,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
     '      </div>' +
     '      <div class="zb-sched-mode" style="margin:6px 0 0"><label title="ZCode 启动屏(加载页)期间不显示壁纸与美化面板,主界面就绪后再出现"><input type="checkbox" id="zb-startup-clean">启动屏时隐藏壁纸与面板</label></div>' +
+    '      <div class="zb-sched-mode" style="margin-top:4px"><label title="ZCode 下载/安装更新的进度窗口默认不显示壁纸与面板;勾选后更新窗口也美化"><input type="checkbox" id="zb-updater-wp">ZCode 更新界面显示壁纸与面板</label></div>' +
     '      <div class="zb-sched-mode" style="margin-top:4px"><label title="悬停 WE 库中的视频壁纸时直接播放其真实画面(而非封面图);场景壁纸仍显示封面"><input type="checkbox" id="zb-we-live">WE 预览播放真实视频</label></div>' +
 '      <div class="zb-sched-mode" style="margin-top:4px"><span title="壁纸库·动态列表一次最多可见的行数(其余滚动查看)">动态库</span>' +
     '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" style="width:44px" title="动态壁纸列表最多显示行数">' +
@@ -595,6 +596,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         wallpaperVisible: $('zb-vis').checked,
         kenBurns: $('zb-kb').checked,
         startupClean: (document.getElementById('zb-startup-clean') || {}).checked !== false,
+        showOnUpdater: (document.getElementById('zb-updater-wp') || {}).checked === true,
         videoVolume: Number($('zb-vol').value)
       }, function (d) { status(d && d.windows > 0 ? '已应用 applied' : '已保存(ZCode 未连接)'); });
     }, 300);
@@ -670,6 +672,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
+        var uw = document.getElementById('zb-updater-wp');
+        if (uw) uw.checked = c.showOnUpdater === true;
         var resetBtn = $('zb-reset');
         if (c.wallpaperSet) {
           resetBtn.textContent = '还原外观';
@@ -759,6 +763,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   }
   var zbScEl = document.getElementById('zb-startup-clean');
   if (zbScEl) zbScEl.addEventListener('change', pushConfig);
+  var zbUwEl = document.getElementById('zb-updater-wp');
+  if (zbUwEl) zbUwEl.addEventListener('change', pushConfig);
   // Per-library visible row counts (设置 → 配置): stored in localStorage —
   // pure panel preference, no serve round-trip needed.
   // Hover delegation is DOCUMENT-level and cannot be swept like intervals —

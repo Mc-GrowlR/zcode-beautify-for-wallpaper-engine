@@ -19,6 +19,7 @@ import {
   CdpConnection,
   buildBootstrapScript,
   buildResetScript,
+  isUpdaterTarget,
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
@@ -220,6 +221,7 @@ function publicConfig(config: BeautifyConfig) {
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
     startupClean: config.startupClean !== false,
+    showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
     fit: config.fit,
     wallpaperSet: Boolean(config.wallpaperPath && fs.existsSync(config.wallpaperPath)),
@@ -240,6 +242,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (typeof body?.kenBurns === "boolean") out.kenBurns = body.kenBurns;
   if (typeof body?.startupClean === "boolean") out.startupClean = body.startupClean;
+  if (typeof body?.showOnUpdater === "boolean") out.showOnUpdater = body.showOnUpdater;
   // Import resolution (录制分辨率): "auto" follows the wallpaper project's own
   // size; otherwise fixed WxH.
   const ir = body?.importRes;
@@ -303,6 +306,32 @@ let importJob: ImportJob = { running: false, stage: "idle" };
 // --- injection session management -------------------------------------------
 
 const held = new Map<string, HeldSession>();
+/** Update-status windows already scrubbed this serve run (for log de-dup). */
+const scrubbedUpdaters = new Set<string>();
+
+/**
+ * Idempotent scrub for windows we deliberately do NOT beautify (the update
+ * dialog): removes every node/style this plugin ever mounted plus panel
+ * intervals, so nothing from an earlier injection — or from an
+ * evaluateOnNewDocument registration a previous serve left behind — survives.
+ * Safe to run every poll tick; it also defeats replays after a page reload.
+ */
+async function scrubTarget(target: { webSocketDebuggerUrl?: string }): Promise<void> {
+  if (!target.webSocketDebuggerUrl) return;
+  const conn = await CdpConnection.connect(target.webSocketDebuggerUrl);
+  try {
+    await conn.send("Runtime.evaluate", {
+      expression: `(function(){
+        ['zcode-beautify-style','zcode-beautify-wallpaper','zcode-beautify-fade','zcode-beautify-fade-style','zcode-beautify-chatlook-style','zcode-beautify-frost','zcode-beautify-zonemask','zcode-beautify-backdrop','zcode-beautify-panel-root'].forEach(function(i){var e=document.getElementById(i);if(e)e.remove();});
+        document.querySelectorAll('body > .zb-we-pop, style[id^="zcode-beautify"]').forEach(function(e){e.remove();});
+        try{(window.__zbTimers||[]).forEach(function(t){clearInterval(t)});window.__zbTimers=[];}catch(_){}
+      })()`,
+      returnByValue: true,
+    });
+  } finally {
+    conn.close();
+  }
+}
 
 /** Per-start random API token; handed to the injected panel and appended to
  *  media URLs. Without it any web page open on this machine could read the
@@ -432,6 +461,25 @@ async function poll(config: BeautifyConfig, apiPort: number): Promise<void> {
       }
     }
     for (const t of targets) {
+      // The update-status window stays stock unless the user opted in. Drop
+      // any session held while the option was on, and scrub what an earlier
+      // injection left behind (every tick — cheap, and beats replays).
+      if (isUpdaterTarget(t) && config.showOnUpdater !== true) {
+        if (held.has(t.id)) {
+          held.get(t.id)!.conn.close();
+          held.delete(t.id);
+        }
+        try {
+          await scrubTarget(t);
+          if (!scrubbedUpdaters.has(t.id)) {
+            scrubbedUpdaters.add(t.id);
+            console.log(`serve: update-status window (${t.id.slice(0, 8)}) left stock — wallpaper/panel scrubbed (opt back in via settings)`);
+          }
+        } catch {
+          scrubbedUpdaters.delete(t.id);
+        }
+        continue;
+      }
       if (!held.has(t.id)) {
         try {
           await holdSession(t, config, apiPort);

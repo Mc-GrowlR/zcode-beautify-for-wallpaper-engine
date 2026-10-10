@@ -3,7 +3,7 @@
  * overrides, plus helpers to apply a theme to a running ZCode instance.
  */
 
-import { CdpConnection, injectIntoTarget, listTargets, pickRendererTargets, buildBootstrapScript, buildResetScript } from "./cdp.js";
+import { CdpConnection, injectIntoTarget, isUpdaterTarget, listTargets, pickRendererTargets, buildBootstrapScript, buildResetScript } from "./cdp.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
 import { dataDir } from "./launch.js";
@@ -116,6 +116,8 @@ export interface BeautifyConfig {
   chatLook?: Partial<ChatLookConfig>;
   /** Hide wallpaper+panel during ZCode's startup screen (default true). */
   startupClean?: boolean;
+  /** Beautify ZCode's update-status window too (default false — stays stock). */
+  showOnUpdater?: boolean;
   /** Import resolution: "auto" follows the wallpaper project size, else WxH. */
   importRes?: { mode: string; width?: number; height?: number };
   /** Day/night look schedule (护眼): two dim/blur presets switching by time. */
@@ -323,6 +325,8 @@ export async function applyToZCode(config: BeautifyConfig, payload: BuiltPayload
   }
   let count = 0;
   for (const target of targets) {
+    // The update-status window is opt-in; skip it unless configured otherwise.
+    if (isUpdaterTarget(target) && config.showOnUpdater !== true) continue;
     try {
       await injectIntoTarget(target, payload);
       count++;
