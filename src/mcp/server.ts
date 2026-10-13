@@ -76,7 +76,7 @@ bootstrapServe();
 
 const server = new McpServer({
   name: "zcode-beautify",
-  version: "0.3.1",
+  version: "0.4.0",
 });
 
 /** Registry of the tools this server exposes (used by tests / docs). */
