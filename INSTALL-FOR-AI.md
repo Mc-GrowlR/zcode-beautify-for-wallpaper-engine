@@ -24,7 +24,7 @@ If they want to beautify a non-ZCode app or develop their own → read
 
 ## What you are installing
 
-`zcode-beautify` v0.2.0 — a ZCode plugin that adds a wallpaper layer +
+`zcode-beautify` v0.4.0 — a ZCode plugin that adds a wallpaper layer +
 Material Design 3 (Monet) dynamic color to the ZCode desktop client over CDP,
 with a `/beautify` slash command, MCP tools (`set_background`, `apply_options`,
 `refresh_theme`, `reset_appearance`, `beautify_status`), and a live settings
@@ -86,7 +86,7 @@ everything else.
 4. **Cache the plugin** (what the UI does on "Get"):
    ```text
    from: <clone>/                      (or the staged marketplace copy)
-   to:   ~/.zcode/cli/plugins/cache/zcode-beautify/zcode-beautify/0.2.0/
+   to:   ~/.zcode/cli/plugins/cache/zcode-beautify/zcode-beautify/0.4.0/
    ```
    Read the exact version from `.zcode-plugin/plugin.json` — the folder name
    must equal it.
@@ -105,7 +105,7 @@ everything else.
      "id": "zcode-beautify@zcode-beautify",
      "name": "zcode-beautify",
      "marketplace": "zcode-beautify",
-     "version": "0.2.0",
+     "version": "0.4.0",
      "installPath": "<the cache folder from step 4>",
      "installedAt": "<now, ISO-8601>",
      "updatedAt": "<now, ISO-8601>",
