@@ -3,6 +3,18 @@
 > 基于 fork 上游 0.2.1（27d8699）。所有改动均为增量，静态壁纸原有链路保持不变。
 > 0.3.0：场景壁纸 + 视频壁纸（.mp4/.webm 直接导入）+ 循环冻结看门狗 + ZCode 启动自动拉起 serve。
 > 0.4.0：定时播放（多方案轮播）、WE 壁纸库浏览器、导入管线稳定性大修、面板三标签与界面遮罩（见下）。
+> 0.4.1：移植上游 0.3.3 启动项修复器（launchers.ts）——注册表处理器、递归扫描、dry-run（见下）。
+
+## 0.4.1
+
+> 移植上游 Logocceai/zcode-beautify 0.3.3（4099c2d）的 launcher repair，替换并删除 fork 自有的 `src/core/shortcuts.ts`。合并两者之长：
+
+- **新增 `src/core/launchers.ts`**：单个 PowerShell 脚本完成全部扫描与修复（原来每个快捷方式起一个进程）。
+  - 覆盖面扩大：任意深度递归扫描；按 `.lnk` **目标**匹配 ZCode.exe（改名/中文命名不再漏）；新增 **HKCU 注册表启动项**修复——`zcode://` 协议处理器与资源管理器右键菜单（Directory/Drive 的 `ZCode.OpenInZCode`），插入位置在 exe 之后、保留 `%1` 与引号。
+  - 保留 fork 优势：**OneDrive 桌面重定向**目录照扫；MCP bootstrap **每次启动自愈**（上游仅 CDP 不可达时修；而 ZCode 更新器会重建开始菜单快捷方式且不带参数——每次自愈正好对冲）。
+  - 新增 `repair-launchers [--dry-run]` CLI 子命令与 `repair_launchers` MCP 工具（结构化报告：updated / already-ok / failed+原因；机器级条目只报告不修改）。
+  - PowerShell 输出强制 UTF-8，中文 Windows 报错不再乱码。
+- **测试**：`test/t-launchers-verify.ts` —— 28 项检查全部沙箱化（临时目录伪装 USERPROFILE/APPDATA/PUBLIC/ProgramData/OneDrive + 一次性 HKCU 测试键），不触碰真实快捷方式与 ZCode 注册表处理器；覆盖递归/中文名/OneDrive/任务栏/公共桌面/幂等/dry-run/`%1` 保留。
 
 ## 0.4.0
 
