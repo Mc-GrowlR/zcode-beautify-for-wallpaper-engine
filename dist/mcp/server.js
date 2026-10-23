@@ -3276,8 +3276,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path12) {
-      let input2 = path12;
+    function removeDotSegments(path11) {
+      let input2 = path11;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3686,8 +3686,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path12 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
+        const path11 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7199,12 +7199,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs10, exportName) {
+    function addFormats(ajv, list, fs9, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs10[f2]);
+        ajv.addFormat(f2, fs9[f2]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -11810,7 +11810,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs10 = __require("fs");
+    var fs9 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -11925,14 +11925,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports.write = function(path12, frames, spec, encoder) {
+    exports.write = function(path11, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path12.match(/\.[a-zA-Z]+$/);
+      const matches = path11.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path12}' has an unexpected suffix`);
+        throw new Error(`GIF '${path11}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path12, gif2.buffer).then(() => {
+        return _writeBinary(path11, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -12004,9 +12004,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path12) {
+    function _readBinary(path11) {
       return new Promise((resolve, reject) => {
-        fs10.readFile(path12, (err, buffer) => {
+        fs9.readFile(path11, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -12014,9 +12014,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path12, buffer) {
+    function _writeBinary(path11, buffer) {
       return new Promise((resolve, reject) => {
-        fs10.writeFile(path12, buffer, (err) => {
+        fs9.writeFile(path11, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -13995,9 +13995,9 @@ var require_decoder = __commonJS({
         return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
       }
       constructor.prototype = {
-        load: function load(path12) {
+        load: function load(path11) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path12, true);
+          xhr.open("GET", path11, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -24424,11 +24424,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path12) {
-      path12 = String(path12);
-      let last = path12.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path11) {
+      path11 = String(path11);
+      let last = path11.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path12.length;
+      let hasPath = last.length < path11.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -30615,8 +30615,8 @@ function isTokenizerStreamBoundsError(error62) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error62.stack);
 }
-async function fileTypeFromFile(path12, options) {
-  return new FileTypeParser2(options).fromFile(path12, options);
+async function fileTypeFromFile(path11, options) {
+  return new FileTypeParser2(options).fromFile(path11, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -30647,9 +30647,9 @@ var init_file_type = __esm({
           }
         }
       }
-      async fromFile(path12) {
+      async fromFile(path11) {
         this.options.signal?.throwIfAborted();
-        const fileHandle = await fs2.open(path12, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+        const fileHandle = await fs2.open(path11, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
         const fileStat = await fileHandle.stat();
         if (!fileStat.isFile()) {
           await fileHandle.close();
@@ -30658,7 +30658,7 @@ var init_file_type = __esm({
         const tokenizer = new FileTokenizer(fileHandle, {
           ...this.getTokenizerOptions(),
           fileInfo: {
-            path: path12,
+            path: path11,
             size: fileStat.size
           }
         });
@@ -38552,88 +38552,170 @@ var init_scenePipeline = __esm({
   }
 });
 
-// dist/core/shortcuts.js
-var shortcuts_exports = {};
-__export(shortcuts_exports, {
-  ensureShortcutsHaveCdpFlag: () => ensureShortcutsHaveCdpFlag
+// dist/core/launchers.js
+var launchers_exports = {};
+__export(launchers_exports, {
+  DEFAULT_REGISTRY_KEYS: () => DEFAULT_REGISTRY_KEYS,
+  psScript: () => psScript,
+  repairLaunchers: () => repairLaunchers
 });
-import fs9 from "node:fs";
-import path10 from "node:path";
-function shortcutDirs() {
-  const home = process.env.USERPROFILE ?? "";
-  const appData = process.env.APPDATA ?? "";
-  return [
-    // Desktop may be OneDrive-redirected; cover both physical locations.
-    path10.join(home, "Desktop"),
-    ...process.env.OneDrive ? [path10.join(process.env.OneDrive, "Desktop")] : [],
-    path10.join(appData, "Microsoft", "Windows", "Start Menu", "Programs"),
-    path10.join("C:", "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs"),
-    path10.join(appData, "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar")
-  ];
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+function psScript(port, dryRun, registryKeys = DEFAULT_REGISTRY_KEYS) {
+  return `
+$ErrorActionPreference = 'Continue'
+# Without this, Chinese Windows error strings come back as mojibake through
+# Node's UTF-8 stdout decoding.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$port = ${port}
+$dryRun = $${dryRun ? "true" : "false"}
+$flag = ' --remote-debugging-port=' + $port
+$results = New-Object System.Collections.ArrayList
+
+function Add-Result($kind, $p, $before, $after, $status, $reason) {
+  [void]$results.Add([pscustomobject]@{
+    kind = $kind; path = $p; before = $before; after = $after
+    status = $status; reason = $reason
+  })
 }
-async function ensureShortcutsHaveCdpFlag(port) {
-  if (process.platform !== "win32")
-    return { updated: [], skipped: [], failed: [] };
-  const flag = `--remote-debugging-port=${port}`;
-  const result = { updated: [], skipped: [], failed: [] };
-  const links = [];
-  const collect = (dir) => {
-    links.push(...fs9.readdirSync(dir).filter((f2) => /^zcode/i.test(f2) && f2.endsWith(".lnk")).map((f2) => path10.join(dir, f2)));
-  };
-  for (const dir of shortcutDirs()) {
+
+# --- shortcuts -------------------------------------------------------------
+$dirs = @(
+  (Join-Path $env:USERPROFILE 'Desktop'),
+  $(if ($env:OneDrive) { Join-Path $env:OneDrive 'Desktop' }),
+  (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'),
+  # Pinned taskbar shortcuts are plain .lnk files; start-menu search and most
+  # third-party launchers (Flow Launcher, PowerToys Run, \u2026) index the Start Menu
+  # copy, but users who pin the app read this one.
+  (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar'),
+  (Join-Path $env:PUBLIC 'Desktop'),
+  (Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs')
+)
+
+$lnks = @()
+foreach ($d in $dirs) {
+  if ($d -and (Test-Path -LiteralPath $d)) {
+    $lnks += @(Get-ChildItem -LiteralPath $d -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)
+  }
+}
+
+$wsh = New-Object -ComObject WScript.Shell
+foreach ($item in $lnks) {
+  try { $sc = $wsh.CreateShortcut($item.FullName) } catch { continue }
+  $target = [string]$sc.TargetPath
+  if ($target -notlike '*ZCode.exe') { continue }
+
+  $before = [string]$sc.Arguments
+  if ($before -match 'remote-debugging-port') {
+    Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+    continue
+  }
+
+  $after = ($before.Trim() + $flag).Trim()
+  if ($dryRun) {
+    Add-Result 'shortcut' $item.FullName $before $after 'updated' 'dry-run'
+    continue
+  }
+  try {
+    $sc.Arguments = $after
+    $sc.Save()
+    Add-Result 'shortcut' $item.FullName $before $after 'updated' $null
+  } catch {
+    Add-Result 'shortcut' $item.FullName $before $after 'failed' $_.Exception.Message
+  }
+}
+
+# --- HKCU protocol / shell handlers ----------------------------------------
+$keys = @(${registryKeys.map((k) => `'${k.replace(/'/g, "''")}'`).join(",")})
+
+foreach ($k in $keys) {
+  if (-not (Test-Path -LiteralPath $k)) { continue }
+  try {
+    $key = Get-Item -LiteralPath $k
+    $before = [string]$key.GetValue('')
+    if ($before -notmatch 'ZCode\\.exe') { continue }
+    if ($before -match 'remote-debugging-port') {
+      Add-Result 'registry' $k $before $before 'already-ok' $null
+      continue
+    }
+    # Insert the flag directly after the executable token, keeping any
+    # placeholders ("%1") and quoting untouched.
+    $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
+    if ($dryRun) {
+      Add-Result 'registry' $k $before $after 'updated' 'dry-run'
+      continue
+    }
     try {
-      collect(dir);
-      for (const sub of fs9.readdirSync(dir, { withFileTypes: true })) {
-        if (!sub.isDirectory())
-          continue;
-        try {
-          collect(path10.join(dir, sub.name));
-        } catch {
-        }
-      }
+      # Get-Item hands back a read-only handle, so the default value can only be
+      # changed through a .NET key opened with write access.
+      $sub = $k -replace '^HKCU:\\\\', ''
+      $writable = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($sub, $true)
+      if (-not $writable) { throw 'cannot open the key for writing' }
+      $writable.SetValue('', $after, [Microsoft.Win32.RegistryValueKind]::String)
+      $writable.Close()
+      Add-Result 'registry' $k $before $after 'updated' $null
     } catch {
+      Add-Result 'registry' $k $before $after 'failed' $_.Exception.Message
     }
+  } catch {
+    Add-Result 'registry' $k '' '' 'failed' $_.Exception.Message
   }
-  if (links.length === 0)
-    return result;
-  for (const lnk of links) {
-    const script = `
-$ErrorActionPreference = 'Stop'
-try {
-  $ws = New-Object -ComObject WScript.Shell
-  $s = $ws.CreateShortcut('${lnk.replace(/'/g, "''")}')
-  if ($s.TargetPath -notmatch 'ZCode.exe$') { Write-Output 'ok|not-zcode'; exit }
-  if ($s.Arguments -like '*--remote-debugging-port*') { Write-Output 'ok|has-flag'; exit }
-  $s.Arguments = ($s.Arguments.Trim() + ' ${flag}').Trim()
-  $s.Save()
-  Write-Output 'updated'
-} catch { Write-Output ('err|' + $_.Exception.Message) }`;
-    try {
-      const { stdout } = await execFileP("powershell", ["-NoProfile", "-Command", script], { timeout: 15e3, windowsHide: true });
-      const out = stdout.trim();
-      if (out.startsWith("updated"))
-        result.updated.push(lnk);
-      else if (out.startsWith("err"))
-        result.failed.push({ path: lnk, reason: out.slice(4) });
-      else
-        result.skipped.push(lnk);
-    } catch (err) {
-      result.failed.push({ path: lnk, reason: err.message });
-    }
-  }
-  return result;
 }
-var init_shortcuts = __esm({
-  "dist/core/shortcuts.js"() {
+
+@($results) | ConvertTo-Json -Depth 4 -Compress
+`;
+}
+async function repairLaunchers(opts) {
+  const dryRun = opts.dryRun ?? false;
+  if (process.platform !== "win32") {
+    return {
+      supported: false,
+      dryRun,
+      fixes: [],
+      error: "launcher repair is only implemented for Windows; on other platforms edit your app shortcut manually"
+    };
+  }
+  const encoded = Buffer.from(psScript(opts.port, dryRun, opts.registryKeys), "utf16le").toString("base64");
+  try {
+    const { stdout } = await execFileAsync2("powershell", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { maxBuffer: 8 * 1024 * 1024, timeout: 12e4, windowsHide: true });
+    const trimmed = stdout.trim();
+    if (!trimmed)
+      return { supported: true, dryRun, fixes: [] };
+    const raw = JSON.parse(trimmed);
+    const list = Array.isArray(raw) ? raw : [raw];
+    return {
+      supported: true,
+      dryRun,
+      fixes: list.map((r2) => ({
+        kind: r2.kind === "registry" ? "registry" : "shortcut",
+        path: r2.path,
+        before: r2.before,
+        after: r2.after,
+        status: r2.status === "updated" || r2.status === "already-ok" ? r2.status : "failed",
+        reason: r2.reason ?? void 0
+      }))
+    };
+  } catch (err) {
+    return { supported: true, dryRun, fixes: [], error: err.message };
+  }
+}
+var execFileAsync2, DEFAULT_REGISTRY_KEYS;
+var init_launchers = __esm({
+  "dist/core/launchers.js"() {
     "use strict";
-    init_exec();
+    execFileAsync2 = promisify3(execFile3);
+    DEFAULT_REGISTRY_KEYS = [
+      "HKCU:\\Software\\Classes\\zcode\\shell\\open\\command",
+      "HKCU:\\Software\\Classes\\Directory\\shell\\ZCode.OpenInZCode\\command",
+      "HKCU:\\Software\\Classes\\Drive\\shell\\ZCode.OpenInZCode\\command"
+    ];
   }
 });
 
 // dist/mcp/server.js
 import { spawn as spawn3 } from "node:child_process";
 import { existsSync as existsSync2, statSync } from "node:fs";
-import path11 from "node:path";
+import path10 from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -39009,8 +39091,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -39125,11 +39207,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -43083,10 +43165,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path11) {
+  if (!path11)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path11.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -43426,11 +43508,11 @@ function explicitlyAborted(x2, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path11, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path11);
     return iss;
   });
 }
@@ -43880,16 +43962,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path12 = []) => {
+  const processError = (error63, path11 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path11, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -43928,17 +44010,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path12 = []) => {
+  const processError = (error63, path11 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path11, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -43977,8 +44059,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path12 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path12) {
+  const path11 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path11) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -59493,11 +59575,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path12) {
-  if (path12.length === 0) {
+function getDotPath(path11) {
+  if (path11.length === 0) {
     return "object root";
   }
-  return path12.reduce((acc, seg, index) => {
+  return path11.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -61724,13 +61806,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path12 = ref.slice(1).split("/").filter(Boolean);
-  if (path12.length === 0) {
+  const path11 = ref.slice(1).split("/").filter(Boolean);
+  if (path11.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path12[0] === defsKey) {
-    const key = path12[1] === void 0 ? void 0 : decodeJSONPointerSegment(path12[1]);
+  if (path11[0] === defsKey) {
+    const key = path11[1] === void 0 ? void 0 : decodeJSONPointerSegment(path11[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -70302,8 +70384,8 @@ function getErrorMap3() {
 
 // node_modules/@jimp/types/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue2 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -70419,11 +70501,11 @@ var errorUtil2;
 
 // node_modules/@jimp/types/node_modules/zod/v3/types.js
 var ParseInputLazyPath2 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -74358,8 +74440,8 @@ function getErrorMap4() {
 
 // node_modules/@jimp/plugin-blit/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue3 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -74475,11 +74557,11 @@ var errorUtil3;
 
 // node_modules/@jimp/plugin-blit/node_modules/zod/v3/types.js
 var ParseInputLazyPath3 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -79184,8 +79266,8 @@ function getErrorMap5() {
 
 // node_modules/@jimp/plugin-circle/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue4 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -79301,11 +79383,11 @@ var errorUtil4;
 
 // node_modules/@jimp/plugin-circle/node_modules/zod/v3/types.js
 var ParseInputLazyPath4 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -83267,8 +83349,8 @@ function getErrorMap6() {
 
 // node_modules/@jimp/plugin-color/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue5 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -83384,11 +83466,11 @@ var errorUtil5;
 
 // node_modules/@jimp/plugin-color/node_modules/zod/v3/types.js
 var ParseInputLazyPath5 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -88104,9 +88186,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path12, options) {
-      const mimeType = import_lite.default.getType(path12);
-      await writeFile(path12, await this.getBuffer(mimeType, options));
+    async write(path11, options) {
+      const mimeType = import_lite.default.getType(path11);
+      await writeFile(path11, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -88797,8 +88879,8 @@ function getErrorMap7() {
 
 // node_modules/@jimp/plugin-resize/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue6 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -88914,11 +88996,11 @@ var errorUtil6;
 
 // node_modules/@jimp/plugin-resize/node_modules/zod/v3/types.js
 var ParseInputLazyPath6 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -93470,8 +93552,8 @@ function getErrorMap8() {
 
 // node_modules/@jimp/plugin-contain/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue7 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -93587,11 +93669,11 @@ var errorUtil7;
 
 // node_modules/@jimp/plugin-contain/node_modules/zod/v3/types.js
 var ParseInputLazyPath7 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -97562,8 +97644,8 @@ function getErrorMap9() {
 
 // node_modules/@jimp/plugin-crop/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue8 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -97679,11 +97761,11 @@ var errorUtil8;
 
 // node_modules/@jimp/plugin-crop/node_modules/zod/v3/types.js
 var ParseInputLazyPath8 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -101784,8 +101866,8 @@ function getErrorMap10() {
 
 // node_modules/@jimp/plugin-cover/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue9 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -101901,11 +101983,11 @@ var errorUtil9;
 
 // node_modules/@jimp/plugin-cover/node_modules/zod/v3/types.js
 var ParseInputLazyPath9 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -105872,8 +105954,8 @@ function getErrorMap11() {
 
 // node_modules/@jimp/plugin-displace/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue10 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -105989,11 +106071,11 @@ var errorUtil10;
 
 // node_modules/@jimp/plugin-displace/node_modules/zod/v3/types.js
 var ParseInputLazyPath10 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -109993,8 +110075,8 @@ function getErrorMap12() {
 
 // node_modules/@jimp/plugin-fisheye/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue11 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -110110,11 +110192,11 @@ var errorUtil11;
 
 // node_modules/@jimp/plugin-fisheye/node_modules/zod/v3/types.js
 var ParseInputLazyPath11 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -114072,8 +114154,8 @@ function getErrorMap13() {
 
 // node_modules/@jimp/plugin-flip/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue12 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -114189,11 +114271,11 @@ var errorUtil12;
 
 // node_modules/@jimp/plugin-flip/node_modules/zod/v3/types.js
 var ParseInputLazyPath12 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -118305,8 +118387,8 @@ function getErrorMap14() {
 
 // node_modules/@jimp/plugin-mask/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue13 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -118422,11 +118504,11 @@ var errorUtil13;
 
 // node_modules/@jimp/plugin-mask/node_modules/zod/v3/types.js
 var ParseInputLazyPath13 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -122403,8 +122485,8 @@ function getErrorMap15() {
 
 // node_modules/@jimp/plugin-print/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue14 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -122520,11 +122602,11 @@ var errorUtil14;
 
 // node_modules/@jimp/plugin-print/node_modules/zod/v3/types.js
 var ParseInputLazyPath14 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -126644,8 +126726,8 @@ function getErrorMap16() {
 
 // node_modules/@jimp/plugin-rotate/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue15 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -126761,11 +126843,11 @@ var errorUtil15;
 
 // node_modules/@jimp/plugin-rotate/node_modules/zod/v3/types.js
 var ParseInputLazyPath15 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -130846,8 +130928,8 @@ function getErrorMap17() {
 
 // node_modules/@jimp/plugin-threshold/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue16 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -130963,11 +131045,11 @@ var errorUtil16;
 
 // node_modules/@jimp/plugin-threshold/node_modules/zod/v3/types.js
 var ParseInputLazyPath16 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -137818,8 +137900,8 @@ function getErrorMap18() {
 
 // node_modules/@jimp/plugin-quantize/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue17 = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -137935,11 +138017,11 @@ var errorUtil17;
 
 // node_modules/@jimp/plugin-quantize/node_modules/zod/v3/types.js
 var ParseInputLazyPath17 = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -146531,7 +146613,7 @@ init_wallpaperType();
 init_launch();
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
 var absoluteExisting = (p2) => {
-  if (!path11.isAbsolute(p2))
+  if (!path10.isAbsolute(p2))
     throw new Error(`\u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84: ${p2}`);
   if (!existsSync2(p2))
     throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${p2}`);
@@ -146539,9 +146621,9 @@ var absoluteExisting = (p2) => {
 };
 function bootstrapServe() {
   try {
-    const serverFile = path11.resolve(process.argv[1] ?? "");
-    const cliJs = path11.join(path11.dirname(serverFile), "..", "cli.js");
-    if (path11.basename(serverFile) !== "server.js" || !existsSync2(cliJs))
+    const serverFile = path10.resolve(process.argv[1] ?? "");
+    const cliJs = path10.join(path10.dirname(serverFile), "..", "cli.js");
+    if (path10.basename(serverFile) !== "server.js" || !existsSync2(cliJs))
       return;
     const apiPort = loadConfig().apiPort ?? 9223;
     fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r2) => {
@@ -146563,14 +146645,25 @@ function bootstrapServe() {
       } catch {
       }
     });
-    Promise.resolve().then(() => (init_shortcuts(), shortcuts_exports)).then((m) => m.ensureShortcutsHaveCdpFlag(9222)).catch(() => void 0);
+    Promise.resolve().then(() => (init_launchers(), launchers_exports)).then((m) => m.repairLaunchers({ port: loadConfig().port ?? 9222 }).then((report) => {
+      if (report.error) {
+        console.error(`launcher check failed: ${report.error}`);
+        return;
+      }
+      const updated = report.fixes.filter((f2) => f2.status === "updated");
+      if (updated.length > 0) {
+        console.error(`launcher self-heal: added the CDP flag to ${updated.length} launch entr(ies):`);
+        for (const f2 of updated)
+          console.error(`  ${f2.path}`);
+      }
+    })).catch(() => void 0);
   } catch {
   }
 }
 bootstrapServe();
 var server = new McpServer({
   name: "zcode-beautify",
-  version: "0.4.0"
+  version: "0.4.1"
 });
 var TOOL_NAMES = [
   "set_background",
@@ -146578,7 +146671,8 @@ var TOOL_NAMES = [
   "apply_options",
   "refresh_theme",
   "reset_appearance",
-  "beautify_status"
+  "beautify_status",
+  "repair_launchers"
 ];
 server.registerTool("set_background", {
   title: "Set ZCode wallpaper",
@@ -146690,6 +146784,34 @@ server.registerTool("beautify_status", {
 }, async () => {
   const cfg = loadConfig();
   return { content: [{ type: "text", text: JSON.stringify(cfg, null, 2) }] };
+});
+server.registerTool("repair_launchers", {
+  title: "Fix ZCode launch entries",
+  description: "ZCode only opens its CDP port when it is started with --remote-debugging-port, and that flag has to come from the shortcut or handler that launches it. A machine usually has several launch entries and only some carry the flag. This scans the desktop, Start Menu and pinned-taskbar shortcuts plus the zcode:// protocol and Explorer context-menu verbs, and adds the flag where it is missing. Machine-wide entries that need administrator rights are reported, not modified. Shortcuts are the durable entries: ZCode's updater rebuilds the Start Menu shortcut without the flag, and the app re-registers its protocol and context-menu handlers on every start, so registry entries may need repairing again.",
+  inputSchema: {
+    dry_run: external_exports.boolean().optional().describe("Only report what would change; write nothing")
+  }
+}, async ({ dry_run }) => {
+  try {
+    const port = loadConfig().port ?? DEFAULT_CONFIG.port;
+    const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
+    const report = await repairLaunchers2({ port, dryRun: dry_run });
+    if (report.error) {
+      return { content: [{ type: "text", text: `Could not scan launch entries: ${report.error}` }], isError: true };
+    }
+    const updated = report.fixes.filter((f2) => f2.status === "updated");
+    const failed = report.fixes.filter((f2) => f2.status === "failed");
+    const lines = [
+      report.dryRun ? `Dry run on port ${port}: ${updated.length} of ${report.fixes.length} entry(ies) would be updated.` : `Updated ${updated.length} of ${report.fixes.length} launch entry(ies) to include --remote-debugging-port=${port}.`,
+      ...report.fixes.map((f2) => `  [${f2.status}] ${f2.path}${f2.reason ? ` \u2014 ${f2.reason}` : ""}`)
+    ];
+    if (failed.length > 0) {
+      lines.push("Entries marked failed are machine-wide and need administrator rights; launch ZCode from one of the updated shortcuts instead.");
+    }
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
+  }
 });
 await server.connect(new StdioServerTransport());
 export {
