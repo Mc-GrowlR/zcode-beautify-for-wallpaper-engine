@@ -41,6 +41,9 @@ Commands:
   serve [--port N] [--api-port M] [--detach]
                                  Watch mode + settings panel + local API (default API port 9223)
                                  --detach runs it in the background, outliving this shell
+  repair-launchers [--port N] [--dry-run]
+                                 Add --remote-debugging-port to ZCode launch entries
+                                 (shortcuts, zcode:// handler, context-menu verbs) missing it
 `;
 
 async function main(): Promise<void> {
@@ -56,14 +59,19 @@ async function main(): Promise<void> {
     switch (cmd) {
       case "launch": {
         const r = await launchZcode(port);
-        // Keep every launch path (start menu, taskbar…) able to reach CDP:
-        // append the flag to any ZCode shortcut that lacks it.
-        const { ensureShortcutsHaveCdpFlag } = await import("./core/shortcuts.js");
-        const sync = await ensureShortcutsHaveCdpFlag(port);
-        for (const p of sync.updated) console.log(`shortcut updated: ${p}`);
-        if (sync.failed.length > 0) {
-          console.log(`some shortcuts need one elevated run to update:`);
-          for (const f of sync.failed) console.log(`  - ${f.path} (${f.reason})`);
+        // Keep every launch path (start menu, taskbar, deep links…) able to
+        // reach CDP: repair any ZCode launch entry that lacks the flag.
+        const { repairLaunchers } = await import("./core/launchers.js");
+        const report = await repairLaunchers({ port });
+        if (report.error) {
+          console.log(`launcher check failed: ${report.error}`);
+        } else {
+          for (const f of report.fixes.filter((x) => x.status === "updated")) console.log(`launch entry updated: ${f.path}`);
+          const failedFixes = report.fixes.filter((x) => x.status === "failed");
+          if (failedFixes.length > 0) {
+            console.log(`some launch entries need one elevated run to update:`);
+            for (const f of failedFixes) console.log(`  - ${f.path} (${f.reason})`);
+          }
         }
         if (r.started) {
           console.log(`ZCode started with CDP on port ${port}.`);
@@ -137,8 +145,32 @@ async function main(): Promise<void> {
           for (const t of targets) console.log(`  - [${t.id}] ${t.title} ${t.url}`);
         } catch (err) {
           console.log(`CDP not reachable on port ${port}: ${(err as Error).message}`);
+          console.log(
+            `If ZCode is running, it was probably started from an entry that lacks the debug flag.\n` +
+              `Run \`zcode-beautify repair-launchers\` (add --dry-run to preview) to fix every entry,\n` +
+              `then quit ZCode completely and start it from one of the fixed shortcuts.`
+          );
           process.exitCode = 1;
         }
+        break;
+      }
+      case "repair-launchers": {
+        const { repairLaunchers } = await import("./core/launchers.js");
+        const report = await repairLaunchers({ port, dryRun: has("--dry-run") });
+        if (report.error) {
+          console.error(report.error);
+          process.exitCode = 1;
+          break;
+        }
+        for (const f of report.fixes) {
+          console.log(`[${f.status}] ${f.path}${f.reason ? ` — ${f.reason}` : ""}`);
+        }
+        const updated = report.fixes.filter((f) => f.status === "updated").length;
+        console.log(
+          report.dryRun
+            ? `${updated} of ${report.fixes.length} entry(ies) would be updated.`
+            : `${updated} of ${report.fixes.length} entry(ies) updated.`
+        );
         break;
       }
       case "watch": {

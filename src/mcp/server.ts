@@ -12,6 +12,7 @@ import { z } from "zod";
 import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { loadConfig } from "../core/launch.js";
+import { DEFAULT_CONFIG } from "../core/inject.js";
 
 // ZCode launches MCP servers with ZCODE_BEAUTIFY_DATA_DIR pointed at a
 // plugin-scoped directory; keeping it would make every read/write in this
@@ -63,10 +64,25 @@ function bootstrapServe(): void {
           /* best effort */
         }
       });
-    // Self-heal launch shortcuts: without the CDP flag a start-menu launch
-    // gets no injection for the whole session. Fire-and-forget, silent.
-    import("../core/shortcuts.js")
-      .then((m) => m.ensureShortcutsHaveCdpFlag(9222))
+    // Self-heal launch entries: without the CDP flag a start-menu launch gets
+    // no injection for the whole session — and ZCode's updater rebuilds the
+    // Start Menu shortcut WITHOUT the flag, so this must run at every
+    // bootstrap, not only when CDP is unreachable. Fire-and-forget, fail-soft
+    // (stderr carries the plugin log; stdout is the MCP protocol).
+    import("../core/launchers.js")
+      .then((m) =>
+        m.repairLaunchers({ port: loadConfig().port ?? 9222 }).then((report) => {
+          if (report.error) {
+            console.error(`launcher check failed: ${report.error}`);
+            return;
+          }
+          const updated = report.fixes.filter((f) => f.status === "updated");
+          if (updated.length > 0) {
+            console.error(`launcher self-heal: added the CDP flag to ${updated.length} launch entr(ies):`);
+            for (const f of updated) console.error(`  ${f.path}`);
+          }
+        })
+      )
       .catch(() => undefined);
   } catch {
     /* best effort */
@@ -76,7 +92,7 @@ bootstrapServe();
 
 const server = new McpServer({
   name: "zcode-beautify",
-  version: "0.4.0",
+  version: "0.4.1",
 });
 
 /** Registry of the tools this server exposes (used by tests / docs). */
@@ -87,6 +103,7 @@ export const TOOL_NAMES = [
   "refresh_theme",
   "reset_appearance",
   "beautify_status",
+  "repair_launchers",
 ] as const;
 
 server.registerTool(
@@ -240,6 +257,51 @@ server.registerTool(
   async () => {
     const cfg = loadConfig();
     return { content: [{ type: "text", text: JSON.stringify(cfg, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "repair_launchers",
+  {
+    title: "Fix ZCode launch entries",
+    description:
+      "ZCode only opens its CDP port when it is started with --remote-debugging-port, and that flag has to come from the " +
+      "shortcut or handler that launches it. A machine usually has several launch entries and only some carry the flag. " +
+      "This scans the desktop, Start Menu and pinned-taskbar shortcuts plus the zcode:// protocol and Explorer context-menu " +
+      "verbs, and adds the flag where it is missing. Machine-wide entries that need administrator rights are reported, not " +
+      "modified. Shortcuts are the durable entries: ZCode's updater rebuilds the Start Menu shortcut without the flag, and " +
+      "the app re-registers its protocol and context-menu handlers on every start, so registry entries may need repairing again.",
+    inputSchema: {
+      dry_run: z.boolean().optional().describe("Only report what would change; write nothing"),
+    },
+  },
+  async ({ dry_run }) => {
+    try {
+      const port = loadConfig().port ?? DEFAULT_CONFIG.port;
+      const { repairLaunchers } = await import("../core/launchers.js");
+      const report = await repairLaunchers({ port, dryRun: dry_run });
+
+      if (report.error) {
+        return { content: [{ type: "text", text: `Could not scan launch entries: ${report.error}` }], isError: true };
+      }
+
+      const updated = report.fixes.filter((f) => f.status === "updated");
+      const failed = report.fixes.filter((f) => f.status === "failed");
+      const lines = [
+        report.dryRun
+          ? `Dry run on port ${port}: ${updated.length} of ${report.fixes.length} entry(ies) would be updated.`
+          : `Updated ${updated.length} of ${report.fixes.length} launch entry(ies) to include --remote-debugging-port=${port}.`,
+        ...report.fixes.map((f) => `  [${f.status}] ${f.path}${f.reason ? ` — ${f.reason}` : ""}`),
+      ];
+      if (failed.length > 0) {
+        lines.push(
+          "Entries marked failed are machine-wide and need administrator rights; launch ZCode from one of the updated shortcuts instead."
+        );
+      }
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };
+    }
   }
 );
 
