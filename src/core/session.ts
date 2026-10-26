@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, type BeautifyConfig, type BuiltPayload } from "./inject.js";
+import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, type BeautifyConfig, type BubbleLookConfig, type BuiltPayload } from "./inject.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
@@ -17,6 +17,8 @@ export interface ApplyOptions {
   monet?: boolean;
   wallpaperVisible?: boolean;
   fit?: "cover" | "contain" | "smart";
+  /** User message bubble look (聊天气泡); merged over the stored config. */
+  bubbleLook?: Partial<BubbleLookConfig>;
 }
 
 /** Applies (or refreshes) the theme using the stored config. */
@@ -74,8 +76,10 @@ export async function applyColorsOnly(opts: ApplyOptions): Promise<number> {
   return applyToZCode(config, await buildPayloadFromConfig(config));
 }
 
-/** Merges ApplyOptions over the stored config (CLI/MCP flags win). */
-function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>): BeautifyConfig {
+/** Merges ApplyOptions over the stored config (CLI/MCP flags win). Exported
+ *  for tests: the partial-bubble merge semantics live here, and exercising
+ *  them needs neither a running ZCode nor a data dir. */
+export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>): BeautifyConfig {
   return {
     ...DEFAULT_CONFIG,
     ...stored,
@@ -85,6 +89,10 @@ function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>): Beauti
     monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
     wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
     fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
+    // Partial bubble patches merge over the stored look so callers (MCP
+    // apply_options / the bubble command) can change one aspect — radius only,
+    // preset only — without re-sending (and resetting) the rest.
+    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
   };
 }
 

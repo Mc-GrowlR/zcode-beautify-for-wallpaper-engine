@@ -1,6 +1,6 @@
 {
   "name": "zcode-beautify",
-  "version": "0.4.1",
+  "version": "0.4.4",
   "description": "Open-source beautification plugin for the ZCode desktop client: dynamic wallpapers (Wallpaper Engine scenes / videos) as seamless looping backgrounds + Material Design 3 (Monet) dynamic theming via CDP injection, with a live settings panel.",
   "type": "module",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "bundle": "npm run build && node scripts/bundle.mjs",
+    "test": "tsx test/t11-panel-ui.ts && tsx test/t12-inject-pipeline.ts && tsx test/t13-serve-smoke.ts && tsx test/t14-bubble-merge.ts",
     "package": "node scripts/package.mjs"
   },
   "keywords": [
@@ -41,9 +42,11 @@
     "jimp": "^1.6.0"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.0.0",
     "adm-zip": "^0.6.1",
     "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
     "tsx": "^4.23.13",
     "typescript": "^5.6.0"
   },

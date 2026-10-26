@@ -23,6 +23,7 @@ const pluginFiles = [
   "marketplace.json",
   ".zcode-plugin/plugin.json",
   "commands/beautify.md",
+  "commands/bubble.md",
   "skills/beautify/SKILL.md",
   "dist/cli.js",
   "dist/mcp/server.js",

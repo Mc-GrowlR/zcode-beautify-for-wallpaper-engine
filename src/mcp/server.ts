@@ -12,7 +12,8 @@ import { z } from "zod";
 import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { loadConfig } from "../core/launch.js";
-import { DEFAULT_CONFIG } from "../core/inject.js";
+import { DEFAULT_CONFIG, type BubbleLookConfig } from "../core/inject.js";
+import { VERSION } from "../version.js";
 
 // ZCode launches MCP servers with ZCODE_BEAUTIFY_DATA_DIR pointed at a
 // plugin-scoped directory; keeping it would make every read/write in this
@@ -92,7 +93,7 @@ bootstrapServe();
 
 const server = new McpServer({
   name: "zcode-beautify",
-  version: "0.4.1",
+  version: VERSION,
 });
 
 /** Registry of the tools this server exposes (used by tests / docs). */
@@ -194,18 +195,33 @@ server.registerTool(
   {
     title: "Tune ZCode appearance",
     description:
-      "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, Monet dynamic colors on/off, and wallpaper visibility (translucent vs opaque surfaces). Only the provided values change; the rest keep their current setting.",
+      "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), and the user chat bubble look. Only the provided values change; the rest keep their current setting.",
     inputSchema: {
       blur: z.number().min(0).max(100).optional().describe("Wallpaper blur radius in px"),
       dim: z.number().min(0).max(100).optional().describe("Wallpaper darkening 0-100"),
       monet: z.boolean().optional().describe("Regenerate UI colors from the wallpaper (true) or keep ZCode's original colors (false)"),
       wallpaper_visible: z.boolean().optional().describe("Translucent surfaces showing the wallpaper (true) or opaque surfaces (false)"),
       fit: z.enum(["cover", "contain", "smart"]).optional().describe("Framing: cover fills and crops, contain letterboxes with a blurred backdrop, smart analyzes the picture locally and picks the best framing + focus point"),
+      bubble: z.object({
+        preset: z.enum(["default", "accent", "glass", "outline", "flat", "custom"]).optional().describe("Bubble style: default = stock ZCode bubble, accent = tinted with the theme primary, glass = translucent with backdrop blur, outline = transparent with a primary border, flat = plain surface no border, custom = your own CSS via custom_css"),
+        tint: z.number().min(0).max(100).optional().describe("Accent strength 0-100 (how much primary mixes into the bubble)"),
+        radius: z.number().min(4).max(24).optional().describe("Corner radius in px on the three round corners (the 2px tail stays)"),
+        width: z.number().min(40).max(90).optional().describe("Max bubble width as % of the conversation column"),
+        align: z.enum(["right", "left"]).optional().describe("Bubble alignment (right is ZCode stock)"),
+        custom_css: z.string().max(8000).optional().describe('CSS applied when preset = "custom", written against the friendly selectors .zb-bubble (the user message bubble) and .zb-bubble-row (its conversation row). CSS only — @import, javascript: and </style are stripped. Prefer live theme tokens like var(--color-primary)/var(--color-surface) so a Monet re-theme restyles the bubble too; suffix declarations with !important'),
+      }).optional().describe("User message bubble look; omitted fields keep their current value"),
     },
   },
-  async ({ blur, dim, monet, wallpaper_visible, fit }) => {
+  async ({ blur, dim, monet, wallpaper_visible, fit, bubble }) => {
     try {
-      const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit });
+      // Send only the fields the caller provided: the session layer merges
+      // this partial over the stored look, so one-field tweaks don't reset
+      // the rest.
+      const bubbleLook =
+        bubble === undefined
+          ? undefined
+          : (Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== undefined)) as Partial<BubbleLookConfig>);
+      const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook });
       return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };

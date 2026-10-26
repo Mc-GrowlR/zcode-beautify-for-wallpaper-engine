@@ -23,10 +23,11 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, normalizeChatLook, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLook, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
 import { loadWallpaper, extractPalette, type WallpaperAssets } from "./monet.js";
 import { themeFromSourceColor, argbFromRgb } from "@material/material-color-utilities";
 import { buildPanelScript } from "../panel/panelScript.js";
+import { VERSION } from "../version.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
@@ -220,6 +221,7 @@ function publicConfig(config: BeautifyConfig) {
     themeColor: config.themeColor ?? null,
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
+    bubbleLook: normalizeBubbleLook(config.bubbleLook),
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -268,6 +270,11 @@ function sanitize(body: any): Partial<BeautifyConfig> {
       maskBottom: pct(cl.maskBottom) ?? 0,
       frost: pct(cl.frost) ?? 0,
     };
+  }
+  // User message bubble look (聊天气泡): normalizeBubbleLook fills any field
+  // the client omitted, so partial patches reset the rest to defaults.
+  if (body?.bubbleLook && typeof body.bubbleLook === "object") {
+    out.bubbleLook = normalizeBubbleLook(body.bubbleLook);
   }
   // Day/night look schedule (护眼): two dim/blur presets switch at times.
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -395,6 +402,7 @@ async function holdSession(
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
+    bubbleLook: payload.bubbleLook,
     startupClean: payload.startupClean,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -440,6 +448,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
+    bubbleLook: payload.bubbleLook,
     startupClean: payload.startupClean,
   });
   let ok = 0;
@@ -608,6 +617,7 @@ const IMAGE_EXT: Record<string, string> = {
 
 export async function startServe(opts: ServeOptions): Promise<void> {
   const { cdpPort, apiPort } = opts;
+  const startedAt = Date.now();
 
   // Fresh random token every start; scripts on this machine (watchdog, CLI)
   // read it from <dataDir>/serve.token. The panel receives it in its injected
@@ -874,7 +884,17 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       }
 
       if (req.method === "GET" && url.pathname === "/api/health") {
-        sendJson(res, 200, { ok: true, service: "zcode-beautify", pid: process.pid });
+        // The panel 关于 page reads this; the MCP bootstrap health-check also
+        // probes this route (it only needs service/pid, extras are additive).
+        sendJson(res, 200, {
+          ok: true,
+          service: "zcode-beautify",
+          pid: process.pid,
+          version: VERSION,
+          uptimeMs: Date.now() - startedAt,
+          cdpPort,
+          apiPort,
+        });
         return;
       }
 

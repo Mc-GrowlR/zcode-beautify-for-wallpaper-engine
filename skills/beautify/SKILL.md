@@ -14,6 +14,8 @@ modifies ZCode's installation files.
 - "把这张图设为 ZCode 背景" / "set this image as the ZCode background"
 - "换个主题颜色" / "make the UI match my wallpaper"
 - "恢复默认外观" / "reset the appearance"
+- "把聊天气泡改成毛玻璃" / style the chat bubbles → use the `/bubble` command
+  (it maps the description to presets or custom CSS via `apply_options`)
 
 ## Workflow
 

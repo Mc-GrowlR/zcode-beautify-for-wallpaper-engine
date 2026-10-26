@@ -7212,6 +7212,37 @@ var require_dist = __commonJS({
   }
 });
 
+// dist/core/bubbleRecipes.js
+function bubbleRecipes(sel) {
+  return {
+    accent: sel + "{background:color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100%),var(--color-surface))!important;border:1px solid color-mix(in srgb,var(--color-primary) 55%,transparent)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
+    glass: sel + "{background:color-mix(in srgb,var(--color-surface) 55%,transparent)!important;border:1px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*60% + 15%),transparent)!important;backdrop-filter:blur(8px)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
+    outline: sel + "{background:transparent!important;border:1.5px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100% + 20%),transparent)!important}",
+    flat: sel + "{background:var(--color-surface)!important;border-color:transparent!important}"
+  };
+}
+function sanitizeCustomBubbleCss(raw) {
+  if (typeof raw !== "string")
+    return "";
+  let css = raw.slice(0, CUSTOM_CSS_MAX);
+  css = css.replace(/<\/style/gi, "");
+  css = css.replace(/@import[^;{]*[;{]?/gi, "");
+  css = css.replace(/javascript:/gi, "");
+  return css.trim();
+}
+function rewriteCustomBubbleCss(css, sel, rowSel) {
+  return css.replace(/\.zb-bubble-row(?![\w-])/g, rowSel).replace(/\.zb-bubble(?![\w-])/g, sel);
+}
+var BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL, CUSTOM_CSS_MAX;
+var init_bubbleRecipes = __esm({
+  "dist/core/bubbleRecipes.js"() {
+    "use strict";
+    BUBBLE_SELECTOR_REAL = "[data-v4-user-input-bubble]";
+    BUBBLE_ROW_SELECTOR_REAL = '[class~="group/user-row"]';
+    CUSTOM_CSS_MAX = 8e3;
+  }
+});
+
 // dist/core/cdp.js
 async function listTargets(port, host = "127.0.0.1") {
   let res;
@@ -7239,10 +7270,13 @@ async function injectIntoTarget(target, payload) {
     await conn.send("Runtime.enable");
     const bootstrap = buildBootstrapScript(payload);
     await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: bootstrap });
-    await conn.send("Runtime.evaluate", {
+    const evalResult = await conn.send("Runtime.evaluate", {
       expression: bootstrap,
       returnByValue: true
     });
+    if (evalResult?.exceptionDetails) {
+      throw new Error(`bootstrap threw in "${target.title}": ${JSON.stringify(evalResult.exceptionDetails).slice(0, 400)}`);
+    }
   } finally {
     conn.close();
   }
@@ -7268,6 +7302,20 @@ function buildBootstrapScript(payload) {
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0 }))};
+  var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
+  // Bubble recipe tables must be initialized HERE, before the fast paths run:
+  // applyBubbleLook() is reachable from the volume fast path at the top of
+  // this function body, and var initializers down below would still be
+  // undefined at that point (undefined[preset] throws and kills the whole
+  // bootstrap silently).
+  var BUB = '[data-v4-user-input-bubble]';
+  var BUB_ROW = '[class~="group/user-row"]';
+  // --zb-bubble-tint holds 0-1; the mixes scale it back to a percentage.
+  // Recipes + custom CSS are baked serve-side from core/bubbleRecipes.ts so
+  // this table and the panel preview share one source of truth. The custom
+  // CSS arrives already sanitized and rewritten to the real selectors.
+  var RECIPES = ${JSON.stringify(bubbleRecipes(BUBBLE_SELECTOR_REAL))};
+  var CUSTOM_CSS = ${JSON.stringify(rewriteCustomBubbleCss(payload.bubbleLook?.customCss ?? "", BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL))};
   // Volume-only fast path: changing just the audio must not rebuild the
   // video (instant switch would retire + re-create the decoder). VOL must be
   // declared ABOVE this block \u2014 it used to sit below the fast path, which
@@ -7288,6 +7336,10 @@ function buildBootstrapScript(payload) {
       window.__zcodeBeautify.chatKey = CHAT;
       applyChatLook();
     }
+    if (window.__zcodeBeautify.bubbleKey !== BUBBLE) {
+      window.__zcodeBeautify.bubbleKey = BUBBLE;
+      applyBubbleLook();
+    }
     return;
   }
 
@@ -7301,10 +7353,27 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.wpImg === WP_IMG
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
     if (chatOnly) return;
+  }
+
+  // Bubble-look fast path (same shape as chat): the bubble rules live in
+  // their own style element driven by --zb-bubble-* vars, so preset/slider
+  // tweaks never touch the wallpaper layer.
+  if (window.__zcodeBeautify.bubbleKey !== BUBBLE) {
+    var bubbleOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.bubbleKey = BUBBLE;
+    applyBubbleLook();
+    if (bubbleOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -7313,7 +7382,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -7585,6 +7654,8 @@ function buildBootstrapScript(payload) {
   // All are static composited layers; no per-frame cost.
   window.__zcodeBeautify.chatKey = CHAT;
   applyChatLook();
+  window.__zcodeBeautify.bubbleKey = BUBBLE;
+  applyBubbleLook();
 
   function applyChatLook() {
     var C;
@@ -7616,7 +7687,7 @@ function buildBootstrapScript(payload) {
       // The conversation scroller carries distinctive Tailwind arbitrary
       // classes; .zb-chat-col is the version-proof fallback (markChatCol).
       + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
-      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';
+      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';;
     if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
     if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
     document.documentElement.appendChild(fr);
@@ -7648,6 +7719,39 @@ function buildBootstrapScript(payload) {
       }
       el = el.parentElement;
     }
+  }
+
+  // --- user message bubble look (\u804A\u5929\u6C14\u6CE1) -----------------------------------
+  // Targets the stable v4 data attribute (not Tailwind class hashes) and
+  // color-mixes the live --color-* tokens, so a Monet re-theme restyles the
+  // bubble with no re-injection. preset "default" removes the rules entirely
+  // (stock bubble); unknown presets degrade the same way. BUB/BUB_ROW/RECIPES
+  // are declared at the TOP of this body (fast-path ordering \u2014 see there).
+  function applyBubbleLook() {
+    var B;
+    try { B = JSON.parse(BUBBLE); } catch (e) { return; }
+    var st = document.getElementById(MARKER + '-bubble-style');
+    // "custom" keeps the style even with empty CSS: the base rules below
+    // (radius/max-width/alignment) still apply, driven by the sliders.
+    if (!B || B.preset === 'default' || (B.preset !== 'custom' && !RECIPES[B.preset])) {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-bubble-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var r = Math.max(2, Math.round(B.radius || 12));
+    // Tail keeps its stock 2px corner on the aligned edge; left mirrors it.
+    var corners = B.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px';
+    st.textContent = ':root{--zb-bubble-tint:' + (Math.max(0, Math.min(100, B.tint || 0)) / 100)
+      + ';--zb-bubble-radius:' + corners
+      + ';--zb-bubble-maxw:' + Math.max(40, Math.min(90, B.width || 70)) + '%'
+      + ';--zb-bubble-align:' + (B.align === 'left' ? 'flex-start' : 'flex-end') + '}'
+      + BUB + '{border-radius:var(--zb-bubble-radius)!important;max-width:var(--zb-bubble-maxw)!important}'
+      + BUB_ROW + '{align-items:var(--zb-bubble-align)!important}'
+      + (B.preset === 'custom' ? CUSTOM_CSS : RECIPES[B.preset]);
   }
 
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
@@ -7737,12 +7841,14 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-wallpaper')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   if (window.__zcodeBeautify) {
     window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
+    window.__zcodeBeautify.bubbleKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -7754,6 +7860,7 @@ var CdpError, CdpConnection;
 var init_cdp = __esm({
   "dist/core/cdp.js"() {
     "use strict";
+    init_bubbleRecipes();
     CdpError = class extends Error {
     };
     CdpConnection = class _CdpConnection {
@@ -68001,6 +68108,7 @@ import path9 from "node:path";
 
 // dist/core/inject.js
 init_cdp();
+init_bubbleRecipes();
 
 // node_modules/bmp-ts/dist/esm/header-types.js
 var HeaderTypes;
@@ -146363,6 +146471,26 @@ function normalizeChatLook(raw) {
     frost: pct(raw?.frost)
   };
 }
+var DEFAULT_BUBBLE_LOOK = {
+  preset: "default",
+  tint: 28,
+  radius: 12,
+  width: 70,
+  align: "right"
+};
+var BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
+function normalizeBubbleLook(raw) {
+  const num = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
+  const preset = BUBBLE_PRESETS.includes(raw?.preset) ? raw.preset : "default";
+  return {
+    preset,
+    tint: num(raw?.tint, 0, 100, DEFAULT_BUBBLE_LOOK.tint),
+    radius: num(raw?.radius, 4, 24, DEFAULT_BUBBLE_LOOK.radius),
+    width: num(raw?.width, 40, 90, DEFAULT_BUBBLE_LOOK.width),
+    align: raw?.align === "left" ? "left" : "right",
+    customCss: sanitizeCustomBubbleCss(raw?.customCss)
+  };
+}
 var DEFAULT_CONFIG = {
   port: 9222,
   blur: 0,
@@ -146419,6 +146547,25 @@ html, body { background: transparent !important; }
   background: rgb(0 0 0 / var(--zcode-beautify-dim, ${config2.dim / 100}));
 }`);
   }
+  parts.push(`[data-testid="v4-queue"] {
+  --zb-queue-overlap: 28px;
+  --zb-queue-radius: 16px;
+  --zb-queue-wrap-y: calc(100% - (var(--zb-queue-overlap) - var(--zb-queue-radius)));
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 calc(100% - var(--zb-queue-overlap)), transparent calc(100% - var(--zb-queue-overlap))),
+    radial-gradient(circle at 100% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius)),
+    radial-gradient(circle at 0% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius));
+  -webkit-mask-size: 100% 100%, var(--zb-queue-radius) var(--zb-queue-radius), var(--zb-queue-radius) var(--zb-queue-radius);
+  -webkit-mask-position: 0 0, 0 var(--zb-queue-wrap-y), 100% var(--zb-queue-wrap-y);
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    linear-gradient(to bottom, #000 calc(100% - var(--zb-queue-overlap)), transparent calc(100% - var(--zb-queue-overlap))),
+    radial-gradient(circle at 100% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius)),
+    radial-gradient(circle at 0% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius));
+  mask-size: 100% 100%, var(--zb-queue-radius) var(--zb-queue-radius), var(--zb-queue-radius) var(--zb-queue-radius);
+  mask-position: 0 0, 0 var(--zb-queue-wrap-y), 100% var(--zb-queue-wrap-y);
+  mask-repeat: no-repeat;
+}`);
   if (assets) {
     if (config2.monet) {
       parts.push(buildVariableOverrides(assets.theme, {
@@ -146452,6 +146599,7 @@ html, body { background: transparent !important; }
     kenBurns,
     videoVolume: Math.max(0, Math.min(100, Math.round(config2.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config2.chatLook),
+    bubbleLook: normalizeBubbleLook(config2.bubbleLook),
     startupClean: config2.startupClean !== false
   };
 }
@@ -146541,7 +146689,11 @@ function baseConfig(opts, stored) {
     dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
     monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
     wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
-    fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit
+    fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
+    // Partial bubble patches merge over the stored look so callers (MCP
+    // apply_options / the bubble command) can change one aspect — radius only,
+    // preset only — without re-sending (and resetting) the rest.
+    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -146611,6 +146763,11 @@ function mergedConfig() {
 // dist/mcp/server.js
 init_wallpaperType();
 init_launch();
+
+// dist/version.js
+var VERSION = "0.4.4";
+
+// dist/mcp/server.js
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
 var absoluteExisting = (p2) => {
   if (!path10.isAbsolute(p2))
@@ -146663,7 +146820,7 @@ function bootstrapServe() {
 bootstrapServe();
 var server = new McpServer({
   name: "zcode-beautify",
-  version: "0.4.1"
+  version: VERSION
 });
 var TOOL_NAMES = [
   "set_background",
@@ -146737,17 +146894,26 @@ function statSizeMb(file2) {
 }
 server.registerTool("apply_options", {
   title: "Tune ZCode appearance",
-  description: "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, Monet dynamic colors on/off, and wallpaper visibility (translucent vs opaque surfaces). Only the provided values change; the rest keep their current setting.",
+  description: "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), and the user chat bubble look. Only the provided values change; the rest keep their current setting.",
   inputSchema: {
     blur: external_exports.number().min(0).max(100).optional().describe("Wallpaper blur radius in px"),
     dim: external_exports.number().min(0).max(100).optional().describe("Wallpaper darkening 0-100"),
     monet: external_exports.boolean().optional().describe("Regenerate UI colors from the wallpaper (true) or keep ZCode's original colors (false)"),
     wallpaper_visible: external_exports.boolean().optional().describe("Translucent surfaces showing the wallpaper (true) or opaque surfaces (false)"),
-    fit: external_exports.enum(["cover", "contain", "smart"]).optional().describe("Framing: cover fills and crops, contain letterboxes with a blurred backdrop, smart analyzes the picture locally and picks the best framing + focus point")
+    fit: external_exports.enum(["cover", "contain", "smart"]).optional().describe("Framing: cover fills and crops, contain letterboxes with a blurred backdrop, smart analyzes the picture locally and picks the best framing + focus point"),
+    bubble: external_exports.object({
+      preset: external_exports.enum(["default", "accent", "glass", "outline", "flat", "custom"]).optional().describe("Bubble style: default = stock ZCode bubble, accent = tinted with the theme primary, glass = translucent with backdrop blur, outline = transparent with a primary border, flat = plain surface no border, custom = your own CSS via custom_css"),
+      tint: external_exports.number().min(0).max(100).optional().describe("Accent strength 0-100 (how much primary mixes into the bubble)"),
+      radius: external_exports.number().min(4).max(24).optional().describe("Corner radius in px on the three round corners (the 2px tail stays)"),
+      width: external_exports.number().min(40).max(90).optional().describe("Max bubble width as % of the conversation column"),
+      align: external_exports.enum(["right", "left"]).optional().describe("Bubble alignment (right is ZCode stock)"),
+      custom_css: external_exports.string().max(8e3).optional().describe('CSS applied when preset = "custom", written against the friendly selectors .zb-bubble (the user message bubble) and .zb-bubble-row (its conversation row). CSS only \u2014 @import, javascript: and </style are stripped. Prefer live theme tokens like var(--color-primary)/var(--color-surface) so a Monet re-theme restyles the bubble too; suffix declarations with !important')
+    }).optional().describe("User message bubble look; omitted fields keep their current value")
   }
-}, async ({ blur, dim, monet, wallpaper_visible, fit }) => {
+}, async ({ blur, dim, monet, wallpaper_visible, fit, bubble }) => {
   try {
-    const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit });
+    const bubbleLook = bubble === void 0 ? void 0 : Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== void 0));
+    const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook });
     return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };

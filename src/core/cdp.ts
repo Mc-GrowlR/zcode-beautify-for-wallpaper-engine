@@ -5,6 +5,10 @@
  * with `--remote-debugging-port=<port>` before this module can connect.
  */
 
+import { bubbleRecipes, rewriteCustomBubbleCss, BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL } from "./bubbleRecipes.js";
+// Type-only: erased at compile time, so no runtime cycle with inject.js.
+import type { BubbleLookConfig } from "./inject.js";
+
 export interface CdpTarget {
   id: string;
   type: string;
@@ -139,6 +143,8 @@ export interface InjectionPayload {
   videoVolume?: number;
   /** Zone-refined chat-area masks (聊天界面); absent = all zero. */
   chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number };
+  /** User message bubble look (聊天气泡); absent/preset default = stock. */
+  bubbleLook?: BubbleLookConfig;
   /** Defer mounting until the ZCode startup screen finished (default true). */
   startupClean?: boolean;
 }
@@ -158,10 +164,18 @@ export async function injectIntoTarget(
     await conn.send("Runtime.enable");
     const bootstrap = buildBootstrapScript(payload);
     await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: bootstrap });
-    await conn.send("Runtime.evaluate", {
+    // Runtime.evaluate does NOT reject when the script throws — surface it or
+    // a broken bootstrap (e.g. a fast path hitting a late-initialized var)
+    // fails silently while applyToZCode reports success.
+    const evalResult = await conn.send("Runtime.evaluate", {
       expression: bootstrap,
       returnByValue: true,
     });
+    if (evalResult?.exceptionDetails) {
+      throw new Error(
+        `bootstrap threw in "${target.title}": ${JSON.stringify(evalResult.exceptionDetails).slice(0, 400)}`
+      );
+    }
   } finally {
     conn.close();
   }
@@ -188,6 +202,20 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0 }))};
+  var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
+  // Bubble recipe tables must be initialized HERE, before the fast paths run:
+  // applyBubbleLook() is reachable from the volume fast path at the top of
+  // this function body, and var initializers down below would still be
+  // undefined at that point (undefined[preset] throws and kills the whole
+  // bootstrap silently).
+  var BUB = '[data-v4-user-input-bubble]';
+  var BUB_ROW = '[class~="group/user-row"]';
+  // --zb-bubble-tint holds 0-1; the mixes scale it back to a percentage.
+  // Recipes + custom CSS are baked serve-side from core/bubbleRecipes.ts so
+  // this table and the panel preview share one source of truth. The custom
+  // CSS arrives already sanitized and rewritten to the real selectors.
+  var RECIPES = ${JSON.stringify(bubbleRecipes(BUBBLE_SELECTOR_REAL))};
+  var CUSTOM_CSS = ${JSON.stringify(rewriteCustomBubbleCss(payload.bubbleLook?.customCss ?? "", BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL))};
   // Volume-only fast path: changing just the audio must not rebuild the
   // video (instant switch would retire + re-create the decoder). VOL must be
   // declared ABOVE this block — it used to sit below the fast path, which
@@ -208,6 +236,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       window.__zcodeBeautify.chatKey = CHAT;
       applyChatLook();
     }
+    if (window.__zcodeBeautify.bubbleKey !== BUBBLE) {
+      window.__zcodeBeautify.bubbleKey = BUBBLE;
+      applyBubbleLook();
+    }
     return;
   }
 
@@ -221,10 +253,27 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       && window.__zcodeBeautify.wpImg === WP_IMG
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
     if (chatOnly) return;
+  }
+
+  // Bubble-look fast path (same shape as chat): the bubble rules live in
+  // their own style element driven by --zb-bubble-* vars, so preset/slider
+  // tweaks never touch the wallpaper layer.
+  if (window.__zcodeBeautify.bubbleKey !== BUBBLE) {
+    var bubbleOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.bubbleKey = BUBBLE;
+    applyBubbleLook();
+    if (bubbleOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -233,7 +282,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -505,6 +554,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // All are static composited layers; no per-frame cost.
   window.__zcodeBeautify.chatKey = CHAT;
   applyChatLook();
+  window.__zcodeBeautify.bubbleKey = BUBBLE;
+  applyBubbleLook();
 
   function applyChatLook() {
     var C;
@@ -536,7 +587,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       // The conversation scroller carries distinctive Tailwind arbitrary
       // classes; .zb-chat-col is the version-proof fallback (markChatCol).
       + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
-      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';
+      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';;
     if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
     if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
     document.documentElement.appendChild(fr);
@@ -568,6 +619,39 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       }
       el = el.parentElement;
     }
+  }
+
+  // --- user message bubble look (聊天气泡) -----------------------------------
+  // Targets the stable v4 data attribute (not Tailwind class hashes) and
+  // color-mixes the live --color-* tokens, so a Monet re-theme restyles the
+  // bubble with no re-injection. preset "default" removes the rules entirely
+  // (stock bubble); unknown presets degrade the same way. BUB/BUB_ROW/RECIPES
+  // are declared at the TOP of this body (fast-path ordering — see there).
+  function applyBubbleLook() {
+    var B;
+    try { B = JSON.parse(BUBBLE); } catch (e) { return; }
+    var st = document.getElementById(MARKER + '-bubble-style');
+    // "custom" keeps the style even with empty CSS: the base rules below
+    // (radius/max-width/alignment) still apply, driven by the sliders.
+    if (!B || B.preset === 'default' || (B.preset !== 'custom' && !RECIPES[B.preset])) {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-bubble-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var r = Math.max(2, Math.round(B.radius || 12));
+    // Tail keeps its stock 2px corner on the aligned edge; left mirrors it.
+    var corners = B.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px';
+    st.textContent = ':root{--zb-bubble-tint:' + (Math.max(0, Math.min(100, B.tint || 0)) / 100)
+      + ';--zb-bubble-radius:' + corners
+      + ';--zb-bubble-maxw:' + Math.max(40, Math.min(90, B.width || 70)) + '%'
+      + ';--zb-bubble-align:' + (B.align === 'left' ? 'flex-start' : 'flex-end') + '}'
+      + BUB + '{border-radius:var(--zb-bubble-radius)!important;max-width:var(--zb-bubble-maxw)!important}'
+      + BUB_ROW + '{align-items:var(--zb-bubble-align)!important}'
+      + (B.preset === 'custom' ? CUSTOM_CSS : RECIPES[B.preset]);
   }
 
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
@@ -659,12 +743,14 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   document.getElementById(${JSON.stringify(marker)} + '-wallpaper')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   if (window.__zcodeBeautify) {
     window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
+    window.__zcodeBeautify.bubbleKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;

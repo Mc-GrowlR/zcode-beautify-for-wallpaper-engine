@@ -4,6 +4,31 @@
 > 0.3.0：场景壁纸 + 视频壁纸（.mp4/.webm 直接导入）+ 循环冻结看门狗 + ZCode 启动自动拉起 serve。
 > 0.4.0：定时播放（多方案轮播）、WE 壁纸库浏览器、导入管线稳定性大修、面板三标签与界面遮罩（见下）。
 > 0.4.1：移植上游 0.3.3 启动项修复器（launchers.ts）——注册表处理器、递归扫描、dry-run（见下）。
+> 0.4.2：聊天气泡样式（聊天气泡预设/染色/圆角/宽度/对齐）。
+> 0.4.3：气泡样式编辑器 + 我的样式库 + 预览修复（sandbox=allow-same-origin）。
+> 0.4.4：`/bubble` 指令——自然语言增改气泡样式；MCP 开放自定义 CSS。
+
+## 0.4.4
+
+> 气泡样式对话化：一句描述即可增改，不再需要打开面板编辑器。
+
+- **新指令 `commands/bubble.md`（`/bubble [描述]`）**：agent 读取当前 `bubbleLook`，把描述映射为预设/圆角/宽度/对齐/染色强度；超出预设能表达的部分（指定颜色、渐变、阴影、边框等）写成 `.zb-bubble`/`.zb-bubble-row` 契约的自定义 CSS 再应用。
+- **MCP `apply_options.bubble` 开放 `custom` 预设与 `custom_css` 字段**（≤8000 字符，沿用核心层既有 sanitize → 选择器重写管线）。
+- **气泡字段改为合并语义**：`session.baseConfig` 把部分气泡补丁并入已存 look，只传想改的字段（此前省略字段会重置回默认值）。
+- McpServer 的 version 改由 `src/version.ts` 单一来源（此前硬编码 0.4.1）。
+- **测试**：`t14-bubble-merge.ts`——baseConfig 合并语义（单字段补丁不重置其余）、MCP `apply_options` 接线（只转发已传字段/custom 预设/8000 上限/version 单一来源）、`/bubble` 指令与打包清单契约、marketplace.json 版本同步（本次即抓到它停在 0.4.1 的偏差）；并入 `npm test`。
+
+## 0.4.2
+
+> 会话中**用户发出的消息气泡**可自定义外观；默认预设零注入，与原生完全一致。
+
+- **新配置 `bubbleLook`**（`preset/tint/radius/width/align`）：五个预设——`accent` 主题色染色、`glass` 毛玻璃+背景模糊、`outline` 透明底描边、`flat` 扁平无边框、`default` 原生（移除全部规则）。颜色全部 `color-mix` 引用实时 `--color-*` token，Monet 换主题自动跟随，零硬编码。
+- **选择器**：`[data-v4-user-input-bubble]`（v4 专属属性，不依赖 Tailwind 类名哈希）+ `[class~="group/user-row"]`（对齐镜像 2px 尾角）。长消息 120px 折叠等交互行为不动。
+- **快路径**：气泡规则独立 style 元素 + `--zb-bubble-*` 变量，预设/滑杆调整不重播壁纸切换动画（与 chatLook 同构的 bubbleKey 比对）。
+- **入口**：面板设置新增「聊天气泡」分区（预设下拉 + 染色/圆角/宽度滑杆 + 左右对齐，内联变量实时预览）；MCP `apply_options` 新增 `bubble` 对象字段；serve `/api/config` 接受 `bubbleLook`（sanitize 归一化）。
+- **健壮性**：`injectIntoTarget` 现在检查 bootstrap 的 `exceptionDetails`（此前渲染进程抛错会被静默吞掉、applyToZCode 仍报成功）——本次开发中快路径读到未初始化变量的 bug 正是被它掩盖。`buildResetScript` 清理气泡样式元素与 bubbleKey。
+- **测试**：`t8-verify-bubble.ts`（静态断言：归一化/payload/bootstrap 规则与快路径/面板/重置）+ `t9-live-bubble.ts`（对运行中 ZCode 实测：挂载/computed/染色生效断言/仅改染色不重建壁纸层/左对齐镜像/还原无残留）。
+- **待发送队列**：队列卡片（`[data-testid="v4-queue"]`）底部 28px 空条与输入框顶部圆角重叠；半透明输入框会把整条透成黑带，直接裁掉又会断开两卡片。改为三层 mask——底部整条裁切 + 左右两个 16px 径向补片，只保留输入框两个上圆角外侧的角缺口：队列像卡套一样包住圆角，既无黑带也无断口。圆角/重叠量以 `--zb-queue-radius`、`--zb-queue-overlap` 暴露，便于 ZCode 改版后调整。
 
 ## 0.4.1
 

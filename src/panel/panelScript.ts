@@ -9,6 +9,9 @@
  * injection or reload.
  */
 
+import { VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE } from "../version.js";
+import { bubbleRecipes, BUBBLE_SELECTOR_PREVIEW } from "../core/bubbleRecipes.js";
+
 export const PANEL_ROOT_ID = "zcode-beautify-panel-root";
 
 export function buildPanelScript(apiPort: number, apiToken = "", startupClean = true): string {
@@ -17,6 +20,24 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   var API = ${JSON.stringify(api)};
   var TOKEN = ${JSON.stringify(apiToken)};
   var STARTUP_CLEAN = ${JSON.stringify(startupClean !== false)};
+  var VERSION = ${JSON.stringify(VERSION)};
+  var REPO_URL = ${JSON.stringify(REPO_URL)};
+  var FORK_URL = ${JSON.stringify(FORK_URL)};
+  var AUTHOR = ${JSON.stringify(AUTHOR)};
+  var LICENSE = ${JSON.stringify(LICENSE)};
+  // Preview recipes mirror serve's injection table (core/bubbleRecipes.ts):
+  // same CSS, but bound to the PREVIEW class names the iframe uses, so a
+  // built-in preset previews identically to how it lands in ZCode.
+  var PV_RECIPES = ${JSON.stringify(bubbleRecipes(BUBBLE_SELECTOR_PREVIEW))};
+  var ZB_BUBBLE_EXAMPLE = ${JSON.stringify(`.zb-bubble {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-primary) calc(var(--zb-bubble-tint) * 100%), transparent),
+    transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 60%, transparent) !important;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .35) !important;
+  backdrop-filter: blur(10px);
+}
+.zb-bubble-row { gap: 4px; }`)};
   /** Authenticated fetch: every API call carries the per-start token.
    * Non-2xx responses REJECT — a 401 body like {"error":...} otherwise
    * parses as valid data (undefined fields) and quietly poisons every
@@ -69,61 +90,221 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       ' display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px);',
       ' box-shadow: 0 2px 12px rgba(0,0,0,.35); user-select: none; font-size: 15px; line-height: 1; }',
     '#zb-fab:hover { background: rgba(52,52,60,.85); }',
-    '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: 264px; padding: 0 0 10px;',
-      // A panel taller than the window used to overflow past the screen edge;
-      // it now caps at the viewport and scrolls inside (slim scrollbar).
-      ' max-height: calc(100vh - 68px); overflow-y: auto; overscroll-behavior: contain;',
-      ' background: rgba(24,24,30,.88); border: 1px solid rgba(255,255,255,.12); border-radius: 12px;',
-      ' backdrop-filter: blur(16px); box-shadow: 0 8px 32px rgba(0,0,0,.45); user-select: none; }',
-    '#zb-panel::-webkit-scrollbar { width: 5px; }',
-    '#zb-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
+    // Window shell: sidebar + content settings window (the reference layout),
+    // still one floating draggable panel over ZCode. Only the body column
+    // scrolls, so the sidebar stays put.
+    '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: min(680px, calc(100vw - 36px));',
+      // FIXED height (not max-height): every settings page renders in the
+      // same-size window — switching tabs must not resize the panel.
+      ' height: min(620px, calc(100vh - 68px)); display: flex; flex-direction: column; padding: 0;',
+      ' background: rgba(22,22,28,.92); border: 1px solid rgba(255,255,255,.12); border-radius: 14px;',
+      ' backdrop-filter: blur(22px); box-shadow: 0 12px 44px rgba(0,0,0,.5); user-select: none; overflow: hidden; }',
     '#zb-panel[hidden] { display: none; }',
-    '#zb-head { padding: 9px 12px; font-weight: 600; cursor: move; border-bottom: 1px solid rgba(255,255,255,.1);',
-      ' display: flex; justify-content: space-between; align-items: center; }',
-    '#zb-body { padding: 10px 12px 0; }',
-    '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
-    '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);',
-      ' border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }',
-    '.zb-card-title { font-size: 11px; opacity: .6; margin-bottom: 5px; }',
-    '.zb-card .zb-row:last-child, .zb-card .zb-actions:last-child { margin-bottom: 0; }',
-    // Collapsible cards (壁纸库): clicking the title folds the body. The
-    // grid-rows 1fr→0fr trick animates to any content height smoothly.
-    '.zb-collapsible .zb-card-title { display: flex; justify-content: space-between; align-items: center;',
-      ' cursor: pointer; user-select: none; margin-bottom: 0; padding-bottom: 7px; }',
+    '#zb-head { flex: none; height: 40px; padding: 0 8px 0 16px; font-weight: 600; font-size: 13px; cursor: move;',
+      ' border-bottom: 1px solid rgba(255,255,255,.09); display: flex; justify-content: space-between; align-items: center; }',
+    '#zb-head .zb-head-sub { font-weight: 400; font-size: 11px; opacity: .5; margin-left: 8px; }',
+    '#zb-close { width: 28px; height: 28px; border-radius: 7px; background: none; border: none; color: inherit;',
+      ' opacity: .55; font-size: 14px; line-height: 1; cursor: pointer; }',
+    '#zb-close:hover { opacity: 1; background: rgba(255,255,255,.1); }',
+    '#zb-mid { flex: 1; min-height: 0; display: flex; }',
+    // Sidebar: brand, search, nav. The selected item carries an accent bar on
+    // its left edge (the reference's selection bar, in our blue).
+    '#zb-side { flex: none; width: 158px; display: flex; flex-direction: column; gap: 10px; padding: 12px 10px;',
+      ' background: rgba(0,0,0,.2); border-right: 1px solid rgba(255,255,255,.07); }',
+    '#zb-brand { display: flex; align-items: center; gap: 7px; padding: 0 4px; font-size: 15px; font-weight: 700;',
+      ' color: #9db8ff; }',
+    '#zb-search { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px;',
+      ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); }',
+    '#zb-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: inherit;',
+      ' font-size: 12px; padding: 0; }',
+    '#zb-search input::placeholder { color: rgba(255,255,255,.35); }',
+    '#zb-search .zb-search-ico { opacity: .45; font-size: 11px; flex: none; }',
+    '#zb-tabs { display: flex; flex-direction: column; gap: 2px; flex: 1; }',
+    // 关于 sits at the BOTTOM of the sidebar, like the reference layout.
+    '#zb-tabs .zb-tab[data-tab="about"] { margin-top: auto; }',
+    '.zb-tab { position: relative; display: flex; align-items: center; gap: 9px; text-align: left; padding: 8px 10px;',
+      ' border-radius: 8px; cursor: pointer; background: none; border: none; color: inherit; font-size: 12.5px;',
+      ' opacity: .75; transition: background .12s ease, opacity .12s ease; }',
+    '.zb-tab:hover { background: rgba(255,255,255,.07); opacity: 1; }',
+    '.zb-tab .zb-ico { flex: none; width: 18px; text-align: center; font-size: 14px; }',
+    '.zb-tab[data-active="1"] { background: rgba(122,162,247,.16); opacity: 1; color: #dbe6ff; font-weight: 600; }',
+    '.zb-tab[data-active="1"]::before { content: ""; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px;',
+      ' border-radius: 2px; background: #7aa2f7; }',
+    '#zb-tab-main.zb-pane-in, #zb-tab-look.zb-pane-in, #zb-tab-chat.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in, #zb-tab-about.zb-pane-in { animation: zb-pane-in 150ms ease; }',
+    '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
+    '#zb-body { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 16px;',
+      ' display: flex; flex-direction: column; }',
+    '#zb-body::-webkit-scrollbar { width: 5px; }',
+    '#zb-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
+    // A block = section label sitting ABOVE its card (the reference layout).
+    '.zb-block { margin-bottom: 14px; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child { margin-bottom: 0; }',
+    // Fixed-height window + short page = leftover blank under the last card.
+    // Stretch the visible pane's LAST block (and its last card) to fill the
+    // column so the card surface runs to the bottom edge instead of raw empty
+    // space. (Blocks sit inside pane divs, not directly under #zb-body — and
+    // :not([hidden]) keeps display:flex from un-hiding the inactive panes.)
+    // Pages taller than the window keep scrolling — flex-grow only claims
+    // leftover space.
+    '[id^="zb-tab-"]:not([hidden]) { flex: 1; display: flex; flex-direction: column; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child { flex: 1; display: flex; flex-direction: column; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child .zb-collapse-wrap { flex: 1; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child .zb-collapse-inner { display: flex; flex-direction: column; flex: 1; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child .zb-card:last-child { flex: 1; }',
+    '.zb-block-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600;',
+      ' opacity: .55; margin: 0 2px 7px; }',
+    '.zb-block-title .zb-fold { margin-left: auto; }',
+    '.zb-sub-title { font-size: 11px; opacity: .45; margin: 0 2px 6px; }',
+    // About page: centered hero + plain info rows.
+    '.zb-ab-hero { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px 0 16px; }',
+    '.zb-ab-hero .zb-ab-logo { font-size: 38px; line-height: 1; filter: saturate(1.2); }',
+    '.zb-ab-hero .zb-ab-name { font-size: 16px; font-weight: 700; letter-spacing: .3px; }',
+    '.zb-ab-hero .zb-ab-ver { font-size: 11px; padding: 2px 10px; border-radius: 999px;',
+      ' background: rgba(122,162,247,.16); border: 1px solid rgba(122,162,247,.4); color: #dbe6ff; }',
+    '.zb-ab-hero .zb-ab-tag { font-size: 11px; opacity: .55; text-align: center; }',
+    '.zb-set .zb-set-val { font-size: 12px; opacity: .75; text-align: right; max-width: 55%;',
+      ' overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    // Repo rows stack: name/sub on line 1, full-width URL + copy button on
+    // line 2 (fork URLs are long — inline they squeeze the label column).
+    '.zb-ab-repo { flex-wrap: wrap; row-gap: 5px; }',
+    '.zb-ab-repo .zb-set-main { flex: 1 1 100%; }',
+    '.zb-ab-repo .zb-ctrl { flex: 1 1 100%; min-width: 0; justify-content: flex-end; }',
+    '.zb-ab-repo .zb-set-val { flex: 1 1 auto; min-width: 0; max-width: none; text-align: left;',
+      ' font-size: 11.5px; letter-spacing: .2px; }',
+    '.zb-ab-tips { font-size: 11.5px; line-height: 1.9; opacity: .8; padding: 10px 0; user-select: text; }',
+    '.zb-ab-tips b { font-weight: 600; opacity: 1; }',
+    // Bubble style editor WINDOW (modal, opened by the ✏️ button or by
+    // picking 自定义 CSS in the preset dropdown). The preview iframe and CSS
+    // textarea live here; user CSS cannot leak into the panel or ZCode (style
+    // sheets never cross documents) and scripts inside the sandboxed iframe
+    // are dead (the sandbox grants no script permission). The sandbox keeps
+    // allow-same-origin — NOT an empty sandbox: this Electron renderer never
+    // commits an opaque-origin srcdoc document, so an empty sandbox leaves
+    // the frame tree (and the preview) blank forever. Verified live via CDP
+    // (2026-10-24): allow-same-origin commits the srcdoc AND still blocks
+    // script execution.
+    '#zb-bubble-win { position: fixed; inset: 0; z-index: 2147483647; display: flex;',
+      ' align-items: center; justify-content: center; }',
+    '#zb-bubble-win[hidden] { display: none; }',
+    '#zb-bubble-win-mask { position: absolute; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }',
+    '#zb-bubble-win-card { position: relative; width: min(600px, calc(100vw - 48px));',
+      ' max-height: calc(100vh - 80px); display: flex; flex-direction: column; overflow-y: auto;',
+      ' background: rgba(22,22,28,.97); border: 1px solid rgba(255,255,255,.14); border-radius: 14px;',
+      ' padding: 14px 16px; box-shadow: 0 16px 56px rgba(0,0,0,.55); user-select: none; }',
+    '#zb-bubble-win-head { display: flex; align-items: center; justify-content: space-between;',
+      ' font-size: 13px; font-weight: 600; margin-bottom: 8px; }',
+    '#zb-bubble-win-close { width: 28px; height: 28px; border-radius: 7px; background: none; border: none;',
+      ' color: inherit; opacity: .55; font-size: 14px; line-height: 1; cursor: pointer; }',
+    '#zb-bubble-win-close:hover { opacity: 1; background: rgba(255,255,255,.1); }',
+    // Labeled sections: each block states WHAT it affects, so controls read
+    // against the preview above them instead of a dense hint paragraph.
+    '.zb-win-sec { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; margin: 12px 0 7px; }',
+    '.zb-win-sec .zb-win-sec-sub { font-weight: 400; font-size: 11px; opacity: .5; }',
+    '.zb-win-sec .zb-win-mode { margin-left: auto; font-size: 11px; font-weight: 500; padding: 2px 9px;',
+      ' border-radius: 999px; background: rgba(122,162,247,.16); border: 1px solid rgba(122,162,247,.4); color: #dbe6ff; }',
+    // Mirror slider rows (基础参数): delegate to the canonical chat-page sliders.
+    '.zb-wrow { display: flex; align-items: center; gap: 10px; padding: 4px 0; }',
+    '.zb-wrow > span:first-child { flex: none; width: 62px; font-size: 12px; opacity: .85; }',
+    '.zb-wrow input[type=range] { flex: 1; min-width: 60px; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
+    '.zb-wrow .zb-val { flex: none; min-width: 46px; text-align: right; font-size: 11.5px; opacity: .8;',
+      ' font-variant-numeric: tabular-nums; }',
+    '.zb-wrow .zb-wrow-sub { flex: 1; text-align: right; font-size: 11px; opacity: .45; }',
+    // Mode gate: custom code is a no-op under built-in presets — say so and
+    // offer the explicit switch instead of a silently dead textarea.
+    '#zb-bubble-css-gate { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px;',
+      ' border-radius: 8px; background: rgba(255,255,255,.05); border: 1px dashed rgba(255,255,255,.22);',
+      ' font-size: 11.5px; opacity: .9; }',
+    '#zb-bubble-css-gate[hidden] { display: none; }',
+    '#zb-bubble-css-gate .zb-btn { margin-left: auto; flex: none; }',
+    '.zb-win-foot { font-size: 11px; opacity: .45; text-align: center; margin-top: 8px; }',
+    '#zb-bubble-win-card #zb-bubble-pv-frame { display: block; width: 100%; height: 150px; border: none;',
+      ' border-radius: 8px; background: transparent; margin-bottom: 2px; }',
+    '#zb-bubble-win-card .zb-actions { padding: 10px 0 0; justify-content: flex-end; }',
+    '#zb-bubble-css { display: block; width: 100%; min-height: 150px; resize: vertical; padding: 8px 10px;',
+      ' border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.35); color: #dce4f5;',
+      ' font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px; line-height: 1.55;',
+      ' outline: none; user-select: text; white-space: pre; }',
+    '#zb-bubble-css:focus { border-color: rgba(122,162,247,.6); }',
+    // Saved custom styles (我的样式): name-entry row + chip list below the
+    // textarea. Both are display:flex containers, so each needs the explicit
+    // [hidden] guard — author display beats the UA hidden rule otherwise.
+    '#zb-bubble-style-name-row[hidden], #zb-bubble-style-chips[hidden] { display: none; }',
+    '#zb-bubble-style-name { flex: 1; min-width: 0; padding: 5px 9px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.35); color: #dce4f5;',
+      ' font-size: 12px; outline: none; user-select: text; }',
+    '#zb-bubble-style-name:focus { border-color: rgba(122,162,247,.6); }',
+    '#zb-bubble-style-name::placeholder { color: rgba(255,255,255,.35); }',
+    '#zb-bubble-style-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }',
+    '.zb-style-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 9px;',
+      ' border-radius: 999px; background: rgba(122,162,247,.14); border: 1px solid rgba(122,162,247,.4);',
+      ' color: #dbe6ff; font-size: 11.5px; cursor: pointer; user-select: none; }',
+    '.zb-style-chip:hover { background: rgba(122,162,247,.28); }',
+    '.zb-style-chip .zb-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    '.zb-style-chip .zb-chip-del { flex: none; width: 14px; height: 14px; line-height: 13px; text-align: center;',
+      ' border-radius: 50%; font-size: 10px; opacity: .5; }',
+    '.zb-style-chip .zb-chip-del:hover { opacity: 1; background: rgba(255,255,255,.2); }',
+    '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08);',
+      ' border-radius: 12px; padding: 2px 14px; }',
+    '.zb-card .zb-set:last-child, .zb-card .zb-actions:last-child, .zb-card .zb-import-row:last-child { padding-bottom: 10px; }',
+    // Collapsible blocks (壁纸库/显示调节): clicking the section label folds
+    // the card body. The grid-rows 1fr→0fr trick animates to any height.
+    '.zb-collapsible .zb-block-title { cursor: pointer; user-select: none; }',
     '.zb-collapse-wrap { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .18s ease; }',
     '.zb-collapse-wrap > .zb-collapse-inner { overflow: hidden; min-height: 0; }',
     '.zb-collapsed .zb-collapse-wrap { grid-template-rows: 0fr; }',
-    '.zb-collapsed .zb-card-title { padding-bottom: 0; }',
-    '.zb-fold { width: 22px; height: 18px; border-radius: 5px; background: rgba(255,255,255,.09);',
+    // Collapsed = the card chrome folds away too, leaving just the label row.
+    '.zb-collapsed .zb-card { border-color: transparent; background: none; padding-top: 0; padding-bottom: 0; }',
+    '.zb-fold { width: 20px; height: 17px; border-radius: 5px; background: rgba(255,255,255,.09);',
       ' border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center;',
       ' font-size: 10px; line-height: 1; color: inherit; flex: none;',
       ' transition: transform .15s ease, background .15s ease, border-color .15s ease; }',
-    '.zb-collapsible .zb-card-title:hover .zb-fold { background: rgba(122,162,247,.35); border-color: rgba(122,162,247,.6); }',
+    '.zb-collapsible .zb-block-title:hover .zb-fold { background: rgba(122,162,247,.35); border-color: rgba(122,162,247,.6); }',
     // Collapsed = arrow rotated right AND the chip lights up blue — the
-    // direction alone was too subtle to tell collapsed cards apart.
+    // direction alone was too subtle to tell collapsed blocks apart.
     '.zb-collapsed .zb-fold { transform: rotate(-90deg); background: rgba(122,162,247,.5);',
       ' border-color: rgba(122,162,247,.9); color: #d6e2ff; }',
-    '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
-      ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
-    '.zb-tab:hover { background: rgba(255,255,255,.12); }',
-    '.zb-tab[data-active="1"] { background: rgba(122,162,247,.3); border-color: rgba(122,162,247,.6); }',
-    '#zb-tab-main.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in { animation: zb-pane-in 150ms ease; }',
-    '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
-    '.zb-row { margin-bottom: 6px; }',
-    '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 2px; opacity: .85; }',
+    // Settings row: label (name + optional sub) on the left, control on the
+    // right — the row pattern the whole reference panel is built from.
+    '.zb-set { display: flex; align-items: center; gap: 12px; padding: 9px 0; }',
+    '.zb-set + .zb-set, .zb-set + .zb-sched-mode, .zb-sched-mode + .zb-set { border-top: 1px solid rgba(255,255,255,.06); }',
+    '.zb-set-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }',
+    '.zb-set-name { font-size: 12.5px; }',
+    '.zb-set-sub { font-size: 11px; opacity: .5; line-height: 1.45; }',
+    '.zb-ctrl { flex: none; display: flex; align-items: center; gap: 8px; }',
+    // Toggle switch (reference-style pill), used via <label class="zb-sw">.
+    '.zb-sw { display: inline-flex; align-items: center; cursor: pointer; flex: none; }',
+    '.zb-sw input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 34px; height: 20px; margin: 0;',
+      ' border-radius: 999px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.22);',
+      ' position: relative; cursor: pointer; outline: none; transition: background .15s ease, border-color .15s ease; }',
+    '.zb-sw input[type=checkbox]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;',
+      ' border-radius: 50%; background: #cfd3dc; transition: transform .15s ease, background .15s ease; }',
+    '.zb-sw input[type=checkbox]:checked { background: rgba(122,162,247,.85); border-color: rgba(122,162,247,.9); }',
+    '.zb-sw input[type=checkbox]:checked::after { transform: translateX(14px); background: #fff; }',
+    // Slider row: label left, track fills the middle, value pinned right.
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
-    '.zb-toggles { display: flex; justify-content: center; gap: 16px; }',
-    '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; white-space: nowrap; }',
-    '.zb-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }',
+    '.zb-slide input[type=range] { flex: 1; min-width: 60px; width: auto; }',
+    '.zb-set .zb-val { flex: none; min-width: 48px; text-align: right; font-size: 11.5px; opacity: .8;',
+      ' font-variant-numeric: tabular-nums; }',
+    // Shared control chrome for selects / time / number inputs inside rows.
+    '.zb-set select, .zb-sched-mode select, .zb-sched-plan select, .zb-sched-row select { padding: 4px 8px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 12px;',
+      ' outline: none; color-scheme: dark; cursor: pointer; }',
+    '.zb-set input[type=time], .zb-sched-mode input[type=time], .zb-set input[type=number],',
+      ' .zb-sched-mode input[type=number] { padding: 4px 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);',
+      ' background: rgba(0,0,0,.3); color: inherit; font-size: 12px; outline: none; color-scheme: dark; }',
+    '.zb-set input[type=time] { width: 80px; }',
+    '.zb-set input[type=number] { width: 56px; }',
+    '.zb-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 8px; }',
     '.zb-cfg-row .zb-btn { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
       ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); color: inherit; font-size: 12px;',
       ' white-space: nowrap; flex: 0 1 auto; }',
     '.zb-btn:hover { background: rgba(255,255,255,.16); }',
-    '#zb-status { min-height: 14px; padding: 2px 12px 0; opacity: .6; font-size: 11px; }',
+    '#zb-status { flex: none; min-height: 24px; padding: 4px 16px 6px; opacity: .6; font-size: 11px;',
+      ' border-top: 1px solid rgba(255,255,255,.07); }',
     // Import row: picker + paste field + action on ONE line (the old stacked
     // button/input/button block ate three rows for two functions).
-    '.zb-import-row { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }',
+    '.zb-import-row { display: flex; align-items: center; gap: 6px; margin: 0; padding: 10px 0 8px; }',
     '.zb-import-row .zb-btn { padding: 4px 9px; font-size: 11px; flex: none; }',
     '.zb-import-row .zb-icon-btn { padding: 4px 7px; line-height: 1; }',
     '.zb-import-row .zb-grow { flex: 1; min-width: 0; }',
@@ -148,17 +329,15 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '#zb-hover-preview video { display: block; width: 100%; max-height: 240px; object-fit: contain; background: #000; }',
     '#zb-hover-preview .zb-hv-off { display: none; }',
     '#zb-hover-preview[hidden] { display: none; }',
-    '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
-    '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
-    '.zb-sched-plan { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }',
-    '.zb-sched-plan select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
-      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
-      ' outline: none; color-scheme: dark; }',
+    '.zb-sched-plan { display: flex; align-items: center; gap: 6px; }',
+    '.zb-sched-plan select { flex: 0 1 auto; min-width: 140px; }',
     '.zb-sched-plan .zb-act { font-size: 12px; }',
-    '.zb-sched-mode { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; opacity: .85; font-size: 11px; }',
-    '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
-      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
-      ' outline: none; color-scheme: dark; }',
+    '.zb-sched-mode { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 12px; }',
+    '.zb-sched-mode + .zb-sched-mode { border-top: 1px solid rgba(255,255,255,.06); }',
+    '.zb-sched-mode > span:first-child { flex: 1; min-width: 0; text-align: left; }',
+    '.zb-sched-mode > label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }',
+    '.zb-sched-mode select { flex: 0 1 auto; min-width: 130px; }',
+    '.zb-sched-mode input[type=number] { width: 58px; }',
     '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 200px; overflow-y: auto; overflow-anchor: none; padding-right: 2px; }',
     '.zb-sched-row { display: flex; align-items: center; gap: 4px; }',
     '.zb-sched-row input[type=number], .zb-sched-row input[type=time], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
@@ -262,16 +441,6 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '.zb-item .zb-label-input { flex: 1; min-width: 0; padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(122,162,247,.6);',
       ' background: rgba(0,0,0,.35); color: inherit; font-size: 11px; outline: none; }',
     '.zb-item .zb-act { cursor: pointer; opacity: .5; padding: 0 3px; font-size: 11px; background: none; border: none; color: inherit; }',
-    // Display card sections: one card hosts 画面/界面/聊天界面/昼夜护眼
-    // groups — a hairline-separated mini header each, sliders paired in a
-    // two-column grid so the merged card stays compact.
-    '.zb-sec { display: flex; align-items: center; justify-content: space-between; gap: 8px;',
-      ' padding: 5px 2px 2px; margin-top: 4px; border-top: 1px solid rgba(255,255,255,.08);',
-      ' font-size: 10px; opacity: .55; letter-spacing: 2px; }',
-    '.zb-collapse-inner > .zb-sec:first-child { border-top: none; margin-top: 0; padding-top: 2px; }',
-    '.zb-sec .zb-sec-on { display: flex; align-items: center; gap: 4px; font-size: 10px;',
-      ' letter-spacing: normal; opacity: 1; cursor: pointer; white-space: nowrap; }',
-    '.zb-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }',
     '.zb-item .zb-act:hover { opacity: 1; }',
     '.zb-item .zb-act[data-armed="1"] { opacity: 1; color: #f87171; }',
     '#zb-offline { display: flex; flex-direction: column; gap: 6px; align-items: center;',
@@ -298,26 +467,36 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   root.innerHTML =
     '<div id="zb-fab" title="ZCode Beautify">🎨</div>' +
     '<div id="zb-panel" hidden>' +
-    '  <div id="zb-head"><span>ZCode Beautify</span></div>' +
+    '  <div id="zb-head"><span>ZCode Beautify<span class="zb-head-sub">设置</span></span><button id="zb-close" title="关闭面板 (Alt+B)">✕</button></div>' +
     '  <div id="zb-offline" hidden>' +
     '    <div>⚠ 美化服务未运行,面板不可用</div>' +
     '    <div class="zb-hint">在插件目录执行 <code>node dist/cli.js serve --detach</code> 启动</div>' +
     '    <button class="zb-btn" id="zb-retry">重试连接</button>' +
     '  </div>' +
-    '  <div id="zb-body">' +
+    '  <div id="zb-mid">' +
+    '  <div id="zb-side">' +
+    '    <div id="zb-brand"><span>🎨</span><span>Beautify</span></div>' +
+    '    <div id="zb-search"><span class="zb-search-ico">🔍</span><input id="zb-nav-search" placeholder="搜索" spellcheck="false"></div>' +
     '    <div id="zb-tabs">' +
-    '      <button class="zb-tab" data-tab="main">壁纸</button>' +
-    '      <button class="zb-tab" data-tab="sched">定时播放</button>' +
-    '      <button class="zb-tab" data-tab="settings">设置</button>' +
+    '      <button class="zb-tab" data-tab="main"><span class="zb-ico">🖼</span><span>壁纸</span></button>' +
+    '      <button class="zb-tab" data-tab="look"><span class="zb-ico">🎨</span><span>外观</span></button>' +
+    '      <button class="zb-tab" data-tab="chat"><span class="zb-ico">💬</span><span>聊天</span></button>' +
+    '      <button class="zb-tab" data-tab="sched"><span class="zb-ico">⏱</span><span>轮播</span></button>' +
+    '      <button class="zb-tab" data-tab="settings"><span class="zb-ico">⚙</span><span>通用</span></button>' +
+    '      <button class="zb-tab" data-tab="about"><span class="zb-ico">ℹ</span><span>关于</span></button>' +
     '    </div>' +
+    '  </div>' +
+    '  <div id="zb-body">' +
     '    <div id="zb-tab-main">' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center"><span>最近使用 <button class="zb-act" id="zb-stats" title="壁纸累计展示时长排行">📊</button></span> <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-history">' +
+    '      <div class="zb-block-title zb-card-title"><span>最近使用</span><button class="zb-act" id="zb-stats" title="壁纸累计展示时长排行">📊</button><span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-card"><div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-lib-list" id="zb-history" style="max-height:192px"></div>' +
-    '      </div></div>' +
+    '      </div></div></div>' +
     '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-scenes"><div class="zb-card-title">壁纸库 · 动态 <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-scenes">' +
+    '      <div class="zb-block-title zb-card-title"><span>壁纸库 · 动态</span><span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-card"><div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="打开文件选择器(可多选):选 .pkg(场景)或 .mp4(视频),选完自动排队导入">📁</button>' +
     '        <button class="zb-btn zb-icon-btn" id="zb-we-lib" title="浏览本机 Wallpaper Engine 壁纸库(创意工坊/自建项目),点击即可导入">🧩</button>' +
@@ -326,18 +505,19 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '      </div>' +
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>…</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
-    '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
+    '      <div class="zb-actions" style="padding-top:0"><button class="zb-btn" id="zb-guide-retry" hidden>已安装,重试</button></div>' +
     '      <div class="zb-lib-list" id="zb-lib-scenes"></div>' +
-    '      <div class="zb-lib-head" id="zb-storage" style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
+    '      <div class="zb-lib-head" id="zb-storage" style="display:flex;align-items:center;gap:6px;margin:6px 0 8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)">' +
     '        <span id="zb-storage-text" style="flex:1">…</span>' +
     '        <button class="zb-act" id="zb-open-scenes" title="在资源管理器中打开动态壁纸缓存目录">📂</button>' +
     '        <button class="zb-act" id="zb-compress" title="省电压缩:把动态壁纸循环重编码为 720p/24fps,显著降低 GPU 解码占用与体积(使用中的跳过,可重新导入恢复原画质)">⚡ 压缩</button>' +
     '        <button class="zb-act" id="zb-purge" title="删除全部已缓存的动态壁纸循环(正在使用的除外)">🗑 清理</button>' +
     '      </div>' +
-    '      </div></div>' +
+    '      </div></div></div>' +
     '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-images"><div class="zb-card-title">壁纸库 · 图片 <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-images">' +
+    '      <div class="zb-block-title zb-card-title"><span>壁纸库 · 图片</span><span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-card"><div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <label class="zb-btn zb-grow" for="zb-file" title="选择一张图片作为背景壁纸,UI 配色随之更新">🖼 更换图片…</label>' +
     '        <button class="zb-act" id="zb-img-sort" title="切换排序:按时间(新→旧)/按名称">⇅ 时间</button>' +
@@ -346,108 +526,202 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="file" id="zb-file" accept="image/*" hidden>' +
     '      </div>' +
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
+    '      </div></div></div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-look" hidden>' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-display">' +
+    '      <div class="zb-block-title zb-card-title"><span>显示调节</span><span class="zb-fold">▾</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-sub-title">画面</div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">背景模糊</span><span class="zb-set-sub">背景壁纸的模糊程度(像素)</span></div>' +
+    '        <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"><span class="zb-val"><span id="zb-blur-val">0</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">背景压暗</span><span class="zb-set-sub">背景压暗程度(百分比,越高越暗)</span></div>' +
+    '        <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"><span class="zb-val"><span id="zb-dim-val">0</span>%</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">填充方式</span><span class="zb-set-sub">背景铺满窗口的策略</span></div>' +
+    '        <select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">' +
+    '          <option value="cover">填满裁剪</option>' +
+    '          <option value="contain">完整显示</option>' +
+    '          <option value="smart">智能适配</option>' +
+    '        </select></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">视频音量</span><span class="zb-set-sub">0 = 静音,仅对保留了声音的导入生效</span></div>' +
+    '        <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-vol-val">0</span>%</span></div>' +
+    '      </div>' +
+    '      <div class="zb-sub-title" style="margin-top:14px">界面</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">UI 莫奈取色</span><span class="zb-set-sub">根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色</span></div>' +
+    '        <div class="zb-ctrl"><label class="zb-sw"><input type="checkbox" id="zb-monet"></label>' +
+    '        <button class="zb-btn" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">显示壁纸</span><span class="zb-set-sub">关闭后隐藏背景壁纸</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-vis"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">图片缓动</span><span class="zb-set-sub">图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-kb"></label></div>' +
+    '      </div>' +
+    '      <div class="zb-sub-title" style="margin-top:14px">昼夜护眼</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">按时段自动调暗</span><span class="zb-set-sub">在白天 / 夜间两套显示参数间定时切换</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-dn-on"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">白天时段</span></div>' +
+    '        <div class="zb-ctrl"><input type="time" id="zb-dn-start"><span style="opacity:.5">至</span><input type="time" id="zb-dn-end"></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">白天参数</span></div>' +
+    '        <div class="zb-ctrl"><span style="opacity:.6">压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80">%' +
+    '        <span style="opacity:.6">模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30">px</div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">夜间参数</span></div>' +
+    '        <div class="zb-ctrl"><span style="opacity:.6">压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80">%' +
+    '        <span style="opacity:.6">模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30">px</div></div>' +
+    '      </div>' +
     '      </div></div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-chat" hidden>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">聊天区</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">聊天区暗度</span><span class="zb-set-sub">对话列背后的额外压暗,消息文字浮在其上不受影响</span></div>' +
+    '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">遮罩上端</span><span class="zb-set-sub">窗口顶部向下渐隐遮罩的浓度</span></div>' +
+    '        <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-top-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">遮罩下端</span><span class="zb-set-sub">窗口底部向上渐隐遮罩的浓度(输入框附近)</span></div>' +
+    '        <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-bot-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">大容器偏白</span><span class="zb-set-sub">整窗白色薄纱浓度,暗色壁纸下提升文字可读性</span></div>' +
+    '        <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-frost-val">0.00</span></span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">聊天气泡</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">气泡样式</span><span class="zb-set-sub">你发出消息的气泡预设;原生 = 完全不改样式</span></div>' +
+    '        <div class="zb-ctrl"><select id="zb-bubble-preset" title="你发出消息的气泡预设;原生=完全不改样式">' +
+    '          <option value="default">原生</option>' +
+    '          <option value="accent">主题色染色</option>' +
+    '          <option value="glass">毛玻璃</option>' +
+    '          <option value="outline">描边</option>' +
+    '          <option value="flat">扁平</option>' +
+    '          <option value="custom">自定义 CSS</option>' +
+    '        </select>' +
+    '        <button class="zb-btn" id="zb-bubble-edit" title="打开气泡样式编辑器窗口:编辑并启用自定义 CSS,实时预览">✏️ 编辑样式</button>' +
+    '        <button class="zb-btn" id="zb-bubble-align" title="气泡靠右(ZCode 原生)或靠左显示">↔ 靠右</button></div></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">染色浓度</span><span class="zb-set-sub">主题色掺入气泡背景的浓度</span></div>' +
+    '        <input type="range" id="zb-bubble-tint" min="0" max="100" step="1" value="28"><span class="zb-val"><span id="zb-bubble-tint-val">28</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">圆角</span><span class="zb-set-sub">气泡圆角;对齐侧保留原生 2px 小角</span></div>' +
+    '        <input type="range" id="zb-bubble-radius" min="4" max="24" step="1" value="12"><span class="zb-val"><span id="zb-bubble-radius-val">12</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">最大宽度</span><span class="zb-set-sub">气泡最大宽度占对话列宽度的比例</span></div>' +
+    '        <input type="range" id="zb-bubble-width" min="40" max="90" step="1" value="70"><span class="zb-val"><span id="zb-bubble-width-val">70</span>%</span></div>' +
+    '      </div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-settings" hidden>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-display"><div class="zb-card-title">显示调节 <span class="zb-fold">▾</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
-    '    <div class="zb-sec">画面</div>' +
-    '    <div class="zb-g2">' +
-    '    <div class="zb-row"><label title="背景模糊程度(像素)"><span>背景模糊</span><span><span id="zb-blur-val">0</span>px</span></label>' +
-    '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="背景压暗程度(百分比,越高越暗)"><span>背景压暗</span><span><span id="zb-dim-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"></div>' +
-    '    </div>' +
-    '    <div class="zb-sched-mode"><span>填充</span><select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体" style="flex:1">' +
-    '      <option value="cover">填满裁剪</option>' +
-    '      <option value="contain">完整显示</option>' +
-    '      <option value="smart">智能适配</option>' +
-    '    </select></div>' +
-    '    <div class="zb-sec">界面</div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="根据壁纸自动生成 UI 配色;关闭则保留 ZCode 原生颜色"><input type="checkbox" id="zb-monet">UI 莫奈取色</label>' +
-    '      <button class="zb-act" id="zb-pin" title="从壁纸主色锁定主题色(取色偏色时手工钉一个)">🎨 锁色</button>' +
-    '    </div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="显示或隐藏背景壁纸"><input type="checkbox" id="zb-vis">显示壁纸</label>' +
-    '      <label title="图片壁纸缓慢缩放平移(呼吸感);模糊开启时自动停用"><input type="checkbox" id="zb-kb">图片缓动</label>' +
-    '    </div>' +
-    '    <div class="zb-row"><label title="视频壁纸的音量(0=静音,仅对保留了声音的导入生效)"><span>视频音量</span><span><span id="zb-vol-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-sec">聊天界面</div>' +
-    '    <div class="zb-g2">' +
-    '    <div class="zb-row"><label title="对话列背后的额外压暗,消息文字浮在其上不受影响"><span>聊天区暗度</span><span id="zb-chat-dim-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="窗口顶部向下渐隐遮罩的浓度"><span>遮罩上端</span><span id="zb-chat-top-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="窗口底部向上渐隐遮罩的浓度(输入框附近)"><span>遮罩下端</span><span id="zb-chat-bot-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="整窗白色薄纱浓度,暗色壁纸下提升文字可读性"><span>大容器偏白</span><span id="zb-chat-frost-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"></div>' +
-    '    </div>' +
-    '    <div class="zb-sec">昼夜护眼 <label title="按时间段自动切换两套显示参数" class="zb-sec-on"><input type="checkbox" id="zb-dn-on">按时段自动调暗</label></div>' +
-    '      <div class="zb-sched-mode"><span>白天</span><input type="time" id="zb-dn-start" style="flex:1">' +
-    '        <span style="opacity:.5">至</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
-    '      <div class="zb-sched-mode"><span>白天压暗</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
-    '        <span>模糊</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
-    '      <div class="zb-sched-mode"><span>夜间压暗</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
-    '        <span>模糊</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
-    '      </div></div>' +
-    '    </div>' +
-    '    <div class="zb-card" id="zb-card-config"><div class="zb-card-title">配置</div>' +
-    '      <div class="zb-actions zb-cfg-row">' +
+    '    <div class="zb-block" id="zb-card-config">' +
+    '      <div class="zb-block-title">配置</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-actions zb-cfg-row" style="padding-top:12px">' +
     '        <button class="zb-btn" id="zb-reset" title="移除壁纸与配色,还原 ZCode 默认外观(壁纸会被记住,可再次恢复)">还原外观</button>' +
     '        <button class="zb-btn" id="zb-cfg-export" title="导出当前壁纸/外观/播放方案为 JSON 文件">⬇ 导出</button>' +
     '        <button class="zb-btn" id="zb-cfg-import" title="从导出的 JSON 文件恢复配置">⬆ 导入</button>' +
     '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
     '      </div>' +
-    '      <div class="zb-sched-mode" style="margin:6px 0 0"><label title="ZCode 启动屏(加载页)期间不显示壁纸与美化面板,主界面就绪后再出现"><input type="checkbox" id="zb-startup-clean">启动屏时隐藏壁纸与面板</label></div>' +
-    '      <div class="zb-sched-mode" style="margin-top:4px"><label title="ZCode 下载/安装更新的进度窗口默认不显示壁纸;勾选后更新窗口显示壁纸(仅壁纸,不显示美化面板)"><input type="checkbox" id="zb-updater-wp">ZCode 更新界面显示壁纸</label></div>' +
-    '      <div class="zb-sched-mode" style="margin-top:4px"><label title="悬停 WE 库中的视频壁纸时直接播放其真实画面(而非封面图);场景壁纸仍显示封面"><input type="checkbox" id="zb-we-live">WE 预览播放真实视频</label></div>' +
-'      <div class="zb-sched-mode" style="margin-top:4px"><span title="壁纸库·动态列表一次最多可见的行数(其余滚动查看)">动态库</span>' +
-    '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" style="width:44px" title="动态壁纸列表最多显示行数">' +
-    '        <span title="壁纸库·图片列表一次最多可见的行数(其余滚动查看)">图片库</span>' +
-    '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" style="width:44px" title="图片壁纸列表最多显示行数">行</div>' +
-'      <div class="zb-sched-mode" style="margin-top:4px"><span title="场景壁纸录制输出的分辨率;默认=壁纸项目自带尺寸">录制分辨率</span>' +
-    '        <select id="zb-import-res" style="flex:1"><option value="auto">默认(跟随壁纸)</option><option value="1920x1080">1920×1080</option><option value="1280x720">1280×720(省电)</option><option value="custom">自定义…</option></select>' +
-    '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" style="width:52px" hidden>' +
-    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" style="width:52px" hidden></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">启动屏时隐藏壁纸与面板</span><span class="zb-set-sub">ZCode 启动屏(加载页)期间不显示壁纸与美化面板,主界面就绪后再出现</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-startup-clean"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">ZCode 更新界面显示壁纸</span><span class="zb-set-sub">下载/安装更新的进度窗口默认不显示壁纸;勾选后更新窗口显示壁纸(仅壁纸,不显示美化面板)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-updater-wp"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">WE 预览播放真实视频</span><span class="zb-set-sub">悬停 WE 库中的视频壁纸时直接播放其真实画面(而非封面图);场景壁纸仍显示封面</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-we-live"></label></div>' +
+    '      <div class="zb-sched-mode"><span title="壁纸库·动态列表一次最多可见的行数(其余滚动查看)">动态库行数</span>' +
+    '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" title="动态壁纸列表最多显示行数">' +
+    '        <span title="壁纸库·图片列表一次最多可见的行数(其余滚动查看)">图片库行数</span>' +
+    '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" title="图片壁纸列表最多显示行数"></div>' +
+    '      <div class="zb-sched-mode"><span title="场景壁纸录制输出的分辨率;默认=壁纸项目自带尺寸">录制分辨率</span>' +
+    '        <select id="zb-import-res"><option value="auto">默认(跟随壁纸)</option><option value="1920x1080">1920×1080</option><option value="1280x720">1280×720(省电)</option><option value="custom">自定义…</option></select>' +
+    '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" hidden>' +
+    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-about" hidden>' +
+    '    <div class="zb-ab-hero">' +
+    '      <div class="zb-ab-logo">🎨</div>' +
+    '      <div class="zb-ab-name">ZCode Beautify</div>' +
+    '      <div class="zb-ab-ver" id="zb-ab-ver">v0.0.0</div>' +
+    '      <div class="zb-ab-tag">动态壁纸 · 莫奈取色 · 聊天气泡 —— ZCode 桌面端美化插件</div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">运行状态</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">美化服务</span></div><span class="zb-set-val" id="zb-ab-svc">检测中…</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">运行时长</span></div><span class="zb-set-val" id="zb-ab-uptime">—</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">CDP 端口</span><span class="zb-set-sub">ZCode 调试接口,注入壁纸与面板</span></div><span class="zb-set-val" id="zb-ab-cdp">—</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">API 端口</span><span class="zb-set-sub">本机控制服务,面板数据来源</span></div><span class="zb-set-val" id="zb-ab-api">—</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">当前壁纸</span></div><span class="zb-set-val" id="zb-ab-wp">—</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">插件信息</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-ab-repo"><div class="zb-set-main"><span class="zb-set-name">上游仓库</span></div>' +
+    '        <div class="zb-ctrl"><span class="zb-set-val" title="${REPO_URL}">${REPO_URL.replace(/^https?:\/\//, "")}</span>' +
+    '        <button class="zb-btn" id="zb-ab-copy" title="复制上游仓库地址">⧉ 复制</button></div></div>' +
+    '      <div class="zb-set zb-ab-repo"><div class="zb-set-main"><span class="zb-set-name">本 Fork 仓库</span><span class="zb-set-sub">当前安装来源:面板重构/自定义气泡/队列修复等改动均在此维护</span></div>' +
+    '        <div class="zb-ctrl"><span class="zb-set-val" title="${FORK_URL}">${FORK_URL.replace(/^https?:\/\//, "")}</span>' +
+    '        <button class="zb-btn" id="zb-ab-copy-fork" title="复制 Fork 仓库地址">⧉ 复制</button></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">开源许可</span></div><span class="zb-set-val" id="zb-ab-license">—</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">作者</span></div><span class="zb-set-val" id="zb-ab-author">—</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">使用提示</div>' +
+    '      <div class="zb-card"><div class="zb-ab-tips">' +
+    '        <b>Alt + B</b> 随时开关本面板;拖动标题栏可移动位置<br>' +
+    '        悬停缩略图放大预览;动态壁纸悬停直接播放循环视频<br>' +
+    '        美化服务未运行时面板会提示,在插件目录执行 <b>node dist/cli.js serve --detach</b> 启动' +
+    '      </div></div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
-    '    <div class="zb-card"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center">轮播状态 <span id="zb-rot-state" style="opacity:.7;font-weight:400">…</span></div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">轮播状态</div>' +
+    '      <div class="zb-card"><div class="zb-set"><div class="zb-set-main">' +
+    '        <span class="zb-set-name" id="zb-rot-state" style="opacity:.8;font-weight:400">…</span></div></div></div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">方案</div>' +
-    '      <div class="zb-sched-head" style="margin-bottom:6px"><span>当前</span>' +
-    '        <label title="启用后按所选模式自动切换壁纸"><input type="checkbox" id="zb-sched-on">启用</label></div>' +
-    '      <div class="zb-sched-plan"><select id="zb-plan" title="播放方案"></select>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">方案</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">启用轮播</span><span class="zb-set-sub">启用后按所选模式自动切换壁纸</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-sched-on"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">当前方案</span></div>' +
+    '        <div class="zb-ctrl zb-sched-plan"><select id="zb-plan" title="播放方案"></select>' +
     '        <button class="zb-act" id="zb-plan-add" title="新建播放方案">➕</button>' +
     '        <button class="zb-act" id="zb-plan-ren" title="重命名当前方案">✎</button>' +
-    '        <button class="zb-act" id="zb-plan-del" title="删除当前方案">🗑</button>' +
+    '        <button class="zb-act" id="zb-plan-del" title="删除当前方案">🗑</button></div></div>' +
     '      </div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">播放设置</div>' +
-    '      <div class="zb-sched-mode"><span>模式</span><select id="zb-sched-mode">' +
-    '        <option value="sequence">顺序轮播</option>' +
-    '        <option value="random">随机轮播</option>' +
-    '        <option value="schedule">定时切换</option>' +
-    '      </select></div>' +
-    '      <div class="zb-sched-mode"><span>特效</span><select id="zb-fx" title="本方案播放时的壁纸切换特效">' +
-    '        <option value="fade">交叉淡入</option>' +
-    '        <option value="slide">右侧滑入</option>' +
-    '        <option value="zoom">缩放浮现</option>' +
-    '        <option value="blur">模糊渐清</option>' +
-    '        <option value="none">直接切换</option>' +
-    '      </select></div>' +
-    '      <div class="zb-sched-mode" title="方案生效时段:留空 = 全天生效;跨夜(如 20:00-06:00)支持"><span>时段</span>' +
-    '        <input type="time" id="zb-win-start" style="flex:1" step="60">' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">播放设置</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">模式</span></div>' +
+    '        <select id="zb-sched-mode">' +
+    '          <option value="sequence">顺序轮播</option>' +
+    '          <option value="random">随机轮播</option>' +
+    '          <option value="schedule">定时切换</option>' +
+    '        </select></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">切换特效</span><span class="zb-set-sub">本方案播放时的壁纸切换特效</span></div>' +
+    '        <select id="zb-fx">' +
+    '          <option value="fade">交叉淡入</option>' +
+    '          <option value="slide">右侧滑入</option>' +
+    '          <option value="zoom">缩放浮现</option>' +
+    '          <option value="blur">模糊渐清</option>' +
+    '          <option value="none">直接切换</option>' +
+    '        </select></div>' +
+    '      <div class="zb-set" title="方案生效时段:留空 = 全天生效;跨夜(如 20:00-06:00)支持"><div class="zb-set-main"><span class="zb-set-name">生效时段</span><span class="zb-set-sub">留空 = 全天生效;跨夜(如 20:00-06:00)支持</span></div>' +
+    '        <div class="zb-ctrl"><input type="time" id="zb-win-start" step="60">' +
     '        <span style="opacity:.5">至</span>' +
-    '        <input type="time" id="zb-win-end" style="flex:1" step="60">' +
-    '        <button class="zb-act" id="zb-win-clear" title="清除时段(全天生效)">✕</button>' +
+    '        <input type="time" id="zb-win-end" step="60">' +
+    '        <button class="zb-act" id="zb-win-clear" title="清除时段(全天生效)">✕</button></div></div>' +
     '      </div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">播放列表</div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">播放列表</div>' +
+    '      <div class="zb-card">' +
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
     '        <button class="zb-btn" id="zb-sched-add" title="添加一条:选择壁纸并设定时长或时间点">➕ 添加</button>' +
@@ -455,13 +729,48 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <button class="zb-btn" id="zb-sched-play" title="保存并立即启用当前方案开始播放">▶ 播放</button>' +
     '        <button class="zb-btn" id="zb-sched-next" title="跳过当前时长,立即切换到下一张壁纸">⏭ 立即切换</button>' +
     '      </div>' +
-    '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 0"></div>' +
+    '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 8px"></div>' +
+    '      </div>' +
     '    </div>' +
     '    </div>' +
     '  </div>' +
+    '  </div>' +
+    '  <div id="zb-status"></div>' +
     '</div>' +
-    '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>' +
-    '<div id="zb-status"></div>';
+    '<div id="zb-bubble-win" hidden>' +
+    '  <div id="zb-bubble-win-mask"></div>' +
+    '  <div id="zb-bubble-win-card">' +
+    '    <div id="zb-bubble-win-head"><span>🎨 气泡样式编辑器</span>' +
+    '      <button id="zb-bubble-win-close" title="关闭 (Esc)">✕</button></div>' +
+    '    <div class="zb-win-sec">实时预览<span class="zb-win-mode" id="zb-bubble-win-mode">…</span><span class="zb-win-sec-sub">改动立即反映</span></div>' +
+    '    <iframe id="zb-bubble-pv-frame" sandbox="allow-same-origin" title="聊天气泡预览"></iframe>' +
+    '    <div class="zb-win-sec">基础参数<span class="zb-win-sec-sub">作用于所有样式,注入为 CSS 变量</span></div>' +
+    '    <div class="zb-wrow"><span title="注入为 --zb-bubble-tint">染色浓度</span><input type="range" id="zb-bubble-tint-w" min="0" max="100" step="1" value="28"><span class="zb-val" id="zb-bubble-tint-w-val">28%</span></div>' +
+    '    <div class="zb-wrow"><span title="注入为 --zb-bubble-radius">圆角</span><input type="range" id="zb-bubble-radius-w" min="4" max="24" step="1" value="12"><span class="zb-val" id="zb-bubble-radius-w-val">12px</span></div>' +
+    '    <div class="zb-wrow"><span title="注入为 --zb-bubble-maxw">最大宽度</span><input type="range" id="zb-bubble-width-w" min="40" max="90" step="1" value="70"><span class="zb-val" id="zb-bubble-width-w-val">70%</span></div>' +
+    '    <div class="zb-wrow"><span>对齐</span><button class="zb-btn" id="zb-bubble-align-w" title="气泡靠右(ZCode 原生)或靠左显示">↔ 靠右</button><span class="zb-wrow-sub">对齐侧保留原生 2px 小角</span></div>' +
+    '    <div class="zb-win-sec">自定义 CSS<span class="zb-win-sec-sub">.zb-bubble = 气泡本体;.zb-bubble-row = 所在行;可引用 --color-primary 等主题变量</span></div>' +
+    '    <div id="zb-bubble-css-gate" hidden>当前使用预设「<span id="zb-bubble-gate-name">…</span>」,自定义代码不生效' +
+    '      <button class="zb-btn" id="zb-bubble-gate-on" title="切换到自定义 CSS,下方代码才会生效">启用自定义 CSS</button></div>' +
+    '    <div id="zb-bubble-css-wrap">' +
+    '      <textarea id="zb-bubble-css" spellcheck="false" placeholder="/* 例:.zb-bubble { background:…; border:…; } */"></textarea>' +
+    '      <div class="zb-actions" style="padding-top:6px">' +
+    '        <button class="zb-btn" id="zb-bubble-add-style" title="把上方 CSS 保存为一个命名的自定义样式,以后一键套用">➕ 存为样式</button>' +
+    '        <button class="zb-btn" id="zb-bubble-example" title="填入一个渐变毛玻璃示例,可在此基础上修改">✨ 插入示例</button>' +
+    '        <button class="zb-btn" id="zb-bubble-clear" title="清空自定义 CSS(仅保留基础参数控制的效果)">清空</button>' +
+    '      </div>' +
+    '      <div class="zb-actions" id="zb-bubble-style-name-row" hidden>' +
+    '        <input id="zb-bubble-style-name" type="text" maxlength="24" placeholder="样式名称,如:薄荷毛玻璃">' +
+    '        <button class="zb-btn" id="zb-bubble-style-save" title="保存为自定义样式">💾 保存</button>' +
+    '        <button class="zb-btn" id="zb-bubble-style-cancel" title="不保存">取消</button>' +
+    '      </div>' +
+    '      <div id="zb-bubble-style-chips" hidden></div>' +
+    '    </div>' +
+    '    <div class="zb-win-foot">所有更改实时生效并保存;✓ 完成 / Esc 仅关闭窗口</div>' +
+    '    <div class="zb-actions" style="justify-content:flex-end;padding-top:4px"><button class="zb-btn" id="zb-bubble-done" title="关闭窗口(更改已实时应用)">✓ 完成</button></div>' +
+    '  </div>' +
+    '</div>' +
+    '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>';
   document.body.appendChild(root);
 
   function $(id) { return document.getElementById(id); }
@@ -503,7 +812,10 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     box.hidden = false;
     var r = thumb.getBoundingClientRect();
     box.style.left = 'auto';
-    box.style.right = '296px'; // panel column (264+18) plus breathing room
+    // To the LEFT of the panel, whatever its current (draggable) position.
+    var panel = $('zb-panel');
+    var pr = panel && !panel.hidden ? panel.getBoundingClientRect() : null;
+    box.style.right = pr ? Math.max(8, window.innerWidth - pr.left + 14) + 'px' : '18px';
     var top = r.top + r.height / 2 - box.offsetHeight / 2;
     if (top < 8) top = 8;
     if (top + box.offsetHeight > window.innerHeight - 8) top = window.innerHeight - box.offsetHeight - 8;
@@ -669,6 +981,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         }
         var cl = c.chatLook || {};
         setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0);
+        setBubbleUI(c.bubbleLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
@@ -862,6 +1175,309 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     });
   });
 
+  // --- user message bubble look (聊天气泡) -----------------------------------
+  function bubbleUIState() {
+    return {
+      preset: $('zb-bubble-preset').value,
+      tint: Number($('zb-bubble-tint').value),
+      radius: Number($('zb-bubble-radius').value),
+      width: Number($('zb-bubble-width').value),
+      align: $('zb-bubble-align').getAttribute('data-left') === '1' ? 'left' : 'right',
+      customCss: $('zb-bubble-css') ? $('zb-bubble-css').value : ''
+    };
+  }
+  function setBubbleUI(b) {
+    b = b || {};
+    var preset = ['default', 'accent', 'glass', 'outline', 'flat'].indexOf(b.preset) >= 0 ? b.preset : 'default';
+    $('zb-bubble-preset').value = preset;
+    $('zb-bubble-tint').value = b.tint ?? 28; $('zb-bubble-tint-val').textContent = String(b.tint ?? 28);
+    $('zb-bubble-radius').value = b.radius ?? 12; $('zb-bubble-radius-val').textContent = String(b.radius ?? 12);
+    $('zb-bubble-width').value = b.width ?? 70; $('zb-bubble-width-val').textContent = String(b.width ?? 70);
+    var left = b.align === 'left';
+    $('zb-bubble-align').setAttribute('data-left', left ? '1' : '0');
+    $('zb-bubble-align').textContent = left ? '↔ 靠左' : '↔ 靠右';
+    var cssEl = $('zb-bubble-css');
+    // Never yank the textarea under an actively typing user — the 4s beat
+    // refresh would otherwise revert chars typed since the last push.
+    if (cssEl && typeof b.customCss === 'string' && document.activeElement !== cssEl) cssEl.value = b.customCss;
+    updateBubblePreview();
+    // Server state is authoritative: drop drag-preview inline vars (same
+    // reason as setChatSliders).
+    ['--zb-bubble-tint', '--zb-bubble-radius', '--zb-bubble-maxw', '--zb-bubble-align'].forEach(function (p) {
+      document.documentElement.style.removeProperty(p);
+    });
+  }
+  // Live preview for slider-driven fields via the same vars the injected
+  // style consumes. Preset changes can't preview locally (new rules needed);
+  // they round-trip through serve (~300ms).
+  function bubblePreview() {
+    var s = bubbleUIState();
+    var r = s.radius;
+    var rs = document.documentElement.style;
+    rs.setProperty('--zb-bubble-tint', String(s.tint / 100));
+    rs.setProperty('--zb-bubble-radius', s.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px');
+    rs.setProperty('--zb-bubble-maxw', s.width + '%');
+    rs.setProperty('--zb-bubble-align', s.align === 'left' ? 'flex-start' : 'flex-end');
+  }
+  var bubblePushTimer = null;
+  function pushBubbleLook() {
+    clearTimeout(bubblePushTimer);
+    bubblePushTimer = setTimeout(function () {
+      post('/api/config', { bubbleLook: bubbleUIState() }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  $('zb-bubble-preset').addEventListener('change', function () {
+    // Re-sync the editor window (mode badge, gate, mirror labels) on EVERY
+    // preset change — the window can be open while the dropdown on the chat
+    // page flips, and a stale badge there lies about the active mode.
+    zbWinSync();
+    zbPvSchedule();
+    pushBubbleLook();
+    // Picking 自定义 CSS opens the editor window — that is where the CSS
+    // lives now (the dropdown only selects the preset).
+    if (this.value === 'custom') zbBubbleWinOpen();
+  });
+  $('zb-bubble-align').addEventListener('click', function () {
+    var left = this.getAttribute('data-left') === '1';
+    this.setAttribute('data-left', left ? '0' : '1');
+    this.textContent = left ? '↔ 靠右' : '↔ 靠左';
+    bubblePreview();
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  [['zb-bubble-tint', 'zb-bubble-tint-val'], ['zb-bubble-radius', 'zb-bubble-radius-val'], ['zb-bubble-width', 'zb-bubble-width-val']].forEach(function (pair) {
+    $(pair[0]).addEventListener('input', function () {
+      $(pair[1]).textContent = this.value;
+      bubblePreview();
+      zbPvSchedule();
+      pushBubbleLook();
+    });
+  });
+
+  // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
+  // Every knob sits next to the preview so its effect is immediately visible:
+  // 基础参数 sliders are MIRRORS of the canonical chat-page controls (one
+  // push pipeline, both stay in lockstep), and the custom-CSS area is
+  // mode-gated — editing code means nothing under a built-in preset, so other
+  // presets get an explicit 启用 gate instead of a silently dead textarea.
+  var ZB_PRESET_LABELS = { 'default': '原生', 'accent': '主题色染色', 'glass': '毛玻璃', 'outline': '描边', 'flat': '扁平', 'custom': '自定义 CSS' };
+  function zbWinSync() {
+    var pairs = [['zb-bubble-tint', 'zb-bubble-tint-w'], ['zb-bubble-radius', 'zb-bubble-radius-w'], ['zb-bubble-width', 'zb-bubble-width-w']];
+    for (var i = 0; i < pairs.length; i++) {
+      var src = $(pairs[i][0]), dst = $(pairs[i][1]);
+      dst.value = src.value;
+      $(pairs[i][1] + '-val').textContent = src.value + (pairs[i][0] === 'zb-bubble-radius' ? 'px' : '%');
+    }
+    var pa = $('zb-bubble-align'), wa = $('zb-bubble-align-w');
+    wa.textContent = pa.textContent;
+    wa.setAttribute('data-left', pa.getAttribute('data-left'));
+    var preset = $('zb-bubble-preset').value;
+    $('zb-bubble-win-mode').textContent = ZB_PRESET_LABELS[preset] || preset;
+    var custom = preset === 'custom';
+    $('zb-bubble-css-gate').hidden = custom;
+    $('zb-bubble-css-wrap').hidden = !custom;
+    if (!custom) $('zb-bubble-gate-name').textContent = ZB_PRESET_LABELS[preset] || preset;
+  }
+  function zbBubbleWinOpen() {
+    zbWinSync();
+    $('zb-bubble-win').hidden = false;
+    updateBubblePreview(); // refresh to the current state on every open
+  }
+  function zbBubbleWinClose() {
+    $('zb-bubble-win').hidden = true;
+  }
+  // Mirrors sanitizeCustomBubbleCss (core/bubbleRecipes.ts) for the preview
+  // iframe; serve re-sanitizes before the real injection.
+  function zbPvSanitize(css) {
+    // NOTE: this lives inside a template literal — the backslash must be
+    // doubled or the generated script would read /</style/gi (broken regex).
+    css = String(css || '').slice(0, 8000)
+      .replace(/<\\/style/gi, '')
+      .replace(/@import[^;{]*[;{]?/gi, '')
+      .replace(/javascript:/gi, '');
+    return css.trim();
+  }
+  var zbPvTimer = null;
+  function zbPvSchedule() {
+    clearTimeout(zbPvTimer);
+    zbPvTimer = setTimeout(updateBubblePreview, 120);
+  }
+  /** Rebuild the preview iframe document from the CURRENT editor state — the
+   * recipe tables and var plumbing are the same ones ZCode receives, bound to
+   * the preview's own class names, so what you see is what gets applied. */
+  function updateBubblePreview() {
+    var frame = $('zb-bubble-pv-frame');
+    if (!frame) return;
+    var s = bubbleUIState();
+    var r = Math.max(2, Math.round(s.radius));
+    var corners = s.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px';
+    var body = s.preset === 'custom' ? zbPvSanitize(s.customCss) : (PV_RECIPES[s.preset] || '');
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><style>'
+      + 'html,body{margin:0;padding:0}'
+      // Approximations of the live --color-* tokens so color-mix recipes and
+      // custom styles referencing them render faithfully in the sandbox.
+      + ':root{--color-primary:#7aa2f7;--color-surface:#26262e}'
+      + 'body{font:12.5px/1.55 system-ui,sans-serif;color:#e9e9ef;padding:14px 16px;'
+      + ' background:linear-gradient(135deg,#242a3d 0%,#3a2f45 55%,#2b3550 100%)}'
+      + '.zb-chat{display:flex;flex-direction:column;gap:9px;max-width:540px;margin:0 auto}'
+      + '.zb-row{display:flex}'
+      + '.zb-row-o{justify-content:flex-start}'
+      + '.zb-bubble-row{justify-content:flex-end}'
+      + '.zb-bub{padding:7px 12px;border-radius:12px 2px 12px 12px;max-width:78%}'
+      + '.zb-o{background:#2b2b35;border-radius:2px 12px 12px 12px}'
+      + '.zb-me{background:#39435e}'
+      + ':root{--zb-bubble-tint:' + (s.tint / 100)
+      + ';--zb-bubble-radius:' + corners
+      + ';--zb-bubble-maxw:' + s.width + '%'
+      + ';--zb-bubble-align:' + (s.align === 'left' ? 'flex-start' : 'flex-end') + '}'
+      + '.zb-bubble{border-radius:var(--zb-bubble-radius)!important;max-width:var(--zb-bubble-maxw)!important}'
+      + '.zb-bubble-row{align-items:var(--zb-bubble-align)!important;justify-content:var(--zb-bubble-align)!important}'
+      + (body || '')
+      + '</style></head><body><div class="zb-chat">'
+      + '<div class="zb-row zb-row-o"><div class="zb-bub zb-o">收到,正在预览这个气泡样式。</div></div>'
+      + '<div class="zb-row zb-bubble-row"><div class="zb-bub zb-me zb-bubble">帮我把气泡换成这种效果</div></div>'
+      + '</div></body></html>';
+    frame.setAttribute('srcdoc', doc);
+  }
+  $('zb-bubble-css').addEventListener('input', function () {
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  $('zb-bubble-example').addEventListener('click', function () {
+    $('zb-bubble-css').value = ZB_BUBBLE_EXAMPLE;
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  $('zb-bubble-clear').addEventListener('click', function () {
+    $('zb-bubble-css').value = '';
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  // --- saved custom styles (我的样式): a panel-local name-and-reuse library.
+  // Lives in localStorage — it is editor UX state, not server appearance
+  // config, so the serve schema stays untouched. Clicking a chip applies the
+  // CSS and flips the preset to custom through the select's own change event,
+  // so gate/mode-badge/preview/push all run exactly as if hand-picked.
+  var ZB_STYLE_KEY = 'zcode-beautify:bubble-styles';
+  function zbStylesLoad() {
+    try {
+      var v = JSON.parse(localStorage.getItem(ZB_STYLE_KEY) || '[]');
+      if (!Array.isArray(v)) return [];
+      return v.filter(function (s) { return s && typeof s.name === 'string' && typeof s.css === 'string'; });
+    } catch (e) { return []; }
+  }
+  function zbStylesSave(list) {
+    try { localStorage.setItem(ZB_STYLE_KEY, JSON.stringify(list.slice(0, 24))); } catch (e) {}
+  }
+  function zbRenderStyleChips() {
+    var box = $('zb-bubble-style-chips');
+    if (!box) return;
+    var list = zbStylesLoad();
+    box.hidden = list.length === 0;
+    box.innerHTML = '';
+    for (var i = 0; i < list.length; i++) {
+      (function (s) {
+        var chip = document.createElement('span');
+        chip.className = 'zb-style-chip';
+        chip.setAttribute('title', '点击套用样式「' + s.name + '」');
+        var nm = document.createElement('span');
+        nm.className = 'zb-chip-name';
+        nm.textContent = s.name;
+        chip.appendChild(nm);
+        chip.addEventListener('click', function () {
+          var sel = $('zb-bubble-preset');
+          if (sel.value !== 'custom') {
+            sel.value = 'custom';
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          $('zb-bubble-css').value = s.css;
+          zbPvSchedule();
+          pushBubbleLook();
+          status('已套用样式「' + s.name + '」');
+        });
+        var del = document.createElement('span');
+        del.className = 'zb-chip-del';
+        del.textContent = '✕';
+        del.setAttribute('title', '删除样式「' + s.name + '」');
+        del.addEventListener('click', function (e) {
+          e.stopPropagation();
+          // Filter by name: zbStylesLoad() re-parses localStorage on every
+          // call, so object-identity against the closure's captured style
+          // object never matches.
+          zbStylesSave(zbStylesLoad().filter(function (x) { return x.name !== s.name; }));
+          zbRenderStyleChips();
+          status('已删除样式「' + s.name + '」');
+        });
+        chip.appendChild(del);
+        box.appendChild(chip);
+      })(list[i]);
+    }
+  }
+  $('zb-bubble-add-style').addEventListener('click', function () {
+    $('zb-bubble-style-name-row').hidden = false;
+    var inp = $('zb-bubble-style-name');
+    inp.value = '';
+    inp.placeholder = '样式名称,如:薄荷毛玻璃';
+    inp.focus();
+  });
+  $('zb-bubble-style-cancel').addEventListener('click', function () {
+    $('zb-bubble-style-name-row').hidden = true;
+  });
+  $('zb-bubble-style-save').addEventListener('click', function () {
+    var css = $('zb-bubble-css').value.trim();
+    if (!css) { status('CSS 为空,没有可保存的内容'); return; }
+    var name = $('zb-bubble-style-name').value.trim() || ('我的样式 ' + (zbStylesLoad().length + 1));
+    // Same name overwrites — renaming is the only way to duplicate on purpose.
+    var list = zbStylesLoad().filter(function (x) { return x.name !== name; });
+    list.push({ name: name, css: css });
+    zbStylesSave(list);
+    $('zb-bubble-style-name-row').hidden = true;
+    zbRenderStyleChips();
+    status('已保存样式「' + name + '」');
+  });
+  $('zb-bubble-style-name').addEventListener('keydown', function (e) {
+    // Enter saves; Esc cancels WITHOUT closing the editor window (stop the
+    // event before the document-level Esc handler sees it).
+    if (e.key === 'Enter') { e.preventDefault(); $('zb-bubble-style-save').click(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); $('zb-bubble-style-cancel').click(); }
+  });
+  zbRenderStyleChips();
+  // Window wiring: the ✏️ button opens it, ✕/完成/mask/Esc close it. Picking
+  // 自定义 CSS in the dropdown opens it too (see the change handler above).
+  $('zb-bubble-edit').addEventListener('click', zbBubbleWinOpen);
+  $('zb-bubble-win-close').addEventListener('click', zbBubbleWinClose);
+  $('zb-bubble-done').addEventListener('click', zbBubbleWinClose);
+  $('zb-bubble-win-mask').addEventListener('click', zbBubbleWinClose);
+  var zbWinEsc = function (e) {
+    if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('keydown', zbWinEsc); return; }
+    if (e.key === 'Escape' && !$('zb-bubble-win').hidden) zbBubbleWinClose();
+  };
+  document.addEventListener('keydown', zbWinEsc);
+  // Mirror controls delegate to the canonical chat-page controls: set the
+  // source value, refresh the mirror label, then fire the source's own input
+  // event so the existing pipeline (label/preview/debounced push) runs once.
+  [['zb-bubble-tint', 'zb-bubble-tint-w'], ['zb-bubble-radius', 'zb-bubble-radius-w'], ['zb-bubble-width', 'zb-bubble-width-w']].forEach(function (pair) {
+    var unit = pair[0] === 'zb-bubble-radius' ? 'px' : '%';
+    $(pair[1]).addEventListener('input', function () {
+      var src = $(pair[0]);
+      src.value = this.value;
+      $(pair[1] + '-val').textContent = this.value + unit;
+      src.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  });
+  $('zb-bubble-align-w').addEventListener('click', function () {
+    $('zb-bubble-align').click();
+    zbWinSync();
+  });
+  // Gate switch: flip the preset to custom through its own change handler so
+  // push/preview/open-sync all run exactly as if the user picked it.
+  $('zb-bubble-gate-on').addEventListener('click', function () {
+    var sel = $('zb-bubble-preset');
+    sel.value = 'custom';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  updateBubblePreview();
+
   // --- pinned theme color (🎨) ---------------------------------------------
   $('zb-pin').addEventListener('click', function () {
     apiFetch('/api/palette')
@@ -913,12 +1529,19 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   });
 
   // --- Alt+B panel shortcut -------------------------------------------------
-  document.addEventListener('keydown', function (e) {
+  // Document-level listeners survive panel rebuilds: every serve restart
+  // re-evaluates this script, and N stale generations meant N fab clicks per
+  // keypress (observed 23 — toggles cancel out by parity, so Alt+B "worked
+  // randomly"). Same generation-token guard as the hover handlers: a stale
+  // listener no-ops and unbinds itself on the first keydown it sees.
+  var zbAltB = function (e) {
+    if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('keydown', zbAltB); return; }
     if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
       e.preventDefault();
       $('zb-fab').click();
     }
-  });
+  };
+  document.addEventListener('keydown', zbAltB);
 
   var FITS = ['cover', 'contain', 'smart'];
   var FIT_LABELS = { cover: '填满裁剪', contain: '完整显示', smart: '智能适配' };
@@ -2400,21 +3023,26 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     // per-library row limits after the rebuild settles.
     setTimeout(function () { if (typeof applyLibRows === 'function') applyLibRows(); }, 350);
   }
+  var ZB_TABS = ['main', 'look', 'chat', 'sched', 'settings', 'about'];
   function switchTab(name) {
+    if (ZB_TABS.indexOf(name) < 0) name = 'main';
     var tabs = document.querySelectorAll('.zb-tab');
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].setAttribute('data-active', tabs[i].getAttribute('data-tab') === name ? '1' : '0');
     }
-    var pane = $(name === 'main' ? 'zb-tab-main' : name === 'sched' ? 'zb-tab-sched' : 'zb-tab-settings');
-    $('zb-tab-main').hidden = name !== 'main';
-    $('zb-tab-sched').hidden = name !== 'sched';
-    $('zb-tab-settings').hidden = name !== 'settings';
+    var pane = null;
+    for (var p = 0; p < ZB_TABS.length; p++) {
+      var el = $('zb-tab-' + ZB_TABS[p]);
+      el.hidden = ZB_TABS[p] !== name;
+      if (ZB_TABS[p] === name) pane = el;
+    }
     // Silk: a short fade-and-rise so the pane change reads as one motion.
     pane.classList.remove('zb-pane-in');
     void pane.offsetWidth;
     pane.classList.add('zb-pane-in');
     try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
     if (name === 'sched') loadRotation();
+    else if (name === 'about') { refresh(); updateAbout(); }
     else {
       refresh();
       if (zbLibDirty) reloadMainLists();
@@ -2427,8 +3055,63 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   function activateSavedTab() {
     var saved = 'main';
     try { saved = localStorage.getItem('zcode-beautify:tab') || 'main'; } catch (e) {}
-    switchTab(saved === 'sched' || saved === 'settings' ? saved : 'main');
+    switchTab(ZB_TABS.indexOf(saved) >= 0 ? saved : 'main');
   }
+  // Header ✕ — reuse the FAB's close path so the beat/poll cleanup runs.
+  $('zb-close').addEventListener('click', function () {
+    if (!$('zb-panel').hidden) $('zb-fab').click();
+  });
+  // Sidebar search: live-filter the nav items, like the reference sidebar.
+  $('zb-nav-search').addEventListener('input', function () {
+    var q = this.value.trim().toLowerCase();
+    var items = document.querySelectorAll('#zb-tabs .zb-tab');
+    for (var i = 0; i < items.length; i++) {
+      items[i].style.display = !q || (items[i].textContent || '').toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+    }
+  });
+
+  // --- 关于 page: plugin identity + live serve status -------------------------
+  function fmtUptime(ms) {
+    var s = Math.floor(ms / 1000);
+    if (s < 60) return s + ' 秒';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + ' 分钟';
+    return Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
+  }
+  function updateAbout() {
+    $('zb-ab-ver').textContent = 'v' + VERSION;
+    $('zb-ab-license').textContent = LICENSE;
+    $('zb-ab-author').textContent = AUTHOR;
+    $('zb-ab-api').textContent = API.replace(/^.*:/, '');
+    $('zb-ab-svc').textContent = '检测中…';
+    $('zb-ab-uptime').textContent = '—';
+    $('zb-ab-cdp').textContent = '—';
+    if (lastConfig) {
+      $('zb-ab-wp').textContent = lastConfig.wallpaperSet
+        ? (lastConfig.mediaType === 'video' ? '动态壁纸' : '图片壁纸')
+        : '未设置';
+    } else {
+      $('zb-ab-wp').textContent = '未知(切到其他页后返回可刷新)';
+    }
+    apiFetch('/api/health')
+      .then(function (r) { return r.json(); })
+      .then(function (h) {
+        $('zb-ab-svc').textContent = '运行中 · v' + (h.version || '?') + ' (pid ' + h.pid + ')';
+        if (typeof h.uptimeMs === 'number') $('zb-ab-uptime').textContent = fmtUptime(h.uptimeMs);
+        if (h.cdpPort) $('zb-ab-cdp').textContent = h.cdpPort;
+      })
+      .catch(function () {
+        $('zb-ab-svc').textContent = '未运行(仅静态信息可用)';
+      });
+  }
+  function zbCopyRepo(url, label) {
+    var fail = function () { status(label + '地址复制失败,详见 README'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () { status('已复制' + label + '地址'); }, fail);
+    } else fail();
+  }
+  $('zb-ab-copy').addEventListener('click', function () { zbCopyRepo(REPO_URL, '上游仓库'); });
+  $('zb-ab-copy-fork').addEventListener('click', function () { zbCopyRepo(FORK_URL, ' Fork 仓库'); });
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
@@ -2459,6 +3142,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     var head = $('zb-head'), panel = $('zb-panel');
     var sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
     head.addEventListener('pointerdown', function (e) {
+      // The ✕ lives inside the drag bar; capturing the pointer here would
+      // retarget its click to the bar and swallow the close.
+      if (e.target && e.target.closest && e.target.closest('#zb-close')) return;
       dragging = true; sx = e.clientX; sy = e.clientY;
       var r = panel.getBoundingClientRect(); ox = r.left; oy = r.top;
       panel.style.right = 'auto'; panel.style.bottom = 'auto';

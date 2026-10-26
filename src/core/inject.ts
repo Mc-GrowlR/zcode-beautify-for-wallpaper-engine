@@ -4,6 +4,7 @@
  */
 
 import { CdpConnection, injectIntoTarget, isUpdaterTarget, listTargets, pickRendererTargets, buildBootstrapScript, buildResetScript } from "./cdp.js";
+import { sanitizeCustomBubbleCss } from "./bubbleRecipes.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
 import { dataDir } from "./launch.js";
@@ -85,6 +86,57 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
   };
 }
 
+/**
+ * User message bubble look (聊天气泡): preset + tint/radius/width/align.
+ * "default" injects nothing — the bubble stays exactly stock. Colors never
+ * live here: the injected rules color-mix the live --color-* tokens, so a
+ * Monet re-theme restyles the bubble with zero extra work.
+ */
+export type BubblePreset = "default" | "accent" | "glass" | "outline" | "flat" | "custom";
+
+export interface BubbleLookConfig {
+  preset: BubblePreset;
+  /** Accent strength 0-100 (mix ratio into the surface background). */
+  tint: number;
+  /** Corner radius 4-24px on the three round corners; the tail stays 2px. */
+  radius: number;
+  /** Max bubble width as % of the conversation column (40-90). */
+  width: number;
+  /** Right is ZCode's stock alignment; left mirrors the tail corner too. */
+  align: "right" | "left";
+  /**
+   * User-authored CSS for preset "custom" — written against the friendly
+   * selectors .zb-bubble / .zb-bubble-row, sanitized here and rewritten to
+   * ZCode's real selectors at injection time (see core/bubbleRecipes.ts).
+   */
+  customCss?: string;
+}
+
+export const DEFAULT_BUBBLE_LOOK: BubbleLookConfig = {
+  preset: "default",
+  tint: 28,
+  radius: 12,
+  width: 70,
+  align: "right",
+};
+
+const BUBBLE_PRESETS: BubblePreset[] = ["default", "accent", "glass", "outline", "flat", "custom"];
+
+/** Clamp a partial bubble look over the defaults (unparsable fields fall back). */
+export function normalizeBubbleLook(raw?: Partial<BubbleLookConfig>): BubbleLookConfig {
+  const num = (v: unknown, min: number, max: number, dflt: number): number =>
+    typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
+  const preset = BUBBLE_PRESETS.includes(raw?.preset as BubblePreset) ? raw!.preset! : "default";
+  return {
+    preset,
+    tint: num(raw?.tint, 0, 100, DEFAULT_BUBBLE_LOOK.tint),
+    radius: num(raw?.radius, 4, 24, DEFAULT_BUBBLE_LOOK.radius),
+    width: num(raw?.width, 40, 90, DEFAULT_BUBBLE_LOOK.width),
+    align: raw?.align === "left" ? "left" : "right",
+    customCss: sanitizeCustomBubbleCss(raw?.customCss),
+  };
+}
+
 export interface BeautifyConfig {
   port: number;
   wallpaperPath?: string;
@@ -114,6 +166,8 @@ export interface BeautifyConfig {
   themeColor?: string;
   /** Zone-refined chat-area masks (聊天界面); absent = all zero. */
   chatLook?: Partial<ChatLookConfig>;
+  /** User message bubble look (聊天气泡); absent = stock ZCode bubble. */
+  bubbleLook?: Partial<BubbleLookConfig>;
   /** Hide wallpaper+panel during ZCode's startup screen (default true). */
   startupClean?: boolean;
   /** Beautify ZCode's update-status window too (default false — stays stock). */
@@ -159,6 +213,8 @@ export interface BuiltPayload {
   videoVolume: number;
   /** Zone-refined chat-area masks (聊天界面), normalized 0-100. */
   chatLook?: ChatLookConfig;
+  /** User message bubble look (聊天气泡), normalized; preset default = stock. */
+  bubbleLook?: BubbleLookConfig;
   /** Defer mounting until the ZCode startup screen is gone (default true). */
   startupClean?: boolean;
 }
@@ -218,6 +274,45 @@ html, body { background: transparent !important; }
 }`);
   }
 
+  // The prompt-queue card (data-testid="v4-queue") reserves a 28px empty strip
+  // at its bottom (pb-7) and pulls the next row up by the same 28px (-mb-7),
+  // so the queue sits behind the input card's top edge. Stock ZCode depends on
+  // the input being opaque: only the two notches outside its rounded corners
+  // show queue surface, which makes queue + input read as one card. With our
+  // translucent input that strip shows through as a dark band; masking the
+  // whole strip away instead leaves a hard cut between the two cards.
+  //
+  // Keep queue paint only where the stock wrap actually shows: the corner
+  // notches around the input's two top rounded corners.
+  //   1. a vertical mask clears the 28px overlap strip;
+  //   2. two 16x16 radial patches paint it back outside each corner arc
+  //      (transparent inside the radius, opaque outside).
+  // Layers composite additively. `calc(100% - (overlap - radius))` is the
+  // patch's top offset: a mask-position percentage aligns the patch's FAR edge,
+  // so 100% already sits `radius` above the bottom; subtracting the remaining
+  // 12px lands the patch exactly on the input's top edge. Both numbers are
+  // structural — rounded-2xl input (16px) and pb-7/-mb-7 queue (28px) — and
+  // are exposed as variables for future ZCode versions.
+  parts.push(`[data-testid="v4-queue"] {
+  --zb-queue-overlap: 28px;
+  --zb-queue-radius: 16px;
+  --zb-queue-wrap-y: calc(100% - (var(--zb-queue-overlap) - var(--zb-queue-radius)));
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 calc(100% - var(--zb-queue-overlap)), transparent calc(100% - var(--zb-queue-overlap))),
+    radial-gradient(circle at 100% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius)),
+    radial-gradient(circle at 0% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius));
+  -webkit-mask-size: 100% 100%, var(--zb-queue-radius) var(--zb-queue-radius), var(--zb-queue-radius) var(--zb-queue-radius);
+  -webkit-mask-position: 0 0, 0 var(--zb-queue-wrap-y), 100% var(--zb-queue-wrap-y);
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    linear-gradient(to bottom, #000 calc(100% - var(--zb-queue-overlap)), transparent calc(100% - var(--zb-queue-overlap))),
+    radial-gradient(circle at 100% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius)),
+    radial-gradient(circle at 0% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius));
+  mask-size: 100% 100%, var(--zb-queue-radius) var(--zb-queue-radius), var(--zb-queue-radius) var(--zb-queue-radius);
+  mask-position: 0 0, 0 var(--zb-queue-wrap-y), 100% var(--zb-queue-wrap-y);
+  mask-repeat: no-repeat;
+}`);
+
   if (assets) {
     // Monet recolors the UI from the wallpaper; the wallpaper toggle only
     // decides whether the picture is visible at all. With Monet off we still
@@ -263,6 +358,7 @@ html, body { background: transparent !important; }
     kenBurns,
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config.chatLook),
+    bubbleLook: normalizeBubbleLook(config.bubbleLook),
     startupClean: config.startupClean !== false,
   };
 }

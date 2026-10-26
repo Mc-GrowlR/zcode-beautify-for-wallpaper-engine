@@ -48,6 +48,38 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// dist/core/bubbleRecipes.js
+function bubbleRecipes(sel) {
+  return {
+    accent: sel + "{background:color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100%),var(--color-surface))!important;border:1px solid color-mix(in srgb,var(--color-primary) 55%,transparent)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
+    glass: sel + "{background:color-mix(in srgb,var(--color-surface) 55%,transparent)!important;border:1px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*60% + 15%),transparent)!important;backdrop-filter:blur(8px)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
+    outline: sel + "{background:transparent!important;border:1.5px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100% + 20%),transparent)!important}",
+    flat: sel + "{background:var(--color-surface)!important;border-color:transparent!important}"
+  };
+}
+function sanitizeCustomBubbleCss(raw) {
+  if (typeof raw !== "string")
+    return "";
+  let css = raw.slice(0, CUSTOM_CSS_MAX);
+  css = css.replace(/<\/style/gi, "");
+  css = css.replace(/@import[^;{]*[;{]?/gi, "");
+  css = css.replace(/javascript:/gi, "");
+  return css.trim();
+}
+function rewriteCustomBubbleCss(css, sel, rowSel) {
+  return css.replace(/\.zb-bubble-row(?![\w-])/g, rowSel).replace(/\.zb-bubble(?![\w-])/g, sel);
+}
+var BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL, BUBBLE_SELECTOR_PREVIEW, CUSTOM_CSS_MAX;
+var init_bubbleRecipes = __esm({
+  "dist/core/bubbleRecipes.js"() {
+    "use strict";
+    BUBBLE_SELECTOR_REAL = "[data-v4-user-input-bubble]";
+    BUBBLE_ROW_SELECTOR_REAL = '[class~="group/user-row"]';
+    BUBBLE_SELECTOR_PREVIEW = ".zb-bubble";
+    CUSTOM_CSS_MAX = 8e3;
+  }
+});
+
 // dist/core/cdp.js
 var cdp_exports = {};
 __export(cdp_exports, {
@@ -86,10 +118,13 @@ async function injectIntoTarget(target, payload) {
     await conn.send("Runtime.enable");
     const bootstrap = buildBootstrapScript(payload);
     await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: bootstrap });
-    await conn.send("Runtime.evaluate", {
+    const evalResult = await conn.send("Runtime.evaluate", {
       expression: bootstrap,
       returnByValue: true
     });
+    if (evalResult?.exceptionDetails) {
+      throw new Error(`bootstrap threw in "${target.title}": ${JSON.stringify(evalResult.exceptionDetails).slice(0, 400)}`);
+    }
   } finally {
     conn.close();
   }
@@ -115,6 +150,20 @@ function buildBootstrapScript(payload) {
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0 }))};
+  var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
+  // Bubble recipe tables must be initialized HERE, before the fast paths run:
+  // applyBubbleLook() is reachable from the volume fast path at the top of
+  // this function body, and var initializers down below would still be
+  // undefined at that point (undefined[preset] throws and kills the whole
+  // bootstrap silently).
+  var BUB = '[data-v4-user-input-bubble]';
+  var BUB_ROW = '[class~="group/user-row"]';
+  // --zb-bubble-tint holds 0-1; the mixes scale it back to a percentage.
+  // Recipes + custom CSS are baked serve-side from core/bubbleRecipes.ts so
+  // this table and the panel preview share one source of truth. The custom
+  // CSS arrives already sanitized and rewritten to the real selectors.
+  var RECIPES = ${JSON.stringify(bubbleRecipes(BUBBLE_SELECTOR_REAL))};
+  var CUSTOM_CSS = ${JSON.stringify(rewriteCustomBubbleCss(payload.bubbleLook?.customCss ?? "", BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL))};
   // Volume-only fast path: changing just the audio must not rebuild the
   // video (instant switch would retire + re-create the decoder). VOL must be
   // declared ABOVE this block \u2014 it used to sit below the fast path, which
@@ -135,6 +184,10 @@ function buildBootstrapScript(payload) {
       window.__zcodeBeautify.chatKey = CHAT;
       applyChatLook();
     }
+    if (window.__zcodeBeautify.bubbleKey !== BUBBLE) {
+      window.__zcodeBeautify.bubbleKey = BUBBLE;
+      applyBubbleLook();
+    }
     return;
   }
 
@@ -148,10 +201,27 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.wpImg === WP_IMG
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
     if (chatOnly) return;
+  }
+
+  // Bubble-look fast path (same shape as chat): the bubble rules live in
+  // their own style element driven by --zb-bubble-* vars, so preset/slider
+  // tweaks never touch the wallpaper layer.
+  if (window.__zcodeBeautify.bubbleKey !== BUBBLE) {
+    var bubbleOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.bubbleKey = BUBBLE;
+    applyBubbleLook();
+    if (bubbleOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -160,7 +230,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -432,6 +502,8 @@ function buildBootstrapScript(payload) {
   // All are static composited layers; no per-frame cost.
   window.__zcodeBeautify.chatKey = CHAT;
   applyChatLook();
+  window.__zcodeBeautify.bubbleKey = BUBBLE;
+  applyBubbleLook();
 
   function applyChatLook() {
     var C;
@@ -463,7 +535,7 @@ function buildBootstrapScript(payload) {
       // The conversation scroller carries distinctive Tailwind arbitrary
       // classes; .zb-chat-col is the version-proof fallback (markChatCol).
       + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
-      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';
+      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';;
     if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
     if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
     document.documentElement.appendChild(fr);
@@ -495,6 +567,39 @@ function buildBootstrapScript(payload) {
       }
       el = el.parentElement;
     }
+  }
+
+  // --- user message bubble look (\u804A\u5929\u6C14\u6CE1) -----------------------------------
+  // Targets the stable v4 data attribute (not Tailwind class hashes) and
+  // color-mixes the live --color-* tokens, so a Monet re-theme restyles the
+  // bubble with no re-injection. preset "default" removes the rules entirely
+  // (stock bubble); unknown presets degrade the same way. BUB/BUB_ROW/RECIPES
+  // are declared at the TOP of this body (fast-path ordering \u2014 see there).
+  function applyBubbleLook() {
+    var B;
+    try { B = JSON.parse(BUBBLE); } catch (e) { return; }
+    var st = document.getElementById(MARKER + '-bubble-style');
+    // "custom" keeps the style even with empty CSS: the base rules below
+    // (radius/max-width/alignment) still apply, driven by the sliders.
+    if (!B || B.preset === 'default' || (B.preset !== 'custom' && !RECIPES[B.preset])) {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-bubble-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var r = Math.max(2, Math.round(B.radius || 12));
+    // Tail keeps its stock 2px corner on the aligned edge; left mirrors it.
+    var corners = B.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px';
+    st.textContent = ':root{--zb-bubble-tint:' + (Math.max(0, Math.min(100, B.tint || 0)) / 100)
+      + ';--zb-bubble-radius:' + corners
+      + ';--zb-bubble-maxw:' + Math.max(40, Math.min(90, B.width || 70)) + '%'
+      + ';--zb-bubble-align:' + (B.align === 'left' ? 'flex-start' : 'flex-end') + '}'
+      + BUB + '{border-radius:var(--zb-bubble-radius)!important;max-width:var(--zb-bubble-maxw)!important}'
+      + BUB_ROW + '{align-items:var(--zb-bubble-align)!important}'
+      + (B.preset === 'custom' ? CUSTOM_CSS : RECIPES[B.preset]);
   }
 
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
@@ -584,12 +689,14 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-wallpaper')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   if (window.__zcodeBeautify) {
     window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
+    window.__zcodeBeautify.bubbleKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -601,6 +708,7 @@ var CdpError, CdpConnection;
 var init_cdp = __esm({
   "dist/core/cdp.js"() {
     "use strict";
+    init_bubbleRecipes();
     CdpError = class extends Error {
     };
     CdpConnection = class _CdpConnection {
@@ -110423,6 +110531,18 @@ function normalizeChatLook(raw) {
     frost: pct(raw?.frost)
   };
 }
+function normalizeBubbleLook(raw) {
+  const num = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
+  const preset = BUBBLE_PRESETS.includes(raw?.preset) ? raw.preset : "default";
+  return {
+    preset,
+    tint: num(raw?.tint, 0, 100, DEFAULT_BUBBLE_LOOK.tint),
+    radius: num(raw?.radius, 4, 24, DEFAULT_BUBBLE_LOOK.radius),
+    width: num(raw?.width, 40, 90, DEFAULT_BUBBLE_LOOK.width),
+    align: raw?.align === "left" ? "left" : "right",
+    customCss: sanitizeCustomBubbleCss(raw?.customCss)
+  };
+}
 function activePlanTransition(rotation) {
   const plans = rotation?.plans;
   if (!plans?.length)
@@ -110471,6 +110591,25 @@ html, body { background: transparent !important; }
   background: rgb(0 0 0 / var(--zcode-beautify-dim, ${config.dim / 100}));
 }`);
   }
+  parts.push(`[data-testid="v4-queue"] {
+  --zb-queue-overlap: 28px;
+  --zb-queue-radius: 16px;
+  --zb-queue-wrap-y: calc(100% - (var(--zb-queue-overlap) - var(--zb-queue-radius)));
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 calc(100% - var(--zb-queue-overlap)), transparent calc(100% - var(--zb-queue-overlap))),
+    radial-gradient(circle at 100% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius)),
+    radial-gradient(circle at 0% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius));
+  -webkit-mask-size: 100% 100%, var(--zb-queue-radius) var(--zb-queue-radius), var(--zb-queue-radius) var(--zb-queue-radius);
+  -webkit-mask-position: 0 0, 0 var(--zb-queue-wrap-y), 100% var(--zb-queue-wrap-y);
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    linear-gradient(to bottom, #000 calc(100% - var(--zb-queue-overlap)), transparent calc(100% - var(--zb-queue-overlap))),
+    radial-gradient(circle at 100% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius)),
+    radial-gradient(circle at 0% 100%, transparent calc(var(--zb-queue-radius) - 1px), #000 var(--zb-queue-radius));
+  mask-size: 100% 100%, var(--zb-queue-radius) var(--zb-queue-radius), var(--zb-queue-radius) var(--zb-queue-radius);
+  mask-position: 0 0, 0 var(--zb-queue-wrap-y), 100% var(--zb-queue-wrap-y);
+  mask-repeat: no-repeat;
+}`);
   if (assets) {
     if (config.monet) {
       parts.push(buildVariableOverrides(assets.theme, {
@@ -110504,6 +110643,7 @@ html, body { background: transparent !important; }
     kenBurns,
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config.chatLook),
+    bubbleLook: normalizeBubbleLook(config.bubbleLook),
     startupClean: config.startupClean !== false
   };
 }
@@ -110540,14 +110680,23 @@ async function resetZCode(port) {
   }
   return count;
 }
-var DEFAULT_CONFIG;
+var DEFAULT_BUBBLE_LOOK, BUBBLE_PRESETS, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
     init_cdp();
+    init_bubbleRecipes();
     init_monet();
     init_tokens();
     init_launch();
+    DEFAULT_BUBBLE_LOOK = {
+      preset: "default",
+      tint: 28,
+      radius: 12,
+      width: 70,
+      align: "right"
+    };
+    BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
     DEFAULT_CONFIG = {
       port: 9222,
       blur: 0,
@@ -111743,6 +111892,7 @@ __export(session_exports, {
   applyColorsOnly: () => applyColorsOnly,
   applySceneWallpaper: () => applySceneWallpaper,
   applyWallpaper: () => applyWallpaper,
+  baseConfig: () => baseConfig,
   buildPayloadFromConfig: () => buildPayloadFromConfig,
   getInstallGuide: () => getInstallGuide,
   reapplyStored: () => reapplyStored,
@@ -111797,7 +111947,11 @@ function baseConfig(opts, stored) {
     dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
     monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
     wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
-    fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit
+    fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
+    // Partial bubble patches merge over the stored look so callers (MCP
+    // apply_options / the bubble command) can change one aspect — radius only,
+    // preset only — without re-sending (and resetting) the rest.
+    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -112034,6 +112188,19 @@ var init_launchers = __esm({
   }
 });
 
+// dist/version.js
+var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
+var init_version = __esm({
+  "dist/version.js"() {
+    "use strict";
+    VERSION = "0.4.4";
+    REPO_URL = "https://github.com/Logocceai/zcode-beautify";
+    FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
+    AUTHOR = "Logocceai";
+    LICENSE = "MIT";
+  }
+});
+
 // dist/panel/panelScript.js
 function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   const api = `http://127.0.0.1:${apiPort}`;
@@ -112041,6 +112208,24 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   var API = ${JSON.stringify(api)};
   var TOKEN = ${JSON.stringify(apiToken)};
   var STARTUP_CLEAN = ${JSON.stringify(startupClean !== false)};
+  var VERSION = ${JSON.stringify(VERSION)};
+  var REPO_URL = ${JSON.stringify(REPO_URL)};
+  var FORK_URL = ${JSON.stringify(FORK_URL)};
+  var AUTHOR = ${JSON.stringify(AUTHOR)};
+  var LICENSE = ${JSON.stringify(LICENSE)};
+  // Preview recipes mirror serve's injection table (core/bubbleRecipes.ts):
+  // same CSS, but bound to the PREVIEW class names the iframe uses, so a
+  // built-in preset previews identically to how it lands in ZCode.
+  var PV_RECIPES = ${JSON.stringify(bubbleRecipes(BUBBLE_SELECTOR_PREVIEW))};
+  var ZB_BUBBLE_EXAMPLE = ${JSON.stringify(`.zb-bubble {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-primary) calc(var(--zb-bubble-tint) * 100%), transparent),
+    transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 60%, transparent) !important;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .35) !important;
+  backdrop-filter: blur(10px);
+}
+.zb-bubble-row { gap: 4px; }`)};
   /** Authenticated fetch: every API call carries the per-start token.
    * Non-2xx responses REJECT \u2014 a 401 body like {"error":...} otherwise
    * parses as valid data (undefined fields) and quietly poisons every
@@ -112093,61 +112278,221 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
       ' display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px);',
       ' box-shadow: 0 2px 12px rgba(0,0,0,.35); user-select: none; font-size: 15px; line-height: 1; }',
     '#zb-fab:hover { background: rgba(52,52,60,.85); }',
-    '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: 264px; padding: 0 0 10px;',
-      // A panel taller than the window used to overflow past the screen edge;
-      // it now caps at the viewport and scrolls inside (slim scrollbar).
-      ' max-height: calc(100vh - 68px); overflow-y: auto; overscroll-behavior: contain;',
-      ' background: rgba(24,24,30,.88); border: 1px solid rgba(255,255,255,.12); border-radius: 12px;',
-      ' backdrop-filter: blur(16px); box-shadow: 0 8px 32px rgba(0,0,0,.45); user-select: none; }',
-    '#zb-panel::-webkit-scrollbar { width: 5px; }',
-    '#zb-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
+    // Window shell: sidebar + content settings window (the reference layout),
+    // still one floating draggable panel over ZCode. Only the body column
+    // scrolls, so the sidebar stays put.
+    '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: min(680px, calc(100vw - 36px));',
+      // FIXED height (not max-height): every settings page renders in the
+      // same-size window \u2014 switching tabs must not resize the panel.
+      ' height: min(620px, calc(100vh - 68px)); display: flex; flex-direction: column; padding: 0;',
+      ' background: rgba(22,22,28,.92); border: 1px solid rgba(255,255,255,.12); border-radius: 14px;',
+      ' backdrop-filter: blur(22px); box-shadow: 0 12px 44px rgba(0,0,0,.5); user-select: none; overflow: hidden; }',
     '#zb-panel[hidden] { display: none; }',
-    '#zb-head { padding: 9px 12px; font-weight: 600; cursor: move; border-bottom: 1px solid rgba(255,255,255,.1);',
-      ' display: flex; justify-content: space-between; align-items: center; }',
-    '#zb-body { padding: 10px 12px 0; }',
-    '#zb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }',
-    '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);',
-      ' border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }',
-    '.zb-card-title { font-size: 11px; opacity: .6; margin-bottom: 5px; }',
-    '.zb-card .zb-row:last-child, .zb-card .zb-actions:last-child { margin-bottom: 0; }',
-    // Collapsible cards (\u58C1\u7EB8\u5E93): clicking the title folds the body. The
-    // grid-rows 1fr\u21920fr trick animates to any content height smoothly.
-    '.zb-collapsible .zb-card-title { display: flex; justify-content: space-between; align-items: center;',
-      ' cursor: pointer; user-select: none; margin-bottom: 0; padding-bottom: 7px; }',
+    '#zb-head { flex: none; height: 40px; padding: 0 8px 0 16px; font-weight: 600; font-size: 13px; cursor: move;',
+      ' border-bottom: 1px solid rgba(255,255,255,.09); display: flex; justify-content: space-between; align-items: center; }',
+    '#zb-head .zb-head-sub { font-weight: 400; font-size: 11px; opacity: .5; margin-left: 8px; }',
+    '#zb-close { width: 28px; height: 28px; border-radius: 7px; background: none; border: none; color: inherit;',
+      ' opacity: .55; font-size: 14px; line-height: 1; cursor: pointer; }',
+    '#zb-close:hover { opacity: 1; background: rgba(255,255,255,.1); }',
+    '#zb-mid { flex: 1; min-height: 0; display: flex; }',
+    // Sidebar: brand, search, nav. The selected item carries an accent bar on
+    // its left edge (the reference's selection bar, in our blue).
+    '#zb-side { flex: none; width: 158px; display: flex; flex-direction: column; gap: 10px; padding: 12px 10px;',
+      ' background: rgba(0,0,0,.2); border-right: 1px solid rgba(255,255,255,.07); }',
+    '#zb-brand { display: flex; align-items: center; gap: 7px; padding: 0 4px; font-size: 15px; font-weight: 700;',
+      ' color: #9db8ff; }',
+    '#zb-search { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px;',
+      ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); }',
+    '#zb-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: inherit;',
+      ' font-size: 12px; padding: 0; }',
+    '#zb-search input::placeholder { color: rgba(255,255,255,.35); }',
+    '#zb-search .zb-search-ico { opacity: .45; font-size: 11px; flex: none; }',
+    '#zb-tabs { display: flex; flex-direction: column; gap: 2px; flex: 1; }',
+    // \u5173\u4E8E sits at the BOTTOM of the sidebar, like the reference layout.
+    '#zb-tabs .zb-tab[data-tab="about"] { margin-top: auto; }',
+    '.zb-tab { position: relative; display: flex; align-items: center; gap: 9px; text-align: left; padding: 8px 10px;',
+      ' border-radius: 8px; cursor: pointer; background: none; border: none; color: inherit; font-size: 12.5px;',
+      ' opacity: .75; transition: background .12s ease, opacity .12s ease; }',
+    '.zb-tab:hover { background: rgba(255,255,255,.07); opacity: 1; }',
+    '.zb-tab .zb-ico { flex: none; width: 18px; text-align: center; font-size: 14px; }',
+    '.zb-tab[data-active="1"] { background: rgba(122,162,247,.16); opacity: 1; color: #dbe6ff; font-weight: 600; }',
+    '.zb-tab[data-active="1"]::before { content: ""; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px;',
+      ' border-radius: 2px; background: #7aa2f7; }',
+    '#zb-tab-main.zb-pane-in, #zb-tab-look.zb-pane-in, #zb-tab-chat.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in, #zb-tab-about.zb-pane-in { animation: zb-pane-in 150ms ease; }',
+    '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
+    '#zb-body { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 16px;',
+      ' display: flex; flex-direction: column; }',
+    '#zb-body::-webkit-scrollbar { width: 5px; }',
+    '#zb-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
+    // A block = section label sitting ABOVE its card (the reference layout).
+    '.zb-block { margin-bottom: 14px; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child { margin-bottom: 0; }',
+    // Fixed-height window + short page = leftover blank under the last card.
+    // Stretch the visible pane's LAST block (and its last card) to fill the
+    // column so the card surface runs to the bottom edge instead of raw empty
+    // space. (Blocks sit inside pane divs, not directly under #zb-body \u2014 and
+    // :not([hidden]) keeps display:flex from un-hiding the inactive panes.)
+    // Pages taller than the window keep scrolling \u2014 flex-grow only claims
+    // leftover space.
+    '[id^="zb-tab-"]:not([hidden]) { flex: 1; display: flex; flex-direction: column; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child { flex: 1; display: flex; flex-direction: column; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child .zb-collapse-wrap { flex: 1; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child .zb-collapse-inner { display: flex; flex-direction: column; flex: 1; }',
+    '[id^="zb-tab-"]:not([hidden]) > .zb-block:last-child .zb-card:last-child { flex: 1; }',
+    '.zb-block-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600;',
+      ' opacity: .55; margin: 0 2px 7px; }',
+    '.zb-block-title .zb-fold { margin-left: auto; }',
+    '.zb-sub-title { font-size: 11px; opacity: .45; margin: 0 2px 6px; }',
+    // About page: centered hero + plain info rows.
+    '.zb-ab-hero { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px 0 16px; }',
+    '.zb-ab-hero .zb-ab-logo { font-size: 38px; line-height: 1; filter: saturate(1.2); }',
+    '.zb-ab-hero .zb-ab-name { font-size: 16px; font-weight: 700; letter-spacing: .3px; }',
+    '.zb-ab-hero .zb-ab-ver { font-size: 11px; padding: 2px 10px; border-radius: 999px;',
+      ' background: rgba(122,162,247,.16); border: 1px solid rgba(122,162,247,.4); color: #dbe6ff; }',
+    '.zb-ab-hero .zb-ab-tag { font-size: 11px; opacity: .55; text-align: center; }',
+    '.zb-set .zb-set-val { font-size: 12px; opacity: .75; text-align: right; max-width: 55%;',
+      ' overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    // Repo rows stack: name/sub on line 1, full-width URL + copy button on
+    // line 2 (fork URLs are long \u2014 inline they squeeze the label column).
+    '.zb-ab-repo { flex-wrap: wrap; row-gap: 5px; }',
+    '.zb-ab-repo .zb-set-main { flex: 1 1 100%; }',
+    '.zb-ab-repo .zb-ctrl { flex: 1 1 100%; min-width: 0; justify-content: flex-end; }',
+    '.zb-ab-repo .zb-set-val { flex: 1 1 auto; min-width: 0; max-width: none; text-align: left;',
+      ' font-size: 11.5px; letter-spacing: .2px; }',
+    '.zb-ab-tips { font-size: 11.5px; line-height: 1.9; opacity: .8; padding: 10px 0; user-select: text; }',
+    '.zb-ab-tips b { font-weight: 600; opacity: 1; }',
+    // Bubble style editor WINDOW (modal, opened by the \u270F\uFE0F button or by
+    // picking \u81EA\u5B9A\u4E49 CSS in the preset dropdown). The preview iframe and CSS
+    // textarea live here; user CSS cannot leak into the panel or ZCode (style
+    // sheets never cross documents) and scripts inside the sandboxed iframe
+    // are dead (the sandbox grants no script permission). The sandbox keeps
+    // allow-same-origin \u2014 NOT an empty sandbox: this Electron renderer never
+    // commits an opaque-origin srcdoc document, so an empty sandbox leaves
+    // the frame tree (and the preview) blank forever. Verified live via CDP
+    // (2026-10-24): allow-same-origin commits the srcdoc AND still blocks
+    // script execution.
+    '#zb-bubble-win { position: fixed; inset: 0; z-index: 2147483647; display: flex;',
+      ' align-items: center; justify-content: center; }',
+    '#zb-bubble-win[hidden] { display: none; }',
+    '#zb-bubble-win-mask { position: absolute; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }',
+    '#zb-bubble-win-card { position: relative; width: min(600px, calc(100vw - 48px));',
+      ' max-height: calc(100vh - 80px); display: flex; flex-direction: column; overflow-y: auto;',
+      ' background: rgba(22,22,28,.97); border: 1px solid rgba(255,255,255,.14); border-radius: 14px;',
+      ' padding: 14px 16px; box-shadow: 0 16px 56px rgba(0,0,0,.55); user-select: none; }',
+    '#zb-bubble-win-head { display: flex; align-items: center; justify-content: space-between;',
+      ' font-size: 13px; font-weight: 600; margin-bottom: 8px; }',
+    '#zb-bubble-win-close { width: 28px; height: 28px; border-radius: 7px; background: none; border: none;',
+      ' color: inherit; opacity: .55; font-size: 14px; line-height: 1; cursor: pointer; }',
+    '#zb-bubble-win-close:hover { opacity: 1; background: rgba(255,255,255,.1); }',
+    // Labeled sections: each block states WHAT it affects, so controls read
+    // against the preview above them instead of a dense hint paragraph.
+    '.zb-win-sec { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; margin: 12px 0 7px; }',
+    '.zb-win-sec .zb-win-sec-sub { font-weight: 400; font-size: 11px; opacity: .5; }',
+    '.zb-win-sec .zb-win-mode { margin-left: auto; font-size: 11px; font-weight: 500; padding: 2px 9px;',
+      ' border-radius: 999px; background: rgba(122,162,247,.16); border: 1px solid rgba(122,162,247,.4); color: #dbe6ff; }',
+    // Mirror slider rows (\u57FA\u7840\u53C2\u6570): delegate to the canonical chat-page sliders.
+    '.zb-wrow { display: flex; align-items: center; gap: 10px; padding: 4px 0; }',
+    '.zb-wrow > span:first-child { flex: none; width: 62px; font-size: 12px; opacity: .85; }',
+    '.zb-wrow input[type=range] { flex: 1; min-width: 60px; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
+    '.zb-wrow .zb-val { flex: none; min-width: 46px; text-align: right; font-size: 11.5px; opacity: .8;',
+      ' font-variant-numeric: tabular-nums; }',
+    '.zb-wrow .zb-wrow-sub { flex: 1; text-align: right; font-size: 11px; opacity: .45; }',
+    // Mode gate: custom code is a no-op under built-in presets \u2014 say so and
+    // offer the explicit switch instead of a silently dead textarea.
+    '#zb-bubble-css-gate { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px;',
+      ' border-radius: 8px; background: rgba(255,255,255,.05); border: 1px dashed rgba(255,255,255,.22);',
+      ' font-size: 11.5px; opacity: .9; }',
+    '#zb-bubble-css-gate[hidden] { display: none; }',
+    '#zb-bubble-css-gate .zb-btn { margin-left: auto; flex: none; }',
+    '.zb-win-foot { font-size: 11px; opacity: .45; text-align: center; margin-top: 8px; }',
+    '#zb-bubble-win-card #zb-bubble-pv-frame { display: block; width: 100%; height: 150px; border: none;',
+      ' border-radius: 8px; background: transparent; margin-bottom: 2px; }',
+    '#zb-bubble-win-card .zb-actions { padding: 10px 0 0; justify-content: flex-end; }',
+    '#zb-bubble-css { display: block; width: 100%; min-height: 150px; resize: vertical; padding: 8px 10px;',
+      ' border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.35); color: #dce4f5;',
+      ' font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px; line-height: 1.55;',
+      ' outline: none; user-select: text; white-space: pre; }',
+    '#zb-bubble-css:focus { border-color: rgba(122,162,247,.6); }',
+    // Saved custom styles (\u6211\u7684\u6837\u5F0F): name-entry row + chip list below the
+    // textarea. Both are display:flex containers, so each needs the explicit
+    // [hidden] guard \u2014 author display beats the UA hidden rule otherwise.
+    '#zb-bubble-style-name-row[hidden], #zb-bubble-style-chips[hidden] { display: none; }',
+    '#zb-bubble-style-name { flex: 1; min-width: 0; padding: 5px 9px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.16); background: rgba(0,0,0,.35); color: #dce4f5;',
+      ' font-size: 12px; outline: none; user-select: text; }',
+    '#zb-bubble-style-name:focus { border-color: rgba(122,162,247,.6); }',
+    '#zb-bubble-style-name::placeholder { color: rgba(255,255,255,.35); }',
+    '#zb-bubble-style-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }',
+    '.zb-style-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 9px;',
+      ' border-radius: 999px; background: rgba(122,162,247,.14); border: 1px solid rgba(122,162,247,.4);',
+      ' color: #dbe6ff; font-size: 11.5px; cursor: pointer; user-select: none; }',
+    '.zb-style-chip:hover { background: rgba(122,162,247,.28); }',
+    '.zb-style-chip .zb-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    '.zb-style-chip .zb-chip-del { flex: none; width: 14px; height: 14px; line-height: 13px; text-align: center;',
+      ' border-radius: 50%; font-size: 10px; opacity: .5; }',
+    '.zb-style-chip .zb-chip-del:hover { opacity: 1; background: rgba(255,255,255,.2); }',
+    '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08);',
+      ' border-radius: 12px; padding: 2px 14px; }',
+    '.zb-card .zb-set:last-child, .zb-card .zb-actions:last-child, .zb-card .zb-import-row:last-child { padding-bottom: 10px; }',
+    // Collapsible blocks (\u58C1\u7EB8\u5E93/\u663E\u793A\u8C03\u8282): clicking the section label folds
+    // the card body. The grid-rows 1fr\u21920fr trick animates to any height.
+    '.zb-collapsible .zb-block-title { cursor: pointer; user-select: none; }',
     '.zb-collapse-wrap { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .18s ease; }',
     '.zb-collapse-wrap > .zb-collapse-inner { overflow: hidden; min-height: 0; }',
     '.zb-collapsed .zb-collapse-wrap { grid-template-rows: 0fr; }',
-    '.zb-collapsed .zb-card-title { padding-bottom: 0; }',
-    '.zb-fold { width: 22px; height: 18px; border-radius: 5px; background: rgba(255,255,255,.09);',
+    // Collapsed = the card chrome folds away too, leaving just the label row.
+    '.zb-collapsed .zb-card { border-color: transparent; background: none; padding-top: 0; padding-bottom: 0; }',
+    '.zb-fold { width: 20px; height: 17px; border-radius: 5px; background: rgba(255,255,255,.09);',
       ' border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center;',
       ' font-size: 10px; line-height: 1; color: inherit; flex: none;',
       ' transition: transform .15s ease, background .15s ease, border-color .15s ease; }',
-    '.zb-collapsible .zb-card-title:hover .zb-fold { background: rgba(122,162,247,.35); border-color: rgba(122,162,247,.6); }',
+    '.zb-collapsible .zb-block-title:hover .zb-fold { background: rgba(122,162,247,.35); border-color: rgba(122,162,247,.6); }',
     // Collapsed = arrow rotated right AND the chip lights up blue \u2014 the
-    // direction alone was too subtle to tell collapsed cards apart.
+    // direction alone was too subtle to tell collapsed blocks apart.
     '.zb-collapsed .zb-fold { transform: rotate(-90deg); background: rgba(122,162,247,.5);',
       ' border-color: rgba(122,162,247,.9); color: #d6e2ff; }',
-    '.zb-tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; cursor: pointer;',
-      ' background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: inherit; font-size: 11px; }',
-    '.zb-tab:hover { background: rgba(255,255,255,.12); }',
-    '.zb-tab[data-active="1"] { background: rgba(122,162,247,.3); border-color: rgba(122,162,247,.6); }',
-    '#zb-tab-main.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in { animation: zb-pane-in 150ms ease; }',
-    '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
-    '.zb-row { margin-bottom: 6px; }',
-    '.zb-row label { display: flex; justify-content: space-between; margin-bottom: 2px; opacity: .85; }',
+    // Settings row: label (name + optional sub) on the left, control on the
+    // right \u2014 the row pattern the whole reference panel is built from.
+    '.zb-set { display: flex; align-items: center; gap: 12px; padding: 9px 0; }',
+    '.zb-set + .zb-set, .zb-set + .zb-sched-mode, .zb-sched-mode + .zb-set { border-top: 1px solid rgba(255,255,255,.06); }',
+    '.zb-set-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }',
+    '.zb-set-name { font-size: 12.5px; }',
+    '.zb-set-sub { font-size: 11px; opacity: .5; line-height: 1.45; }',
+    '.zb-ctrl { flex: none; display: flex; align-items: center; gap: 8px; }',
+    // Toggle switch (reference-style pill), used via <label class="zb-sw">.
+    '.zb-sw { display: inline-flex; align-items: center; cursor: pointer; flex: none; }',
+    '.zb-sw input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 34px; height: 20px; margin: 0;',
+      ' border-radius: 999px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.22);',
+      ' position: relative; cursor: pointer; outline: none; transition: background .15s ease, border-color .15s ease; }',
+    '.zb-sw input[type=checkbox]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;',
+      ' border-radius: 50%; background: #cfd3dc; transition: transform .15s ease, background .15s ease; }',
+    '.zb-sw input[type=checkbox]:checked { background: rgba(122,162,247,.85); border-color: rgba(122,162,247,.9); }',
+    '.zb-sw input[type=checkbox]:checked::after { transform: translateX(14px); background: #fff; }',
+    // Slider row: label left, track fills the middle, value pinned right.
     '#zb-panel input[type=range] { width: 100%; accent-color: #7aa2f7; height: 18px; margin: 0; cursor: pointer; }',
-    '.zb-toggles { display: flex; justify-content: center; gap: 16px; }',
-    '.zb-toggles label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; white-space: nowrap; }',
-    '.zb-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }',
+    '.zb-slide input[type=range] { flex: 1; min-width: 60px; width: auto; }',
+    '.zb-set .zb-val { flex: none; min-width: 48px; text-align: right; font-size: 11.5px; opacity: .8;',
+      ' font-variant-numeric: tabular-nums; }',
+    // Shared control chrome for selects / time / number inputs inside rows.
+    '.zb-set select, .zb-sched-mode select, .zb-sched-plan select, .zb-sched-row select { padding: 4px 8px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 12px;',
+      ' outline: none; color-scheme: dark; cursor: pointer; }',
+    '.zb-set input[type=time], .zb-sched-mode input[type=time], .zb-set input[type=number],',
+      ' .zb-sched-mode input[type=number] { padding: 4px 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14);',
+      ' background: rgba(0,0,0,.3); color: inherit; font-size: 12px; outline: none; color-scheme: dark; }',
+    '.zb-set input[type=time] { width: 80px; }',
+    '.zb-set input[type=number] { width: 56px; }',
+    '.zb-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 8px; }',
     '.zb-cfg-row .zb-btn { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
       ' background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); color: inherit; font-size: 12px;',
       ' white-space: nowrap; flex: 0 1 auto; }',
     '.zb-btn:hover { background: rgba(255,255,255,.16); }',
-    '#zb-status { min-height: 14px; padding: 2px 12px 0; opacity: .6; font-size: 11px; }',
+    '#zb-status { flex: none; min-height: 24px; padding: 4px 16px 6px; opacity: .6; font-size: 11px;',
+      ' border-top: 1px solid rgba(255,255,255,.07); }',
     // Import row: picker + paste field + action on ONE line (the old stacked
     // button/input/button block ate three rows for two functions).
-    '.zb-import-row { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }',
+    '.zb-import-row { display: flex; align-items: center; gap: 6px; margin: 0; padding: 10px 0 8px; }',
     '.zb-import-row .zb-btn { padding: 4px 9px; font-size: 11px; flex: none; }',
     '.zb-import-row .zb-icon-btn { padding: 4px 7px; line-height: 1; }',
     '.zb-import-row .zb-grow { flex: 1; min-width: 0; }',
@@ -112172,17 +112517,15 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '#zb-hover-preview video { display: block; width: 100%; max-height: 240px; object-fit: contain; background: #000; }',
     '#zb-hover-preview .zb-hv-off { display: none; }',
     '#zb-hover-preview[hidden] { display: none; }',
-    '.zb-sched-head { display: flex; justify-content: space-between; align-items: center; opacity: .85; margin-bottom: 4px; }',
-    '.zb-sched-head label { display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; }',
-    '.zb-sched-plan { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }',
-    '.zb-sched-plan select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
-      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
-      ' outline: none; color-scheme: dark; }',
+    '.zb-sched-plan { display: flex; align-items: center; gap: 6px; }',
+    '.zb-sched-plan select { flex: 0 1 auto; min-width: 140px; }',
     '.zb-sched-plan .zb-act { font-size: 12px; }',
-    '.zb-sched-mode { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; opacity: .85; font-size: 11px; }',
-    '.zb-sched-mode select { flex: 1; min-width: 0; padding: 3px 5px; border-radius: 6px;',
-      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 11px;',
-      ' outline: none; color-scheme: dark; }',
+    '.zb-sched-mode { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 12px; }',
+    '.zb-sched-mode + .zb-sched-mode { border-top: 1px solid rgba(255,255,255,.06); }',
+    '.zb-sched-mode > span:first-child { flex: 1; min-width: 0; text-align: left; }',
+    '.zb-sched-mode > label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; }',
+    '.zb-sched-mode select { flex: 0 1 auto; min-width: 130px; }',
+    '.zb-sched-mode input[type=number] { width: 58px; }',
     '#zb-sched-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 200px; overflow-y: auto; overflow-anchor: none; padding-right: 2px; }',
     '.zb-sched-row { display: flex; align-items: center; gap: 4px; }',
     '.zb-sched-row input[type=number], .zb-sched-row input[type=time], .zb-sched-row select { padding: 3px 5px; border-radius: 6px;',
@@ -112286,16 +112629,6 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '.zb-item .zb-label-input { flex: 1; min-width: 0; padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(122,162,247,.6);',
       ' background: rgba(0,0,0,.35); color: inherit; font-size: 11px; outline: none; }',
     '.zb-item .zb-act { cursor: pointer; opacity: .5; padding: 0 3px; font-size: 11px; background: none; border: none; color: inherit; }',
-    // Display card sections: one card hosts \u753B\u9762/\u754C\u9762/\u804A\u5929\u754C\u9762/\u663C\u591C\u62A4\u773C
-    // groups \u2014 a hairline-separated mini header each, sliders paired in a
-    // two-column grid so the merged card stays compact.
-    '.zb-sec { display: flex; align-items: center; justify-content: space-between; gap: 8px;',
-      ' padding: 5px 2px 2px; margin-top: 4px; border-top: 1px solid rgba(255,255,255,.08);',
-      ' font-size: 10px; opacity: .55; letter-spacing: 2px; }',
-    '.zb-collapse-inner > .zb-sec:first-child { border-top: none; margin-top: 0; padding-top: 2px; }',
-    '.zb-sec .zb-sec-on { display: flex; align-items: center; gap: 4px; font-size: 10px;',
-      ' letter-spacing: normal; opacity: 1; cursor: pointer; white-space: nowrap; }',
-    '.zb-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }',
     '.zb-item .zb-act:hover { opacity: 1; }',
     '.zb-item .zb-act[data-armed="1"] { opacity: 1; color: #f87171; }',
     '#zb-offline { display: flex; flex-direction: column; gap: 6px; align-items: center;',
@@ -112322,26 +112655,36 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   root.innerHTML =
     '<div id="zb-fab" title="ZCode Beautify">\u{1F3A8}</div>' +
     '<div id="zb-panel" hidden>' +
-    '  <div id="zb-head"><span>ZCode Beautify</span></div>' +
+    '  <div id="zb-head"><span>ZCode Beautify<span class="zb-head-sub">\u8BBE\u7F6E</span></span><button id="zb-close" title="\u5173\u95ED\u9762\u677F (Alt+B)">\u2715</button></div>' +
     '  <div id="zb-offline" hidden>' +
     '    <div>\u26A0 \u7F8E\u5316\u670D\u52A1\u672A\u8FD0\u884C,\u9762\u677F\u4E0D\u53EF\u7528</div>' +
     '    <div class="zb-hint">\u5728\u63D2\u4EF6\u76EE\u5F55\u6267\u884C <code>node dist/cli.js serve --detach</code> \u542F\u52A8</div>' +
     '    <button class="zb-btn" id="zb-retry">\u91CD\u8BD5\u8FDE\u63A5</button>' +
     '  </div>' +
-    '  <div id="zb-body">' +
+    '  <div id="zb-mid">' +
+    '  <div id="zb-side">' +
+    '    <div id="zb-brand"><span>\u{1F3A8}</span><span>Beautify</span></div>' +
+    '    <div id="zb-search"><span class="zb-search-ico">\u{1F50D}</span><input id="zb-nav-search" placeholder="\u641C\u7D22" spellcheck="false"></div>' +
     '    <div id="zb-tabs">' +
-    '      <button class="zb-tab" data-tab="main">\u58C1\u7EB8</button>' +
-    '      <button class="zb-tab" data-tab="sched">\u5B9A\u65F6\u64AD\u653E</button>' +
-    '      <button class="zb-tab" data-tab="settings">\u8BBE\u7F6E</button>' +
+    '      <button class="zb-tab" data-tab="main"><span class="zb-ico">\u{1F5BC}</span><span>\u58C1\u7EB8</span></button>' +
+    '      <button class="zb-tab" data-tab="look"><span class="zb-ico">\u{1F3A8}</span><span>\u5916\u89C2</span></button>' +
+    '      <button class="zb-tab" data-tab="chat"><span class="zb-ico">\u{1F4AC}</span><span>\u804A\u5929</span></button>' +
+    '      <button class="zb-tab" data-tab="sched"><span class="zb-ico">\u23F1</span><span>\u8F6E\u64AD</span></button>' +
+    '      <button class="zb-tab" data-tab="settings"><span class="zb-ico">\u2699</span><span>\u901A\u7528</span></button>' +
+    '      <button class="zb-tab" data-tab="about"><span class="zb-ico">\u2139</span><span>\u5173\u4E8E</span></button>' +
     '    </div>' +
+    '  </div>' +
+    '  <div id="zb-body">' +
     '    <div id="zb-tab-main">' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-history"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center"><span>\u6700\u8FD1\u4F7F\u7528 <button class="zb-act" id="zb-stats" title="\u58C1\u7EB8\u7D2F\u8BA1\u5C55\u793A\u65F6\u957F\u6392\u884C">\u{1F4CA}</button></span> <span class="zb-fold">\u25BE</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-history">' +
+    '      <div class="zb-block-title zb-card-title"><span>\u6700\u8FD1\u4F7F\u7528</span><button class="zb-act" id="zb-stats" title="\u58C1\u7EB8\u7D2F\u8BA1\u5C55\u793A\u65F6\u957F\u6392\u884C">\u{1F4CA}</button><span class="zb-fold">\u25BE</span></div>' +
+    '      <div class="zb-card"><div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-lib-list" id="zb-history" style="max-height:192px"></div>' +
-    '      </div></div>' +
+    '      </div></div></div>' +
     '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-scenes"><div class="zb-card-title">\u58C1\u7EB8\u5E93 \xB7 \u52A8\u6001 <span class="zb-fold">\u25BE</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-scenes">' +
+    '      <div class="zb-block-title zb-card-title"><span>\u58C1\u7EB8\u5E93 \xB7 \u52A8\u6001</span><span class="zb-fold">\u25BE</span></div>' +
+    '      <div class="zb-card"><div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <button class="zb-btn zb-icon-btn" id="zb-pick" title="\u6253\u5F00\u6587\u4EF6\u9009\u62E9\u5668(\u53EF\u591A\u9009):\u9009 .pkg(\u573A\u666F)\u6216 .mp4(\u89C6\u9891),\u9009\u5B8C\u81EA\u52A8\u6392\u961F\u5BFC\u5165">\u{1F4C1}</button>' +
     '        <button class="zb-btn zb-icon-btn" id="zb-we-lib" title="\u6D4F\u89C8\u672C\u673A Wallpaper Engine \u58C1\u7EB8\u5E93(\u521B\u610F\u5DE5\u574A/\u81EA\u5EFA\u9879\u76EE),\u70B9\u51FB\u5373\u53EF\u5BFC\u5165">\u{1F9E9}</button>' +
@@ -112350,18 +112693,19 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '      </div>' +
     '      <div id="zb-progress" hidden><div id="zb-progress-bar"></div><span>\u2026</span></div>' +
     '      <div id="zb-guide" hidden></div>' +
-    '      <div class="zb-actions" style="margin-top:6px"><button class="zb-btn" id="zb-guide-retry" hidden>\u5DF2\u5B89\u88C5,\u91CD\u8BD5</button></div>' +
+    '      <div class="zb-actions" style="padding-top:0"><button class="zb-btn" id="zb-guide-retry" hidden>\u5DF2\u5B89\u88C5,\u91CD\u8BD5</button></div>' +
     '      <div class="zb-lib-list" id="zb-lib-scenes"></div>' +
-    '      <div class="zb-lib-head" id="zb-storage" style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
+    '      <div class="zb-lib-head" id="zb-storage" style="display:flex;align-items:center;gap:6px;margin:6px 0 8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)">' +
     '        <span id="zb-storage-text" style="flex:1">\u2026</span>' +
     '        <button class="zb-act" id="zb-open-scenes" title="\u5728\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u6253\u5F00\u52A8\u6001\u58C1\u7EB8\u7F13\u5B58\u76EE\u5F55">\u{1F4C2}</button>' +
     '        <button class="zb-act" id="zb-compress" title="\u7701\u7535\u538B\u7F29:\u628A\u52A8\u6001\u58C1\u7EB8\u5FAA\u73AF\u91CD\u7F16\u7801\u4E3A 720p/24fps,\u663E\u8457\u964D\u4F4E GPU \u89E3\u7801\u5360\u7528\u4E0E\u4F53\u79EF(\u4F7F\u7528\u4E2D\u7684\u8DF3\u8FC7,\u53EF\u91CD\u65B0\u5BFC\u5165\u6062\u590D\u539F\u753B\u8D28)">\u26A1 \u538B\u7F29</button>' +
     '        <button class="zb-act" id="zb-purge" title="\u5220\u9664\u5168\u90E8\u5DF2\u7F13\u5B58\u7684\u52A8\u6001\u58C1\u7EB8\u5FAA\u73AF(\u6B63\u5728\u4F7F\u7528\u7684\u9664\u5916)">\u{1F5D1} \u6E05\u7406</button>' +
     '      </div>' +
-    '      </div></div>' +
+    '      </div></div></div>' +
     '    </div>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-images"><div class="zb-card-title">\u58C1\u7EB8\u5E93 \xB7 \u56FE\u7247 <span class="zb-fold">\u25BE</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-images">' +
+    '      <div class="zb-block-title zb-card-title"><span>\u58C1\u7EB8\u5E93 \xB7 \u56FE\u7247</span><span class="zb-fold">\u25BE</span></div>' +
+    '      <div class="zb-card"><div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
     '      <div class="zb-import-row">' +
     '        <label class="zb-btn zb-grow" for="zb-file" title="\u9009\u62E9\u4E00\u5F20\u56FE\u7247\u4F5C\u4E3A\u80CC\u666F\u58C1\u7EB8,UI \u914D\u8272\u968F\u4E4B\u66F4\u65B0">\u{1F5BC} \u66F4\u6362\u56FE\u7247\u2026</label>' +
     '        <button class="zb-act" id="zb-img-sort" title="\u5207\u6362\u6392\u5E8F:\u6309\u65F6\u95F4(\u65B0\u2192\u65E7)/\u6309\u540D\u79F0">\u21C5 \u65F6\u95F4</button>' +
@@ -112370,108 +112714,202 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '        <input type="file" id="zb-file" accept="image/*" hidden>' +
     '      </div>' +
     '      <div class="zb-lib-list" id="zb-lib-images"></div>' +
+    '      </div></div></div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-look" hidden>' +
+    '    <div class="zb-block zb-collapsible" id="zb-card-display">' +
+    '      <div class="zb-block-title zb-card-title"><span>\u663E\u793A\u8C03\u8282</span><span class="zb-fold">\u25BE</span></div>' +
+    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-sub-title">\u753B\u9762</div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u80CC\u666F\u6A21\u7CCA</span><span class="zb-set-sub">\u80CC\u666F\u58C1\u7EB8\u7684\u6A21\u7CCA\u7A0B\u5EA6(\u50CF\u7D20)</span></div>' +
+    '        <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"><span class="zb-val"><span id="zb-blur-val">0</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u80CC\u666F\u538B\u6697</span><span class="zb-set-sub">\u80CC\u666F\u538B\u6697\u7A0B\u5EA6(\u767E\u5206\u6BD4,\u8D8A\u9AD8\u8D8A\u6697)</span></div>' +
+    '        <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"><span class="zb-val"><span id="zb-dim-val">0</span>%</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u586B\u5145\u65B9\u5F0F</span><span class="zb-set-sub">\u80CC\u666F\u94FA\u6EE1\u7A97\u53E3\u7684\u7B56\u7565</span></div>' +
+    '        <select id="zb-fit" title="\u80CC\u666F\u586B\u5145\u65B9\u5F0F:\u586B\u6EE1\u88C1\u526A\u94FA\u6EE1\u7A97\u53E3 / \u5B8C\u6574\u663E\u793A\u4E0D\u88C1\u526A(\u6A21\u7CCA\u57AB\u5E95)/ \u667A\u80FD\u9002\u914D\u81EA\u52A8\u5206\u6790\u753B\u9762\u4E3B\u4F53">' +
+    '          <option value="cover">\u586B\u6EE1\u88C1\u526A</option>' +
+    '          <option value="contain">\u5B8C\u6574\u663E\u793A</option>' +
+    '          <option value="smart">\u667A\u80FD\u9002\u914D</option>' +
+    '        </select></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u89C6\u9891\u97F3\u91CF</span><span class="zb-set-sub">0 = \u9759\u97F3,\u4EC5\u5BF9\u4FDD\u7559\u4E86\u58F0\u97F3\u7684\u5BFC\u5165\u751F\u6548</span></div>' +
+    '        <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-vol-val">0</span>%</span></div>' +
+    '      </div>' +
+    '      <div class="zb-sub-title" style="margin-top:14px">\u754C\u9762</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">UI \u83AB\u5948\u53D6\u8272</span><span class="zb-set-sub">\u6839\u636E\u58C1\u7EB8\u81EA\u52A8\u751F\u6210 UI \u914D\u8272;\u5173\u95ED\u5219\u4FDD\u7559 ZCode \u539F\u751F\u989C\u8272</span></div>' +
+    '        <div class="zb-ctrl"><label class="zb-sw"><input type="checkbox" id="zb-monet"></label>' +
+    '        <button class="zb-btn" id="zb-pin" title="\u4ECE\u58C1\u7EB8\u4E3B\u8272\u9501\u5B9A\u4E3B\u9898\u8272(\u53D6\u8272\u504F\u8272\u65F6\u624B\u5DE5\u9489\u4E00\u4E2A)">\u{1F3A8} \u9501\u8272</button></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u663E\u793A\u58C1\u7EB8</span><span class="zb-set-sub">\u5173\u95ED\u540E\u9690\u85CF\u80CC\u666F\u58C1\u7EB8</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-vis"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u56FE\u7247\u7F13\u52A8</span><span class="zb-set-sub">\u56FE\u7247\u58C1\u7EB8\u7F13\u6162\u7F29\u653E\u5E73\u79FB(\u547C\u5438\u611F);\u6A21\u7CCA\u5F00\u542F\u65F6\u81EA\u52A8\u505C\u7528</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-kb"></label></div>' +
+    '      </div>' +
+    '      <div class="zb-sub-title" style="margin-top:14px">\u663C\u591C\u62A4\u773C</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6309\u65F6\u6BB5\u81EA\u52A8\u8C03\u6697</span><span class="zb-set-sub">\u5728\u767D\u5929 / \u591C\u95F4\u4E24\u5957\u663E\u793A\u53C2\u6570\u95F4\u5B9A\u65F6\u5207\u6362</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-dn-on"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u767D\u5929\u65F6\u6BB5</span></div>' +
+    '        <div class="zb-ctrl"><input type="time" id="zb-dn-start"><span style="opacity:.5">\u81F3</span><input type="time" id="zb-dn-end"></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u767D\u5929\u53C2\u6570</span></div>' +
+    '        <div class="zb-ctrl"><span style="opacity:.6">\u538B\u6697</span><input type="number" id="zb-dn-daydim" min="0" max="80">%' +
+    '        <span style="opacity:.6">\u6A21\u7CCA</span><input type="number" id="zb-dn-dayblur" min="0" max="30">px</div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u591C\u95F4\u53C2\u6570</span></div>' +
+    '        <div class="zb-ctrl"><span style="opacity:.6">\u538B\u6697</span><input type="number" id="zb-dn-nightdim" min="0" max="80">%' +
+    '        <span style="opacity:.6">\u6A21\u7CCA</span><input type="number" id="zb-dn-nightblur" min="0" max="30">px</div></div>' +
+    '      </div>' +
     '      </div></div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-chat" hidden>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u804A\u5929\u533A</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u804A\u5929\u533A\u6697\u5EA6</span><span class="zb-set-sub">\u5BF9\u8BDD\u5217\u80CC\u540E\u7684\u989D\u5916\u538B\u6697,\u6D88\u606F\u6587\u5B57\u6D6E\u5728\u5176\u4E0A\u4E0D\u53D7\u5F71\u54CD</span></div>' +
+    '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u906E\u7F69\u4E0A\u7AEF</span><span class="zb-set-sub">\u7A97\u53E3\u9876\u90E8\u5411\u4E0B\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6</span></div>' +
+    '        <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-top-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u906E\u7F69\u4E0B\u7AEF</span><span class="zb-set-sub">\u7A97\u53E3\u5E95\u90E8\u5411\u4E0A\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6(\u8F93\u5165\u6846\u9644\u8FD1)</span></div>' +
+    '        <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-bot-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5927\u5BB9\u5668\u504F\u767D</span><span class="zb-set-sub">\u6574\u7A97\u767D\u8272\u8584\u7EB1\u6D53\u5EA6,\u6697\u8272\u58C1\u7EB8\u4E0B\u63D0\u5347\u6587\u5B57\u53EF\u8BFB\u6027</span></div>' +
+    '        <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-frost-val">0.00</span></span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u804A\u5929\u6C14\u6CE1</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6C14\u6CE1\u6837\u5F0F</span><span class="zb-set-sub">\u4F60\u53D1\u51FA\u6D88\u606F\u7684\u6C14\u6CE1\u9884\u8BBE;\u539F\u751F = \u5B8C\u5168\u4E0D\u6539\u6837\u5F0F</span></div>' +
+    '        <div class="zb-ctrl"><select id="zb-bubble-preset" title="\u4F60\u53D1\u51FA\u6D88\u606F\u7684\u6C14\u6CE1\u9884\u8BBE;\u539F\u751F=\u5B8C\u5168\u4E0D\u6539\u6837\u5F0F">' +
+    '          <option value="default">\u539F\u751F</option>' +
+    '          <option value="accent">\u4E3B\u9898\u8272\u67D3\u8272</option>' +
+    '          <option value="glass">\u6BDB\u73BB\u7483</option>' +
+    '          <option value="outline">\u63CF\u8FB9</option>' +
+    '          <option value="flat">\u6241\u5E73</option>' +
+    '          <option value="custom">\u81EA\u5B9A\u4E49 CSS</option>' +
+    '        </select>' +
+    '        <button class="zb-btn" id="zb-bubble-edit" title="\u6253\u5F00\u6C14\u6CE1\u6837\u5F0F\u7F16\u8F91\u5668\u7A97\u53E3:\u7F16\u8F91\u5E76\u542F\u7528\u81EA\u5B9A\u4E49 CSS,\u5B9E\u65F6\u9884\u89C8">\u270F\uFE0F \u7F16\u8F91\u6837\u5F0F</button>' +
+    '        <button class="zb-btn" id="zb-bubble-align" title="\u6C14\u6CE1\u9760\u53F3(ZCode \u539F\u751F)\u6216\u9760\u5DE6\u663E\u793A">\u2194 \u9760\u53F3</button></div></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u67D3\u8272\u6D53\u5EA6</span><span class="zb-set-sub">\u4E3B\u9898\u8272\u63BA\u5165\u6C14\u6CE1\u80CC\u666F\u7684\u6D53\u5EA6</span></div>' +
+    '        <input type="range" id="zb-bubble-tint" min="0" max="100" step="1" value="28"><span class="zb-val"><span id="zb-bubble-tint-val">28</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5706\u89D2</span><span class="zb-set-sub">\u6C14\u6CE1\u5706\u89D2;\u5BF9\u9F50\u4FA7\u4FDD\u7559\u539F\u751F 2px \u5C0F\u89D2</span></div>' +
+    '        <input type="range" id="zb-bubble-radius" min="4" max="24" step="1" value="12"><span class="zb-val"><span id="zb-bubble-radius-val">12</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u6700\u5927\u5BBD\u5EA6</span><span class="zb-set-sub">\u6C14\u6CE1\u6700\u5927\u5BBD\u5EA6\u5360\u5BF9\u8BDD\u5217\u5BBD\u5EA6\u7684\u6BD4\u4F8B</span></div>' +
+    '        <input type="range" id="zb-bubble-width" min="40" max="90" step="1" value="70"><span class="zb-val"><span id="zb-bubble-width-val">70</span>%</span></div>' +
+    '      </div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-settings" hidden>' +
-    '    <div class="zb-card zb-collapsible" id="zb-card-display"><div class="zb-card-title">\u663E\u793A\u8C03\u8282 <span class="zb-fold">\u25BE</span></div>' +
-    '      <div class="zb-collapse-wrap"><div class="zb-collapse-inner">' +
-    '    <div class="zb-sec">\u753B\u9762</div>' +
-    '    <div class="zb-g2">' +
-    '    <div class="zb-row"><label title="\u80CC\u666F\u6A21\u7CCA\u7A0B\u5EA6(\u50CF\u7D20)"><span>\u80CC\u666F\u6A21\u7CCA</span><span><span id="zb-blur-val">0</span>px</span></label>' +
-    '      <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="\u80CC\u666F\u538B\u6697\u7A0B\u5EA6(\u767E\u5206\u6BD4,\u8D8A\u9AD8\u8D8A\u6697)"><span>\u80CC\u666F\u538B\u6697</span><span><span id="zb-dim-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"></div>' +
-    '    </div>' +
-    '    <div class="zb-sched-mode"><span>\u586B\u5145</span><select id="zb-fit" title="\u80CC\u666F\u586B\u5145\u65B9\u5F0F:\u586B\u6EE1\u88C1\u526A\u94FA\u6EE1\u7A97\u53E3 / \u5B8C\u6574\u663E\u793A\u4E0D\u88C1\u526A(\u6A21\u7CCA\u57AB\u5E95)/ \u667A\u80FD\u9002\u914D\u81EA\u52A8\u5206\u6790\u753B\u9762\u4E3B\u4F53" style="flex:1">' +
-    '      <option value="cover">\u586B\u6EE1\u88C1\u526A</option>' +
-    '      <option value="contain">\u5B8C\u6574\u663E\u793A</option>' +
-    '      <option value="smart">\u667A\u80FD\u9002\u914D</option>' +
-    '    </select></div>' +
-    '    <div class="zb-sec">\u754C\u9762</div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="\u6839\u636E\u58C1\u7EB8\u81EA\u52A8\u751F\u6210 UI \u914D\u8272;\u5173\u95ED\u5219\u4FDD\u7559 ZCode \u539F\u751F\u989C\u8272"><input type="checkbox" id="zb-monet">UI \u83AB\u5948\u53D6\u8272</label>' +
-    '      <button class="zb-act" id="zb-pin" title="\u4ECE\u58C1\u7EB8\u4E3B\u8272\u9501\u5B9A\u4E3B\u9898\u8272(\u53D6\u8272\u504F\u8272\u65F6\u624B\u5DE5\u9489\u4E00\u4E2A)">\u{1F3A8} \u9501\u8272</button>' +
-    '    </div>' +
-    '    <div class="zb-row zb-toggles">' +
-    '      <label title="\u663E\u793A\u6216\u9690\u85CF\u80CC\u666F\u58C1\u7EB8"><input type="checkbox" id="zb-vis">\u663E\u793A\u58C1\u7EB8</label>' +
-    '      <label title="\u56FE\u7247\u58C1\u7EB8\u7F13\u6162\u7F29\u653E\u5E73\u79FB(\u547C\u5438\u611F);\u6A21\u7CCA\u5F00\u542F\u65F6\u81EA\u52A8\u505C\u7528"><input type="checkbox" id="zb-kb">\u56FE\u7247\u7F13\u52A8</label>' +
-    '    </div>' +
-    '    <div class="zb-row"><label title="\u89C6\u9891\u58C1\u7EB8\u7684\u97F3\u91CF(0=\u9759\u97F3,\u4EC5\u5BF9\u4FDD\u7559\u4E86\u58F0\u97F3\u7684\u5BFC\u5165\u751F\u6548)"><span>\u89C6\u9891\u97F3\u91CF</span><span><span id="zb-vol-val">0</span>%</span></label>' +
-    '      <input type="range" id="zb-vol" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-sec">\u804A\u5929\u754C\u9762</div>' +
-    '    <div class="zb-g2">' +
-    '    <div class="zb-row"><label title="\u5BF9\u8BDD\u5217\u80CC\u540E\u7684\u989D\u5916\u538B\u6697,\u6D88\u606F\u6587\u5B57\u6D6E\u5728\u5176\u4E0A\u4E0D\u53D7\u5F71\u54CD"><span>\u804A\u5929\u533A\u6697\u5EA6</span><span id="zb-chat-dim-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="\u7A97\u53E3\u9876\u90E8\u5411\u4E0B\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6"><span>\u906E\u7F69\u4E0A\u7AEF</span><span id="zb-chat-top-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="\u7A97\u53E3\u5E95\u90E8\u5411\u4E0A\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6(\u8F93\u5165\u6846\u9644\u8FD1)"><span>\u906E\u7F69\u4E0B\u7AEF</span><span id="zb-chat-bot-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"></div>' +
-    '    <div class="zb-row"><label title="\u6574\u7A97\u767D\u8272\u8584\u7EB1\u6D53\u5EA6,\u6697\u8272\u58C1\u7EB8\u4E0B\u63D0\u5347\u6587\u5B57\u53EF\u8BFB\u6027"><span>\u5927\u5BB9\u5668\u504F\u767D</span><span id="zb-chat-frost-val">0.00</span></label>' +
-    '      <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"></div>' +
-    '    </div>' +
-    '    <div class="zb-sec">\u663C\u591C\u62A4\u773C <label title="\u6309\u65F6\u95F4\u6BB5\u81EA\u52A8\u5207\u6362\u4E24\u5957\u663E\u793A\u53C2\u6570" class="zb-sec-on"><input type="checkbox" id="zb-dn-on">\u6309\u65F6\u6BB5\u81EA\u52A8\u8C03\u6697</label></div>' +
-    '      <div class="zb-sched-mode"><span>\u767D\u5929</span><input type="time" id="zb-dn-start" style="flex:1">' +
-    '        <span style="opacity:.5">\u81F3</span><input type="time" id="zb-dn-end" style="flex:1"></div>' +
-    '      <div class="zb-sched-mode"><span>\u767D\u5929\u538B\u6697</span><input type="number" id="zb-dn-daydim" min="0" max="80" style="width:48px">%' +
-    '        <span>\u6A21\u7CCA</span><input type="number" id="zb-dn-dayblur" min="0" max="30" style="width:44px">px</div>' +
-    '      <div class="zb-sched-mode"><span>\u591C\u95F4\u538B\u6697</span><input type="number" id="zb-dn-nightdim" min="0" max="80" style="width:48px">%' +
-    '        <span>\u6A21\u7CCA</span><input type="number" id="zb-dn-nightblur" min="0" max="30" style="width:44px">px</div>' +
-    '      </div></div>' +
-    '    </div>' +
-    '    <div class="zb-card" id="zb-card-config"><div class="zb-card-title">\u914D\u7F6E</div>' +
-    '      <div class="zb-actions zb-cfg-row">' +
+    '    <div class="zb-block" id="zb-card-config">' +
+    '      <div class="zb-block-title">\u914D\u7F6E</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-actions zb-cfg-row" style="padding-top:12px">' +
     '        <button class="zb-btn" id="zb-reset" title="\u79FB\u9664\u58C1\u7EB8\u4E0E\u914D\u8272,\u8FD8\u539F ZCode \u9ED8\u8BA4\u5916\u89C2(\u58C1\u7EB8\u4F1A\u88AB\u8BB0\u4F4F,\u53EF\u518D\u6B21\u6062\u590D)">\u8FD8\u539F\u5916\u89C2</button>' +
     '        <button class="zb-btn" id="zb-cfg-export" title="\u5BFC\u51FA\u5F53\u524D\u58C1\u7EB8/\u5916\u89C2/\u64AD\u653E\u65B9\u6848\u4E3A JSON \u6587\u4EF6">\u2B07 \u5BFC\u51FA</button>' +
     '        <button class="zb-btn" id="zb-cfg-import" title="\u4ECE\u5BFC\u51FA\u7684 JSON \u6587\u4EF6\u6062\u590D\u914D\u7F6E">\u2B06 \u5BFC\u5165</button>' +
     '        <input type="file" id="zb-cfg-file" accept="application/json,.json" hidden>' +
     '      </div>' +
-    '      <div class="zb-sched-mode" style="margin:6px 0 0"><label title="ZCode \u542F\u52A8\u5C4F(\u52A0\u8F7D\u9875)\u671F\u95F4\u4E0D\u663E\u793A\u58C1\u7EB8\u4E0E\u7F8E\u5316\u9762\u677F,\u4E3B\u754C\u9762\u5C31\u7EEA\u540E\u518D\u51FA\u73B0"><input type="checkbox" id="zb-startup-clean">\u542F\u52A8\u5C4F\u65F6\u9690\u85CF\u58C1\u7EB8\u4E0E\u9762\u677F</label></div>' +
-    '      <div class="zb-sched-mode" style="margin-top:4px"><label title="ZCode \u4E0B\u8F7D/\u5B89\u88C5\u66F4\u65B0\u7684\u8FDB\u5EA6\u7A97\u53E3\u9ED8\u8BA4\u4E0D\u663E\u793A\u58C1\u7EB8;\u52FE\u9009\u540E\u66F4\u65B0\u7A97\u53E3\u663E\u793A\u58C1\u7EB8(\u4EC5\u58C1\u7EB8,\u4E0D\u663E\u793A\u7F8E\u5316\u9762\u677F)"><input type="checkbox" id="zb-updater-wp">ZCode \u66F4\u65B0\u754C\u9762\u663E\u793A\u58C1\u7EB8</label></div>' +
-    '      <div class="zb-sched-mode" style="margin-top:4px"><label title="\u60AC\u505C WE \u5E93\u4E2D\u7684\u89C6\u9891\u58C1\u7EB8\u65F6\u76F4\u63A5\u64AD\u653E\u5176\u771F\u5B9E\u753B\u9762(\u800C\u975E\u5C01\u9762\u56FE);\u573A\u666F\u58C1\u7EB8\u4ECD\u663E\u793A\u5C01\u9762"><input type="checkbox" id="zb-we-live">WE \u9884\u89C8\u64AD\u653E\u771F\u5B9E\u89C6\u9891</label></div>' +
-'      <div class="zb-sched-mode" style="margin-top:4px"><span title="\u58C1\u7EB8\u5E93\xB7\u52A8\u6001\u5217\u8868\u4E00\u6B21\u6700\u591A\u53EF\u89C1\u7684\u884C\u6570(\u5176\u4F59\u6EDA\u52A8\u67E5\u770B)">\u52A8\u6001\u5E93</span>' +
-    '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" style="width:44px" title="\u52A8\u6001\u58C1\u7EB8\u5217\u8868\u6700\u591A\u663E\u793A\u884C\u6570">' +
-    '        <span title="\u58C1\u7EB8\u5E93\xB7\u56FE\u7247\u5217\u8868\u4E00\u6B21\u6700\u591A\u53EF\u89C1\u7684\u884C\u6570(\u5176\u4F59\u6EDA\u52A8\u67E5\u770B)">\u56FE\u7247\u5E93</span>' +
-    '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" style="width:44px" title="\u56FE\u7247\u58C1\u7EB8\u5217\u8868\u6700\u591A\u663E\u793A\u884C\u6570">\u884C</div>' +
-'      <div class="zb-sched-mode" style="margin-top:4px"><span title="\u573A\u666F\u58C1\u7EB8\u5F55\u5236\u8F93\u51FA\u7684\u5206\u8FA8\u7387;\u9ED8\u8BA4=\u58C1\u7EB8\u9879\u76EE\u81EA\u5E26\u5C3A\u5BF8">\u5F55\u5236\u5206\u8FA8\u7387</span>' +
-    '        <select id="zb-import-res" style="flex:1"><option value="auto">\u9ED8\u8BA4(\u8DDF\u968F\u58C1\u7EB8)</option><option value="1920x1080">1920\xD71080</option><option value="1280x720">1280\xD7720(\u7701\u7535)</option><option value="custom">\u81EA\u5B9A\u4E49\u2026</option></select>' +
-    '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" style="width:52px" hidden>' +
-    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" style="width:52px" hidden></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u542F\u52A8\u5C4F\u65F6\u9690\u85CF\u58C1\u7EB8\u4E0E\u9762\u677F</span><span class="zb-set-sub">ZCode \u542F\u52A8\u5C4F(\u52A0\u8F7D\u9875)\u671F\u95F4\u4E0D\u663E\u793A\u58C1\u7EB8\u4E0E\u7F8E\u5316\u9762\u677F,\u4E3B\u754C\u9762\u5C31\u7EEA\u540E\u518D\u51FA\u73B0</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-startup-clean"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">ZCode \u66F4\u65B0\u754C\u9762\u663E\u793A\u58C1\u7EB8</span><span class="zb-set-sub">\u4E0B\u8F7D/\u5B89\u88C5\u66F4\u65B0\u7684\u8FDB\u5EA6\u7A97\u53E3\u9ED8\u8BA4\u4E0D\u663E\u793A\u58C1\u7EB8;\u52FE\u9009\u540E\u66F4\u65B0\u7A97\u53E3\u663E\u793A\u58C1\u7EB8(\u4EC5\u58C1\u7EB8,\u4E0D\u663E\u793A\u7F8E\u5316\u9762\u677F)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-updater-wp"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">WE \u9884\u89C8\u64AD\u653E\u771F\u5B9E\u89C6\u9891</span><span class="zb-set-sub">\u60AC\u505C WE \u5E93\u4E2D\u7684\u89C6\u9891\u58C1\u7EB8\u65F6\u76F4\u63A5\u64AD\u653E\u5176\u771F\u5B9E\u753B\u9762(\u800C\u975E\u5C01\u9762\u56FE);\u573A\u666F\u58C1\u7EB8\u4ECD\u663E\u793A\u5C01\u9762</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-we-live"></label></div>' +
+    '      <div class="zb-sched-mode"><span title="\u58C1\u7EB8\u5E93\xB7\u52A8\u6001\u5217\u8868\u4E00\u6B21\u6700\u591A\u53EF\u89C1\u7684\u884C\u6570(\u5176\u4F59\u6EDA\u52A8\u67E5\u770B)">\u52A8\u6001\u5E93\u884C\u6570</span>' +
+    '        <input type="number" id="zb-rows-scenes" min="3" max="20" step="1" title="\u52A8\u6001\u58C1\u7EB8\u5217\u8868\u6700\u591A\u663E\u793A\u884C\u6570">' +
+    '        <span title="\u58C1\u7EB8\u5E93\xB7\u56FE\u7247\u5217\u8868\u4E00\u6B21\u6700\u591A\u53EF\u89C1\u7684\u884C\u6570(\u5176\u4F59\u6EDA\u52A8\u67E5\u770B)">\u56FE\u7247\u5E93\u884C\u6570</span>' +
+    '        <input type="number" id="zb-rows-images" min="3" max="20" step="1" title="\u56FE\u7247\u58C1\u7EB8\u5217\u8868\u6700\u591A\u663E\u793A\u884C\u6570"></div>' +
+    '      <div class="zb-sched-mode"><span title="\u573A\u666F\u58C1\u7EB8\u5F55\u5236\u8F93\u51FA\u7684\u5206\u8FA8\u7387;\u9ED8\u8BA4=\u58C1\u7EB8\u9879\u76EE\u81EA\u5E26\u5C3A\u5BF8">\u5F55\u5236\u5206\u8FA8\u7387</span>' +
+    '        <select id="zb-import-res"><option value="auto">\u9ED8\u8BA4(\u8DDF\u968F\u58C1\u7EB8)</option><option value="1920x1080">1920\xD71080</option><option value="1280x720">1280\xD7720(\u7701\u7535)</option><option value="custom">\u81EA\u5B9A\u4E49\u2026</option></select>' +
+    '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" hidden>' +
+    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-about" hidden>' +
+    '    <div class="zb-ab-hero">' +
+    '      <div class="zb-ab-logo">\u{1F3A8}</div>' +
+    '      <div class="zb-ab-name">ZCode Beautify</div>' +
+    '      <div class="zb-ab-ver" id="zb-ab-ver">v0.0.0</div>' +
+    '      <div class="zb-ab-tag">\u52A8\u6001\u58C1\u7EB8 \xB7 \u83AB\u5948\u53D6\u8272 \xB7 \u804A\u5929\u6C14\u6CE1 \u2014\u2014 ZCode \u684C\u9762\u7AEF\u7F8E\u5316\u63D2\u4EF6</div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u8FD0\u884C\u72B6\u6001</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u7F8E\u5316\u670D\u52A1</span></div><span class="zb-set-val" id="zb-ab-svc">\u68C0\u6D4B\u4E2D\u2026</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u8FD0\u884C\u65F6\u957F</span></div><span class="zb-set-val" id="zb-ab-uptime">\u2014</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">CDP \u7AEF\u53E3</span><span class="zb-set-sub">ZCode \u8C03\u8BD5\u63A5\u53E3,\u6CE8\u5165\u58C1\u7EB8\u4E0E\u9762\u677F</span></div><span class="zb-set-val" id="zb-ab-cdp">\u2014</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">API \u7AEF\u53E3</span><span class="zb-set-sub">\u672C\u673A\u63A7\u5236\u670D\u52A1,\u9762\u677F\u6570\u636E\u6765\u6E90</span></div><span class="zb-set-val" id="zb-ab-api">\u2014</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5F53\u524D\u58C1\u7EB8</span></div><span class="zb-set-val" id="zb-ab-wp">\u2014</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u63D2\u4EF6\u4FE1\u606F</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-ab-repo"><div class="zb-set-main"><span class="zb-set-name">\u4E0A\u6E38\u4ED3\u5E93</span></div>' +
+    '        <div class="zb-ctrl"><span class="zb-set-val" title="${REPO_URL}">${REPO_URL.replace(/^https?:\/\//, "")}</span>' +
+    '        <button class="zb-btn" id="zb-ab-copy" title="\u590D\u5236\u4E0A\u6E38\u4ED3\u5E93\u5730\u5740">\u29C9 \u590D\u5236</button></div></div>' +
+    '      <div class="zb-set zb-ab-repo"><div class="zb-set-main"><span class="zb-set-name">\u672C Fork \u4ED3\u5E93</span><span class="zb-set-sub">\u5F53\u524D\u5B89\u88C5\u6765\u6E90:\u9762\u677F\u91CD\u6784/\u81EA\u5B9A\u4E49\u6C14\u6CE1/\u961F\u5217\u4FEE\u590D\u7B49\u6539\u52A8\u5747\u5728\u6B64\u7EF4\u62A4</span></div>' +
+    '        <div class="zb-ctrl"><span class="zb-set-val" title="${FORK_URL}">${FORK_URL.replace(/^https?:\/\//, "")}</span>' +
+    '        <button class="zb-btn" id="zb-ab-copy-fork" title="\u590D\u5236 Fork \u4ED3\u5E93\u5730\u5740">\u29C9 \u590D\u5236</button></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5F00\u6E90\u8BB8\u53EF</span></div><span class="zb-set-val" id="zb-ab-license">\u2014</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u4F5C\u8005</span></div><span class="zb-set-val" id="zb-ab-author">\u2014</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u4F7F\u7528\u63D0\u793A</div>' +
+    '      <div class="zb-card"><div class="zb-ab-tips">' +
+    '        <b>Alt + B</b> \u968F\u65F6\u5F00\u5173\u672C\u9762\u677F;\u62D6\u52A8\u6807\u9898\u680F\u53EF\u79FB\u52A8\u4F4D\u7F6E<br>' +
+    '        \u60AC\u505C\u7F29\u7565\u56FE\u653E\u5927\u9884\u89C8;\u52A8\u6001\u58C1\u7EB8\u60AC\u505C\u76F4\u63A5\u64AD\u653E\u5FAA\u73AF\u89C6\u9891<br>' +
+    '        \u7F8E\u5316\u670D\u52A1\u672A\u8FD0\u884C\u65F6\u9762\u677F\u4F1A\u63D0\u793A,\u5728\u63D2\u4EF6\u76EE\u5F55\u6267\u884C <b>node dist/cli.js serve --detach</b> \u542F\u52A8' +
+    '      </div></div>' +
     '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-sched" hidden>' +
-    '    <div class="zb-card"><div class="zb-card-title" style="display:flex;justify-content:space-between;align-items:center">\u8F6E\u64AD\u72B6\u6001 <span id="zb-rot-state" style="opacity:.7;font-weight:400">\u2026</span></div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u8F6E\u64AD\u72B6\u6001</div>' +
+    '      <div class="zb-card"><div class="zb-set"><div class="zb-set-main">' +
+    '        <span class="zb-set-name" id="zb-rot-state" style="opacity:.8;font-weight:400">\u2026</span></div></div></div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">\u65B9\u6848</div>' +
-    '      <div class="zb-sched-head" style="margin-bottom:6px"><span>\u5F53\u524D</span>' +
-    '        <label title="\u542F\u7528\u540E\u6309\u6240\u9009\u6A21\u5F0F\u81EA\u52A8\u5207\u6362\u58C1\u7EB8"><input type="checkbox" id="zb-sched-on">\u542F\u7528</label></div>' +
-    '      <div class="zb-sched-plan"><select id="zb-plan" title="\u64AD\u653E\u65B9\u6848"></select>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u65B9\u6848</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u542F\u7528\u8F6E\u64AD</span><span class="zb-set-sub">\u542F\u7528\u540E\u6309\u6240\u9009\u6A21\u5F0F\u81EA\u52A8\u5207\u6362\u58C1\u7EB8</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-sched-on"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5F53\u524D\u65B9\u6848</span></div>' +
+    '        <div class="zb-ctrl zb-sched-plan"><select id="zb-plan" title="\u64AD\u653E\u65B9\u6848"></select>' +
     '        <button class="zb-act" id="zb-plan-add" title="\u65B0\u5EFA\u64AD\u653E\u65B9\u6848">\u2795</button>' +
     '        <button class="zb-act" id="zb-plan-ren" title="\u91CD\u547D\u540D\u5F53\u524D\u65B9\u6848">\u270E</button>' +
-    '        <button class="zb-act" id="zb-plan-del" title="\u5220\u9664\u5F53\u524D\u65B9\u6848">\u{1F5D1}</button>' +
+    '        <button class="zb-act" id="zb-plan-del" title="\u5220\u9664\u5F53\u524D\u65B9\u6848">\u{1F5D1}</button></div></div>' +
     '      </div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">\u64AD\u653E\u8BBE\u7F6E</div>' +
-    '      <div class="zb-sched-mode"><span>\u6A21\u5F0F</span><select id="zb-sched-mode">' +
-    '        <option value="sequence">\u987A\u5E8F\u8F6E\u64AD</option>' +
-    '        <option value="random">\u968F\u673A\u8F6E\u64AD</option>' +
-    '        <option value="schedule">\u5B9A\u65F6\u5207\u6362</option>' +
-    '      </select></div>' +
-    '      <div class="zb-sched-mode"><span>\u7279\u6548</span><select id="zb-fx" title="\u672C\u65B9\u6848\u64AD\u653E\u65F6\u7684\u58C1\u7EB8\u5207\u6362\u7279\u6548">' +
-    '        <option value="fade">\u4EA4\u53C9\u6DE1\u5165</option>' +
-    '        <option value="slide">\u53F3\u4FA7\u6ED1\u5165</option>' +
-    '        <option value="zoom">\u7F29\u653E\u6D6E\u73B0</option>' +
-    '        <option value="blur">\u6A21\u7CCA\u6E10\u6E05</option>' +
-    '        <option value="none">\u76F4\u63A5\u5207\u6362</option>' +
-    '      </select></div>' +
-    '      <div class="zb-sched-mode" title="\u65B9\u6848\u751F\u6548\u65F6\u6BB5:\u7559\u7A7A = \u5168\u5929\u751F\u6548;\u8DE8\u591C(\u5982 20:00-06:00)\u652F\u6301"><span>\u65F6\u6BB5</span>' +
-    '        <input type="time" id="zb-win-start" style="flex:1" step="60">' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u64AD\u653E\u8BBE\u7F6E</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6A21\u5F0F</span></div>' +
+    '        <select id="zb-sched-mode">' +
+    '          <option value="sequence">\u987A\u5E8F\u8F6E\u64AD</option>' +
+    '          <option value="random">\u968F\u673A\u8F6E\u64AD</option>' +
+    '          <option value="schedule">\u5B9A\u65F6\u5207\u6362</option>' +
+    '        </select></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5207\u6362\u7279\u6548</span><span class="zb-set-sub">\u672C\u65B9\u6848\u64AD\u653E\u65F6\u7684\u58C1\u7EB8\u5207\u6362\u7279\u6548</span></div>' +
+    '        <select id="zb-fx">' +
+    '          <option value="fade">\u4EA4\u53C9\u6DE1\u5165</option>' +
+    '          <option value="slide">\u53F3\u4FA7\u6ED1\u5165</option>' +
+    '          <option value="zoom">\u7F29\u653E\u6D6E\u73B0</option>' +
+    '          <option value="blur">\u6A21\u7CCA\u6E10\u6E05</option>' +
+    '          <option value="none">\u76F4\u63A5\u5207\u6362</option>' +
+    '        </select></div>' +
+    '      <div class="zb-set" title="\u65B9\u6848\u751F\u6548\u65F6\u6BB5:\u7559\u7A7A = \u5168\u5929\u751F\u6548;\u8DE8\u591C(\u5982 20:00-06:00)\u652F\u6301"><div class="zb-set-main"><span class="zb-set-name">\u751F\u6548\u65F6\u6BB5</span><span class="zb-set-sub">\u7559\u7A7A = \u5168\u5929\u751F\u6548;\u8DE8\u591C(\u5982 20:00-06:00)\u652F\u6301</span></div>' +
+    '        <div class="zb-ctrl"><input type="time" id="zb-win-start" step="60">' +
     '        <span style="opacity:.5">\u81F3</span>' +
-    '        <input type="time" id="zb-win-end" style="flex:1" step="60">' +
-    '        <button class="zb-act" id="zb-win-clear" title="\u6E05\u9664\u65F6\u6BB5(\u5168\u5929\u751F\u6548)">\u2715</button>' +
+    '        <input type="time" id="zb-win-end" step="60">' +
+    '        <button class="zb-act" id="zb-win-clear" title="\u6E05\u9664\u65F6\u6BB5(\u5168\u5929\u751F\u6548)">\u2715</button></div></div>' +
     '      </div>' +
     '    </div>' +
-    '    <div class="zb-card"><div class="zb-card-title">\u64AD\u653E\u5217\u8868</div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u64AD\u653E\u5217\u8868</div>' +
+    '      <div class="zb-card">' +
     '      <div id="zb-sched-list"></div>' +
     '      <div class="zb-actions">' +
     '        <button class="zb-btn" id="zb-sched-add" title="\u6DFB\u52A0\u4E00\u6761:\u9009\u62E9\u58C1\u7EB8\u5E76\u8BBE\u5B9A\u65F6\u957F\u6216\u65F6\u95F4\u70B9">\u2795 \u6DFB\u52A0</button>' +
@@ -112479,13 +112917,48 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '        <button class="zb-btn" id="zb-sched-play" title="\u4FDD\u5B58\u5E76\u7ACB\u5373\u542F\u7528\u5F53\u524D\u65B9\u6848\u5F00\u59CB\u64AD\u653E">\u25B6 \u64AD\u653E</button>' +
     '        <button class="zb-btn" id="zb-sched-next" title="\u8DF3\u8FC7\u5F53\u524D\u65F6\u957F,\u7ACB\u5373\u5207\u6362\u5230\u4E0B\u4E00\u5F20\u58C1\u7EB8">\u23ED \u7ACB\u5373\u5207\u6362</button>' +
     '      </div>' +
-    '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 0"></div>' +
+    '      <div class="zb-lib-head" id="zb-sched-hint" style="margin:4px 0 8px"></div>' +
+    '      </div>' +
     '    </div>' +
     '    </div>' +
     '  </div>' +
+    '  </div>' +
+    '  <div id="zb-status"></div>' +
     '</div>' +
-    '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>' +
-    '<div id="zb-status"></div>';
+    '<div id="zb-bubble-win" hidden>' +
+    '  <div id="zb-bubble-win-mask"></div>' +
+    '  <div id="zb-bubble-win-card">' +
+    '    <div id="zb-bubble-win-head"><span>\u{1F3A8} \u6C14\u6CE1\u6837\u5F0F\u7F16\u8F91\u5668</span>' +
+    '      <button id="zb-bubble-win-close" title="\u5173\u95ED (Esc)">\u2715</button></div>' +
+    '    <div class="zb-win-sec">\u5B9E\u65F6\u9884\u89C8<span class="zb-win-mode" id="zb-bubble-win-mode">\u2026</span><span class="zb-win-sec-sub">\u6539\u52A8\u7ACB\u5373\u53CD\u6620</span></div>' +
+    '    <iframe id="zb-bubble-pv-frame" sandbox="allow-same-origin" title="\u804A\u5929\u6C14\u6CE1\u9884\u89C8"></iframe>' +
+    '    <div class="zb-win-sec">\u57FA\u7840\u53C2\u6570<span class="zb-win-sec-sub">\u4F5C\u7528\u4E8E\u6240\u6709\u6837\u5F0F,\u6CE8\u5165\u4E3A CSS \u53D8\u91CF</span></div>' +
+    '    <div class="zb-wrow"><span title="\u6CE8\u5165\u4E3A --zb-bubble-tint">\u67D3\u8272\u6D53\u5EA6</span><input type="range" id="zb-bubble-tint-w" min="0" max="100" step="1" value="28"><span class="zb-val" id="zb-bubble-tint-w-val">28%</span></div>' +
+    '    <div class="zb-wrow"><span title="\u6CE8\u5165\u4E3A --zb-bubble-radius">\u5706\u89D2</span><input type="range" id="zb-bubble-radius-w" min="4" max="24" step="1" value="12"><span class="zb-val" id="zb-bubble-radius-w-val">12px</span></div>' +
+    '    <div class="zb-wrow"><span title="\u6CE8\u5165\u4E3A --zb-bubble-maxw">\u6700\u5927\u5BBD\u5EA6</span><input type="range" id="zb-bubble-width-w" min="40" max="90" step="1" value="70"><span class="zb-val" id="zb-bubble-width-w-val">70%</span></div>' +
+    '    <div class="zb-wrow"><span>\u5BF9\u9F50</span><button class="zb-btn" id="zb-bubble-align-w" title="\u6C14\u6CE1\u9760\u53F3(ZCode \u539F\u751F)\u6216\u9760\u5DE6\u663E\u793A">\u2194 \u9760\u53F3</button><span class="zb-wrow-sub">\u5BF9\u9F50\u4FA7\u4FDD\u7559\u539F\u751F 2px \u5C0F\u89D2</span></div>' +
+    '    <div class="zb-win-sec">\u81EA\u5B9A\u4E49 CSS<span class="zb-win-sec-sub">.zb-bubble = \u6C14\u6CE1\u672C\u4F53;.zb-bubble-row = \u6240\u5728\u884C;\u53EF\u5F15\u7528 --color-primary \u7B49\u4E3B\u9898\u53D8\u91CF</span></div>' +
+    '    <div id="zb-bubble-css-gate" hidden>\u5F53\u524D\u4F7F\u7528\u9884\u8BBE\u300C<span id="zb-bubble-gate-name">\u2026</span>\u300D,\u81EA\u5B9A\u4E49\u4EE3\u7801\u4E0D\u751F\u6548' +
+    '      <button class="zb-btn" id="zb-bubble-gate-on" title="\u5207\u6362\u5230\u81EA\u5B9A\u4E49 CSS,\u4E0B\u65B9\u4EE3\u7801\u624D\u4F1A\u751F\u6548">\u542F\u7528\u81EA\u5B9A\u4E49 CSS</button></div>' +
+    '    <div id="zb-bubble-css-wrap">' +
+    '      <textarea id="zb-bubble-css" spellcheck="false" placeholder="/* \u4F8B:.zb-bubble { background:\u2026; border:\u2026; } */"></textarea>' +
+    '      <div class="zb-actions" style="padding-top:6px">' +
+    '        <button class="zb-btn" id="zb-bubble-add-style" title="\u628A\u4E0A\u65B9 CSS \u4FDD\u5B58\u4E3A\u4E00\u4E2A\u547D\u540D\u7684\u81EA\u5B9A\u4E49\u6837\u5F0F,\u4EE5\u540E\u4E00\u952E\u5957\u7528">\u2795 \u5B58\u4E3A\u6837\u5F0F</button>' +
+    '        <button class="zb-btn" id="zb-bubble-example" title="\u586B\u5165\u4E00\u4E2A\u6E10\u53D8\u6BDB\u73BB\u7483\u793A\u4F8B,\u53EF\u5728\u6B64\u57FA\u7840\u4E0A\u4FEE\u6539">\u2728 \u63D2\u5165\u793A\u4F8B</button>' +
+    '        <button class="zb-btn" id="zb-bubble-clear" title="\u6E05\u7A7A\u81EA\u5B9A\u4E49 CSS(\u4EC5\u4FDD\u7559\u57FA\u7840\u53C2\u6570\u63A7\u5236\u7684\u6548\u679C)">\u6E05\u7A7A</button>' +
+    '      </div>' +
+    '      <div class="zb-actions" id="zb-bubble-style-name-row" hidden>' +
+    '        <input id="zb-bubble-style-name" type="text" maxlength="24" placeholder="\u6837\u5F0F\u540D\u79F0,\u5982:\u8584\u8377\u6BDB\u73BB\u7483">' +
+    '        <button class="zb-btn" id="zb-bubble-style-save" title="\u4FDD\u5B58\u4E3A\u81EA\u5B9A\u4E49\u6837\u5F0F">\u{1F4BE} \u4FDD\u5B58</button>' +
+    '        <button class="zb-btn" id="zb-bubble-style-cancel" title="\u4E0D\u4FDD\u5B58">\u53D6\u6D88</button>' +
+    '      </div>' +
+    '      <div id="zb-bubble-style-chips" hidden></div>' +
+    '    </div>' +
+    '    <div class="zb-win-foot">\u6240\u6709\u66F4\u6539\u5B9E\u65F6\u751F\u6548\u5E76\u4FDD\u5B58;\u2713 \u5B8C\u6210 / Esc \u4EC5\u5173\u95ED\u7A97\u53E3</div>' +
+    '    <div class="zb-actions" style="justify-content:flex-end;padding-top:4px"><button class="zb-btn" id="zb-bubble-done" title="\u5173\u95ED\u7A97\u53E3(\u66F4\u6539\u5DF2\u5B9E\u65F6\u5E94\u7528)">\u2713 \u5B8C\u6210</button></div>' +
+    '  </div>' +
+    '</div>' +
+    '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>';
   document.body.appendChild(root);
 
   function $(id) { return document.getElementById(id); }
@@ -112527,7 +113000,10 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     box.hidden = false;
     var r = thumb.getBoundingClientRect();
     box.style.left = 'auto';
-    box.style.right = '296px'; // panel column (264+18) plus breathing room
+    // To the LEFT of the panel, whatever its current (draggable) position.
+    var panel = $('zb-panel');
+    var pr = panel && !panel.hidden ? panel.getBoundingClientRect() : null;
+    box.style.right = pr ? Math.max(8, window.innerWidth - pr.left + 14) + 'px' : '18px';
     var top = r.top + r.height / 2 - box.offsetHeight / 2;
     if (top < 8) top = 8;
     if (top + box.offsetHeight > window.innerHeight - 8) top = window.innerHeight - box.offsetHeight - 8;
@@ -112693,6 +113169,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
         }
         var cl = c.chatLook || {};
         setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0);
+        setBubbleUI(c.bubbleLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
@@ -112886,6 +113363,309 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     });
   });
 
+  // --- user message bubble look (\u804A\u5929\u6C14\u6CE1) -----------------------------------
+  function bubbleUIState() {
+    return {
+      preset: $('zb-bubble-preset').value,
+      tint: Number($('zb-bubble-tint').value),
+      radius: Number($('zb-bubble-radius').value),
+      width: Number($('zb-bubble-width').value),
+      align: $('zb-bubble-align').getAttribute('data-left') === '1' ? 'left' : 'right',
+      customCss: $('zb-bubble-css') ? $('zb-bubble-css').value : ''
+    };
+  }
+  function setBubbleUI(b) {
+    b = b || {};
+    var preset = ['default', 'accent', 'glass', 'outline', 'flat'].indexOf(b.preset) >= 0 ? b.preset : 'default';
+    $('zb-bubble-preset').value = preset;
+    $('zb-bubble-tint').value = b.tint ?? 28; $('zb-bubble-tint-val').textContent = String(b.tint ?? 28);
+    $('zb-bubble-radius').value = b.radius ?? 12; $('zb-bubble-radius-val').textContent = String(b.radius ?? 12);
+    $('zb-bubble-width').value = b.width ?? 70; $('zb-bubble-width-val').textContent = String(b.width ?? 70);
+    var left = b.align === 'left';
+    $('zb-bubble-align').setAttribute('data-left', left ? '1' : '0');
+    $('zb-bubble-align').textContent = left ? '\u2194 \u9760\u5DE6' : '\u2194 \u9760\u53F3';
+    var cssEl = $('zb-bubble-css');
+    // Never yank the textarea under an actively typing user \u2014 the 4s beat
+    // refresh would otherwise revert chars typed since the last push.
+    if (cssEl && typeof b.customCss === 'string' && document.activeElement !== cssEl) cssEl.value = b.customCss;
+    updateBubblePreview();
+    // Server state is authoritative: drop drag-preview inline vars (same
+    // reason as setChatSliders).
+    ['--zb-bubble-tint', '--zb-bubble-radius', '--zb-bubble-maxw', '--zb-bubble-align'].forEach(function (p) {
+      document.documentElement.style.removeProperty(p);
+    });
+  }
+  // Live preview for slider-driven fields via the same vars the injected
+  // style consumes. Preset changes can't preview locally (new rules needed);
+  // they round-trip through serve (~300ms).
+  function bubblePreview() {
+    var s = bubbleUIState();
+    var r = s.radius;
+    var rs = document.documentElement.style;
+    rs.setProperty('--zb-bubble-tint', String(s.tint / 100));
+    rs.setProperty('--zb-bubble-radius', s.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px');
+    rs.setProperty('--zb-bubble-maxw', s.width + '%');
+    rs.setProperty('--zb-bubble-align', s.align === 'left' ? 'flex-start' : 'flex-end');
+  }
+  var bubblePushTimer = null;
+  function pushBubbleLook() {
+    clearTimeout(bubblePushTimer);
+    bubblePushTimer = setTimeout(function () {
+      post('/api/config', { bubbleLook: bubbleUIState() }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  $('zb-bubble-preset').addEventListener('change', function () {
+    // Re-sync the editor window (mode badge, gate, mirror labels) on EVERY
+    // preset change \u2014 the window can be open while the dropdown on the chat
+    // page flips, and a stale badge there lies about the active mode.
+    zbWinSync();
+    zbPvSchedule();
+    pushBubbleLook();
+    // Picking \u81EA\u5B9A\u4E49 CSS opens the editor window \u2014 that is where the CSS
+    // lives now (the dropdown only selects the preset).
+    if (this.value === 'custom') zbBubbleWinOpen();
+  });
+  $('zb-bubble-align').addEventListener('click', function () {
+    var left = this.getAttribute('data-left') === '1';
+    this.setAttribute('data-left', left ? '0' : '1');
+    this.textContent = left ? '\u2194 \u9760\u53F3' : '\u2194 \u9760\u5DE6';
+    bubblePreview();
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  [['zb-bubble-tint', 'zb-bubble-tint-val'], ['zb-bubble-radius', 'zb-bubble-radius-val'], ['zb-bubble-width', 'zb-bubble-width-val']].forEach(function (pair) {
+    $(pair[0]).addEventListener('input', function () {
+      $(pair[1]).textContent = this.value;
+      bubblePreview();
+      zbPvSchedule();
+      pushBubbleLook();
+    });
+  });
+
+  // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
+  // Every knob sits next to the preview so its effect is immediately visible:
+  // \u57FA\u7840\u53C2\u6570 sliders are MIRRORS of the canonical chat-page controls (one
+  // push pipeline, both stay in lockstep), and the custom-CSS area is
+  // mode-gated \u2014 editing code means nothing under a built-in preset, so other
+  // presets get an explicit \u542F\u7528 gate instead of a silently dead textarea.
+  var ZB_PRESET_LABELS = { 'default': '\u539F\u751F', 'accent': '\u4E3B\u9898\u8272\u67D3\u8272', 'glass': '\u6BDB\u73BB\u7483', 'outline': '\u63CF\u8FB9', 'flat': '\u6241\u5E73', 'custom': '\u81EA\u5B9A\u4E49 CSS' };
+  function zbWinSync() {
+    var pairs = [['zb-bubble-tint', 'zb-bubble-tint-w'], ['zb-bubble-radius', 'zb-bubble-radius-w'], ['zb-bubble-width', 'zb-bubble-width-w']];
+    for (var i = 0; i < pairs.length; i++) {
+      var src = $(pairs[i][0]), dst = $(pairs[i][1]);
+      dst.value = src.value;
+      $(pairs[i][1] + '-val').textContent = src.value + (pairs[i][0] === 'zb-bubble-radius' ? 'px' : '%');
+    }
+    var pa = $('zb-bubble-align'), wa = $('zb-bubble-align-w');
+    wa.textContent = pa.textContent;
+    wa.setAttribute('data-left', pa.getAttribute('data-left'));
+    var preset = $('zb-bubble-preset').value;
+    $('zb-bubble-win-mode').textContent = ZB_PRESET_LABELS[preset] || preset;
+    var custom = preset === 'custom';
+    $('zb-bubble-css-gate').hidden = custom;
+    $('zb-bubble-css-wrap').hidden = !custom;
+    if (!custom) $('zb-bubble-gate-name').textContent = ZB_PRESET_LABELS[preset] || preset;
+  }
+  function zbBubbleWinOpen() {
+    zbWinSync();
+    $('zb-bubble-win').hidden = false;
+    updateBubblePreview(); // refresh to the current state on every open
+  }
+  function zbBubbleWinClose() {
+    $('zb-bubble-win').hidden = true;
+  }
+  // Mirrors sanitizeCustomBubbleCss (core/bubbleRecipes.ts) for the preview
+  // iframe; serve re-sanitizes before the real injection.
+  function zbPvSanitize(css) {
+    // NOTE: this lives inside a template literal \u2014 the backslash must be
+    // doubled or the generated script would read /</style/gi (broken regex).
+    css = String(css || '').slice(0, 8000)
+      .replace(/<\\/style/gi, '')
+      .replace(/@import[^;{]*[;{]?/gi, '')
+      .replace(/javascript:/gi, '');
+    return css.trim();
+  }
+  var zbPvTimer = null;
+  function zbPvSchedule() {
+    clearTimeout(zbPvTimer);
+    zbPvTimer = setTimeout(updateBubblePreview, 120);
+  }
+  /** Rebuild the preview iframe document from the CURRENT editor state \u2014 the
+   * recipe tables and var plumbing are the same ones ZCode receives, bound to
+   * the preview's own class names, so what you see is what gets applied. */
+  function updateBubblePreview() {
+    var frame = $('zb-bubble-pv-frame');
+    if (!frame) return;
+    var s = bubbleUIState();
+    var r = Math.max(2, Math.round(s.radius));
+    var corners = s.align === 'left' ? '2px ' + r + 'px ' + r + 'px ' + r + 'px' : r + 'px 2px ' + r + 'px ' + r + 'px';
+    var body = s.preset === 'custom' ? zbPvSanitize(s.customCss) : (PV_RECIPES[s.preset] || '');
+    var doc = '<!doctype html><html><head><meta charset="utf-8"><style>'
+      + 'html,body{margin:0;padding:0}'
+      // Approximations of the live --color-* tokens so color-mix recipes and
+      // custom styles referencing them render faithfully in the sandbox.
+      + ':root{--color-primary:#7aa2f7;--color-surface:#26262e}'
+      + 'body{font:12.5px/1.55 system-ui,sans-serif;color:#e9e9ef;padding:14px 16px;'
+      + ' background:linear-gradient(135deg,#242a3d 0%,#3a2f45 55%,#2b3550 100%)}'
+      + '.zb-chat{display:flex;flex-direction:column;gap:9px;max-width:540px;margin:0 auto}'
+      + '.zb-row{display:flex}'
+      + '.zb-row-o{justify-content:flex-start}'
+      + '.zb-bubble-row{justify-content:flex-end}'
+      + '.zb-bub{padding:7px 12px;border-radius:12px 2px 12px 12px;max-width:78%}'
+      + '.zb-o{background:#2b2b35;border-radius:2px 12px 12px 12px}'
+      + '.zb-me{background:#39435e}'
+      + ':root{--zb-bubble-tint:' + (s.tint / 100)
+      + ';--zb-bubble-radius:' + corners
+      + ';--zb-bubble-maxw:' + s.width + '%'
+      + ';--zb-bubble-align:' + (s.align === 'left' ? 'flex-start' : 'flex-end') + '}'
+      + '.zb-bubble{border-radius:var(--zb-bubble-radius)!important;max-width:var(--zb-bubble-maxw)!important}'
+      + '.zb-bubble-row{align-items:var(--zb-bubble-align)!important;justify-content:var(--zb-bubble-align)!important}'
+      + (body || '')
+      + '</style></head><body><div class="zb-chat">'
+      + '<div class="zb-row zb-row-o"><div class="zb-bub zb-o">\u6536\u5230,\u6B63\u5728\u9884\u89C8\u8FD9\u4E2A\u6C14\u6CE1\u6837\u5F0F\u3002</div></div>'
+      + '<div class="zb-row zb-bubble-row"><div class="zb-bub zb-me zb-bubble">\u5E2E\u6211\u628A\u6C14\u6CE1\u6362\u6210\u8FD9\u79CD\u6548\u679C</div></div>'
+      + '</div></body></html>';
+    frame.setAttribute('srcdoc', doc);
+  }
+  $('zb-bubble-css').addEventListener('input', function () {
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  $('zb-bubble-example').addEventListener('click', function () {
+    $('zb-bubble-css').value = ZB_BUBBLE_EXAMPLE;
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  $('zb-bubble-clear').addEventListener('click', function () {
+    $('zb-bubble-css').value = '';
+    zbPvSchedule();
+    pushBubbleLook();
+  });
+  // --- saved custom styles (\u6211\u7684\u6837\u5F0F): a panel-local name-and-reuse library.
+  // Lives in localStorage \u2014 it is editor UX state, not server appearance
+  // config, so the serve schema stays untouched. Clicking a chip applies the
+  // CSS and flips the preset to custom through the select's own change event,
+  // so gate/mode-badge/preview/push all run exactly as if hand-picked.
+  var ZB_STYLE_KEY = 'zcode-beautify:bubble-styles';
+  function zbStylesLoad() {
+    try {
+      var v = JSON.parse(localStorage.getItem(ZB_STYLE_KEY) || '[]');
+      if (!Array.isArray(v)) return [];
+      return v.filter(function (s) { return s && typeof s.name === 'string' && typeof s.css === 'string'; });
+    } catch (e) { return []; }
+  }
+  function zbStylesSave(list) {
+    try { localStorage.setItem(ZB_STYLE_KEY, JSON.stringify(list.slice(0, 24))); } catch (e) {}
+  }
+  function zbRenderStyleChips() {
+    var box = $('zb-bubble-style-chips');
+    if (!box) return;
+    var list = zbStylesLoad();
+    box.hidden = list.length === 0;
+    box.innerHTML = '';
+    for (var i = 0; i < list.length; i++) {
+      (function (s) {
+        var chip = document.createElement('span');
+        chip.className = 'zb-style-chip';
+        chip.setAttribute('title', '\u70B9\u51FB\u5957\u7528\u6837\u5F0F\u300C' + s.name + '\u300D');
+        var nm = document.createElement('span');
+        nm.className = 'zb-chip-name';
+        nm.textContent = s.name;
+        chip.appendChild(nm);
+        chip.addEventListener('click', function () {
+          var sel = $('zb-bubble-preset');
+          if (sel.value !== 'custom') {
+            sel.value = 'custom';
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          $('zb-bubble-css').value = s.css;
+          zbPvSchedule();
+          pushBubbleLook();
+          status('\u5DF2\u5957\u7528\u6837\u5F0F\u300C' + s.name + '\u300D');
+        });
+        var del = document.createElement('span');
+        del.className = 'zb-chip-del';
+        del.textContent = '\u2715';
+        del.setAttribute('title', '\u5220\u9664\u6837\u5F0F\u300C' + s.name + '\u300D');
+        del.addEventListener('click', function (e) {
+          e.stopPropagation();
+          // Filter by name: zbStylesLoad() re-parses localStorage on every
+          // call, so object-identity against the closure's captured style
+          // object never matches.
+          zbStylesSave(zbStylesLoad().filter(function (x) { return x.name !== s.name; }));
+          zbRenderStyleChips();
+          status('\u5DF2\u5220\u9664\u6837\u5F0F\u300C' + s.name + '\u300D');
+        });
+        chip.appendChild(del);
+        box.appendChild(chip);
+      })(list[i]);
+    }
+  }
+  $('zb-bubble-add-style').addEventListener('click', function () {
+    $('zb-bubble-style-name-row').hidden = false;
+    var inp = $('zb-bubble-style-name');
+    inp.value = '';
+    inp.placeholder = '\u6837\u5F0F\u540D\u79F0,\u5982:\u8584\u8377\u6BDB\u73BB\u7483';
+    inp.focus();
+  });
+  $('zb-bubble-style-cancel').addEventListener('click', function () {
+    $('zb-bubble-style-name-row').hidden = true;
+  });
+  $('zb-bubble-style-save').addEventListener('click', function () {
+    var css = $('zb-bubble-css').value.trim();
+    if (!css) { status('CSS \u4E3A\u7A7A,\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u5185\u5BB9'); return; }
+    var name = $('zb-bubble-style-name').value.trim() || ('\u6211\u7684\u6837\u5F0F ' + (zbStylesLoad().length + 1));
+    // Same name overwrites \u2014 renaming is the only way to duplicate on purpose.
+    var list = zbStylesLoad().filter(function (x) { return x.name !== name; });
+    list.push({ name: name, css: css });
+    zbStylesSave(list);
+    $('zb-bubble-style-name-row').hidden = true;
+    zbRenderStyleChips();
+    status('\u5DF2\u4FDD\u5B58\u6837\u5F0F\u300C' + name + '\u300D');
+  });
+  $('zb-bubble-style-name').addEventListener('keydown', function (e) {
+    // Enter saves; Esc cancels WITHOUT closing the editor window (stop the
+    // event before the document-level Esc handler sees it).
+    if (e.key === 'Enter') { e.preventDefault(); $('zb-bubble-style-save').click(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); $('zb-bubble-style-cancel').click(); }
+  });
+  zbRenderStyleChips();
+  // Window wiring: the \u270F\uFE0F button opens it, \u2715/\u5B8C\u6210/mask/Esc close it. Picking
+  // \u81EA\u5B9A\u4E49 CSS in the dropdown opens it too (see the change handler above).
+  $('zb-bubble-edit').addEventListener('click', zbBubbleWinOpen);
+  $('zb-bubble-win-close').addEventListener('click', zbBubbleWinClose);
+  $('zb-bubble-done').addEventListener('click', zbBubbleWinClose);
+  $('zb-bubble-win-mask').addEventListener('click', zbBubbleWinClose);
+  var zbWinEsc = function (e) {
+    if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('keydown', zbWinEsc); return; }
+    if (e.key === 'Escape' && !$('zb-bubble-win').hidden) zbBubbleWinClose();
+  };
+  document.addEventListener('keydown', zbWinEsc);
+  // Mirror controls delegate to the canonical chat-page controls: set the
+  // source value, refresh the mirror label, then fire the source's own input
+  // event so the existing pipeline (label/preview/debounced push) runs once.
+  [['zb-bubble-tint', 'zb-bubble-tint-w'], ['zb-bubble-radius', 'zb-bubble-radius-w'], ['zb-bubble-width', 'zb-bubble-width-w']].forEach(function (pair) {
+    var unit = pair[0] === 'zb-bubble-radius' ? 'px' : '%';
+    $(pair[1]).addEventListener('input', function () {
+      var src = $(pair[0]);
+      src.value = this.value;
+      $(pair[1] + '-val').textContent = this.value + unit;
+      src.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  });
+  $('zb-bubble-align-w').addEventListener('click', function () {
+    $('zb-bubble-align').click();
+    zbWinSync();
+  });
+  // Gate switch: flip the preset to custom through its own change handler so
+  // push/preview/open-sync all run exactly as if the user picked it.
+  $('zb-bubble-gate-on').addEventListener('click', function () {
+    var sel = $('zb-bubble-preset');
+    sel.value = 'custom';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  updateBubblePreview();
+
   // --- pinned theme color (\u{1F3A8}) ---------------------------------------------
   $('zb-pin').addEventListener('click', function () {
     apiFetch('/api/palette')
@@ -112937,12 +113717,19 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   });
 
   // --- Alt+B panel shortcut -------------------------------------------------
-  document.addEventListener('keydown', function (e) {
+  // Document-level listeners survive panel rebuilds: every serve restart
+  // re-evaluates this script, and N stale generations meant N fab clicks per
+  // keypress (observed 23 \u2014 toggles cancel out by parity, so Alt+B "worked
+  // randomly"). Same generation-token guard as the hover handlers: a stale
+  // listener no-ops and unbinds itself on the first keydown it sees.
+  var zbAltB = function (e) {
+    if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('keydown', zbAltB); return; }
     if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
       e.preventDefault();
       $('zb-fab').click();
     }
-  });
+  };
+  document.addEventListener('keydown', zbAltB);
 
   var FITS = ['cover', 'contain', 'smart'];
   var FIT_LABELS = { cover: '\u586B\u6EE1\u88C1\u526A', contain: '\u5B8C\u6574\u663E\u793A', smart: '\u667A\u80FD\u9002\u914D' };
@@ -114424,21 +115211,26 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     // per-library row limits after the rebuild settles.
     setTimeout(function () { if (typeof applyLibRows === 'function') applyLibRows(); }, 350);
   }
+  var ZB_TABS = ['main', 'look', 'chat', 'sched', 'settings', 'about'];
   function switchTab(name) {
+    if (ZB_TABS.indexOf(name) < 0) name = 'main';
     var tabs = document.querySelectorAll('.zb-tab');
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].setAttribute('data-active', tabs[i].getAttribute('data-tab') === name ? '1' : '0');
     }
-    var pane = $(name === 'main' ? 'zb-tab-main' : name === 'sched' ? 'zb-tab-sched' : 'zb-tab-settings');
-    $('zb-tab-main').hidden = name !== 'main';
-    $('zb-tab-sched').hidden = name !== 'sched';
-    $('zb-tab-settings').hidden = name !== 'settings';
+    var pane = null;
+    for (var p = 0; p < ZB_TABS.length; p++) {
+      var el = $('zb-tab-' + ZB_TABS[p]);
+      el.hidden = ZB_TABS[p] !== name;
+      if (ZB_TABS[p] === name) pane = el;
+    }
     // Silk: a short fade-and-rise so the pane change reads as one motion.
     pane.classList.remove('zb-pane-in');
     void pane.offsetWidth;
     pane.classList.add('zb-pane-in');
     try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
     if (name === 'sched') loadRotation();
+    else if (name === 'about') { refresh(); updateAbout(); }
     else {
       refresh();
       if (zbLibDirty) reloadMainLists();
@@ -114451,8 +115243,63 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   function activateSavedTab() {
     var saved = 'main';
     try { saved = localStorage.getItem('zcode-beautify:tab') || 'main'; } catch (e) {}
-    switchTab(saved === 'sched' || saved === 'settings' ? saved : 'main');
+    switchTab(ZB_TABS.indexOf(saved) >= 0 ? saved : 'main');
   }
+  // Header \u2715 \u2014 reuse the FAB's close path so the beat/poll cleanup runs.
+  $('zb-close').addEventListener('click', function () {
+    if (!$('zb-panel').hidden) $('zb-fab').click();
+  });
+  // Sidebar search: live-filter the nav items, like the reference sidebar.
+  $('zb-nav-search').addEventListener('input', function () {
+    var q = this.value.trim().toLowerCase();
+    var items = document.querySelectorAll('#zb-tabs .zb-tab');
+    for (var i = 0; i < items.length; i++) {
+      items[i].style.display = !q || (items[i].textContent || '').toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+    }
+  });
+
+  // --- \u5173\u4E8E page: plugin identity + live serve status -------------------------
+  function fmtUptime(ms) {
+    var s = Math.floor(ms / 1000);
+    if (s < 60) return s + ' \u79D2';
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + ' \u5206\u949F';
+    return Math.floor(m / 60) + ' \u5C0F\u65F6 ' + (m % 60) + ' \u5206';
+  }
+  function updateAbout() {
+    $('zb-ab-ver').textContent = 'v' + VERSION;
+    $('zb-ab-license').textContent = LICENSE;
+    $('zb-ab-author').textContent = AUTHOR;
+    $('zb-ab-api').textContent = API.replace(/^.*:/, '');
+    $('zb-ab-svc').textContent = '\u68C0\u6D4B\u4E2D\u2026';
+    $('zb-ab-uptime').textContent = '\u2014';
+    $('zb-ab-cdp').textContent = '\u2014';
+    if (lastConfig) {
+      $('zb-ab-wp').textContent = lastConfig.wallpaperSet
+        ? (lastConfig.mediaType === 'video' ? '\u52A8\u6001\u58C1\u7EB8' : '\u56FE\u7247\u58C1\u7EB8')
+        : '\u672A\u8BBE\u7F6E';
+    } else {
+      $('zb-ab-wp').textContent = '\u672A\u77E5(\u5207\u5230\u5176\u4ED6\u9875\u540E\u8FD4\u56DE\u53EF\u5237\u65B0)';
+    }
+    apiFetch('/api/health')
+      .then(function (r) { return r.json(); })
+      .then(function (h) {
+        $('zb-ab-svc').textContent = '\u8FD0\u884C\u4E2D \xB7 v' + (h.version || '?') + ' (pid ' + h.pid + ')';
+        if (typeof h.uptimeMs === 'number') $('zb-ab-uptime').textContent = fmtUptime(h.uptimeMs);
+        if (h.cdpPort) $('zb-ab-cdp').textContent = h.cdpPort;
+      })
+      .catch(function () {
+        $('zb-ab-svc').textContent = '\u672A\u8FD0\u884C(\u4EC5\u9759\u6001\u4FE1\u606F\u53EF\u7528)';
+      });
+  }
+  function zbCopyRepo(url, label) {
+    var fail = function () { status(label + '\u5730\u5740\u590D\u5236\u5931\u8D25,\u8BE6\u89C1 README'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () { status('\u5DF2\u590D\u5236' + label + '\u5730\u5740'); }, fail);
+    } else fail();
+  }
+  $('zb-ab-copy').addEventListener('click', function () { zbCopyRepo(REPO_URL, '\u4E0A\u6E38\u4ED3\u5E93'); });
+  $('zb-ab-copy-fork').addEventListener('click', function () { zbCopyRepo(FORK_URL, ' Fork \u4ED3\u5E93'); });
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
@@ -114483,6 +115330,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     var head = $('zb-head'), panel = $('zb-panel');
     var sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
     head.addEventListener('pointerdown', function (e) {
+      // The \u2715 lives inside the drag bar; capturing the pointer here would
+      // retarget its click to the bar and swallow the close.
+      if (e.target && e.target.closest && e.target.closest('#zb-close')) return;
       dragging = true; sx = e.clientX; sy = e.clientY;
       var r = panel.getBoundingClientRect(); ox = r.left; oy = r.top;
       panel.style.right = 'auto'; panel.style.bottom = 'auto';
@@ -114548,6 +115398,8 @@ var PANEL_ROOT_ID;
 var init_panelScript = __esm({
   "dist/panel/panelScript.js"() {
     "use strict";
+    init_version();
+    init_bubbleRecipes();
     PANEL_ROOT_ID = "zcode-beautify-panel-root";
   }
 });
@@ -114969,6 +115821,7 @@ function publicConfig(config) {
     themeColor: config.themeColor ?? null,
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
+    bubbleLook: normalizeBubbleLook(config.bubbleLook),
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -115023,6 +115876,9 @@ function sanitize(body) {
       maskBottom: pct(cl.maskBottom) ?? 0,
       frost: pct(cl.frost) ?? 0
     };
+  }
+  if (body?.bubbleLook && typeof body.bubbleLook === "object") {
+    out.bubbleLook = normalizeBubbleLook(body.bubbleLook);
   }
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const dn = body?.dayNight;
@@ -115097,6 +115953,7 @@ async function holdSession(target, config, apiPort, opts = {}) {
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
+    bubbleLook: payload.bubbleLook,
     startupClean: payload.startupClean
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -115131,6 +115988,7 @@ async function pushConfigToSessions(config) {
     kenBurns: payload.kenBurns,
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
+    bubbleLook: payload.bubbleLook,
     startupClean: payload.startupClean
   });
   let ok = 0;
@@ -115260,6 +116118,7 @@ function readBody(req) {
 }
 async function startServe(opts) {
   const { cdpPort, apiPort } = opts;
+  const startedAt = Date.now();
   mediaToken = crypto2.randomBytes(24).toString("hex");
   try {
     fs11.mkdirSync(dataDir(), { recursive: true });
@@ -115471,7 +116330,15 @@ async function startServe(opts) {
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/health") {
-        sendJson(res, 200, { ok: true, service: "zcode-beautify", pid: process.pid });
+        sendJson(res, 200, {
+          ok: true,
+          service: "zcode-beautify",
+          pid: process.pid,
+          version: VERSION,
+          uptimeMs: Date.now() - startedAt,
+          cdpPort,
+          apiPort
+        });
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/pick-scene") {
@@ -116453,6 +117320,7 @@ var init_server = __esm({
     init_monet();
     init_material_color_utilities();
     init_panelScript();
+    init_version();
     init_launch();
     init_media();
     init_scenePipeline();
