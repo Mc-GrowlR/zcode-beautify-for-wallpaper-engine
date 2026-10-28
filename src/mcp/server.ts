@@ -12,7 +12,7 @@ import { z } from "zod";
 import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { loadConfig } from "../core/launch.js";
-import { DEFAULT_CONFIG, type BubbleLookConfig } from "../core/inject.js";
+import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLookConfig } from "../core/inject.js";
 import { VERSION } from "../version.js";
 
 // ZCode launches MCP servers with ZCODE_BEAUTIFY_DATA_DIR pointed at a
@@ -210,9 +210,11 @@ server.registerTool(
         align: z.enum(["right", "left"]).optional().describe("Bubble alignment (right is ZCode stock)"),
         custom_css: z.string().max(8000).optional().describe('CSS applied when preset = "custom", written against the friendly selectors .zb-bubble (the user message bubble) and .zb-bubble-row (its conversation row). CSS only — @import, javascript: and </style are stripped. Prefer live theme tokens like var(--color-primary)/var(--color-surface) so a Monet re-theme restyles the bubble too; suffix declarations with !important'),
       }).optional().describe("User message bubble look; omitted fields keep their current value"),
+      chat_width_cap_rem: z.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (消息流宽度上限). 0 = stock responsive width; 40-120 widens the column (78 ≈ wide, 100+ ≈ near full width on large windows). The column still tracks window resizes — only the ceiling changes"),
+      chat_width_inset_rem: z.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
     },
   },
-  async ({ blur, dim, monet, wallpaper_visible, fit, bubble }) => {
+  async ({ blur, dim, monet, wallpaper_visible, fit, bubble, chat_width_cap_rem, chat_width_inset_rem }) => {
     try {
       // Send only the fields the caller provided: the session layer merges
       // this partial over the stored look, so one-field tweaks don't reset
@@ -221,7 +223,14 @@ server.registerTool(
         bubble === undefined
           ? undefined
           : (Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== undefined)) as Partial<BubbleLookConfig>);
-      const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook });
+      const chatLook: Partial<ChatLookConfig> | undefined =
+        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined
+          ? undefined
+          : {
+              ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
+              ...(chat_width_inset_rem !== undefined ? { widthInsetRem: chat_width_inset_rem } : {}),
+            };
+      const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, chatLook });
       return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };

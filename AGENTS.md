@@ -18,3 +18,4 @@ This repository is two things at once. Pick your path by what the user asked for
 - The end user is non-technical by default: prefer the marketplace-UI path from `INSTALL-FOR-AI.md` unless they explicitly asked you to do it for them and you have shell access.
 - Never modify ZCode's installation files; everything is user-level (`~/.zcode/...`) or runtime injection.
 - CDP injection requires the app to run with `--remote-debugging-port`. The bundled `launch` command handles that safely (it refuses to race the single-instance lock).
+- Route B's last step writes ZCode's plugin registry (`~/.zcode/cli/plugins/installed_plugins.json`). Run `node scripts/record-install.mjs` — it validates `installPath`, backs the old file up and writes atomically. Never splice a Windows path into JSON by hand: a single NUL byte in one record makes ZCode show **zero plugins** and fail every new chat session with **初始化失败，暂时无法发送**.

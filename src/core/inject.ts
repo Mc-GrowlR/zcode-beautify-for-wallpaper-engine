@@ -61,7 +61,8 @@ export interface RotationConfig {
 
 /**
  * Zone-refined chat-area look (聊天界面): four independent masks layered
- * between the wallpaper and the UI, each a 0-100 density.
+ * between the wallpaper and the UI, each a 0-100 density — plus the
+ * conversation column width (消息流宽度).
  */
 export interface ChatLookConfig {
   /** Extra darkening behind the conversation column (聊天区暗度). */
@@ -72,17 +73,57 @@ export interface ChatLookConfig {
   maskBottom: number;
   /** Whole-window white frost sheet (大容器偏白). */
   frost: number;
+  /**
+   * Conversation column width ceiling in rem (消息流宽度上限); 0 = stock
+   * responsive width (nothing injected). The ceiling alone never breaks
+   * resizing — the column still tracks the window, just wider.
+   */
+  widthCapRem: number;
+  /**
+   * Side inset in rem for the column width formula calc(100% - inset) at the
+   * wide tier (≥1280px container). Stock uses 24; smaller = wider. Only
+   * meaningful with widthCapRem > 0; defaults to 12 when omitted.
+   */
+  widthInsetRem: number;
+  /**
+   * Large-session smooth mode (大会话流畅模式): 0 = off, 1 = inject
+   * content-visibility:auto on conversation rows. Off-screen rows skip
+   * paint/layout (ZCode only does this for the share view, not the main
+   * chat), which cuts first-layout and scrolling cost on long conversations.
+   * contain-intrinsic-size uses `auto <estimate>` so the row keeps its LAST
+   * MEASURED size off-screen — keeps the dynamic-height virtualizer's
+   * measurements stable instead of collapsing to the estimate.
+   */
+  perfSmooth: number;
 }
 
-/** Clamp a partial chat look to four ints 0-100 (missing values become 0). */
+/** Stock wide-tier constants, for reference/tests: 72rem cap, 24rem inset. */
+export const STOCK_CHAT_WIDTH = { capRem: 72, insetRem: 24 } as const;
+
+const CHAT_WIDTH_INSET_DEFAULT = 12;
+
+/** Clamp a partial chat look: masks to 0-100 ints, width cap to 0 or 40-120,
+ * inset to 0-24 (12 when a cap is set but no inset arrives). */
 export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig {
   const pct = (v: unknown): number =>
     typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
+  const cap = typeof raw?.widthCapRem === "number" && Number.isFinite(raw.widthCapRem)
+    ? Math.max(0, Math.min(120, Math.round(raw.widthCapRem)))
+    : 0;
+  const capOn = cap >= 40 ? cap : 0; // 1-39 makes no sense as a column cap
+  const inset = capOn > 0
+    ? (typeof raw?.widthInsetRem === "number" && Number.isFinite(raw.widthInsetRem)
+        ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem)))
+        : CHAT_WIDTH_INSET_DEFAULT)
+    : 0;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
     maskBottom: pct(raw?.maskBottom),
     frost: pct(raw?.frost),
+    widthCapRem: capOn,
+    widthInsetRem: inset,
+    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
   };
 }
 

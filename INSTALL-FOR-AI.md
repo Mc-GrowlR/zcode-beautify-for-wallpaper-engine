@@ -24,7 +24,7 @@ If they want to beautify a non-ZCode app or develop their own → read
 
 ## What you are installing
 
-`zcode-beautify` v0.4.1 — a ZCode plugin that adds a wallpaper layer +
+`zcode-beautify` v0.4.6 — a ZCode plugin that adds a wallpaper layer +
 Material Design 3 (Monet) dynamic color to the ZCode desktop client over CDP,
 with a `/beautify` slash command, MCP tools (`set_background`, `apply_options`,
 `refresh_theme`, `reset_appearance`, `beautify_status`), and a live settings
@@ -86,31 +86,50 @@ everything else.
 4. **Cache the plugin** (what the UI does on "Get"):
    ```text
    from: <clone>/                      (or the staged marketplace copy)
-   to:   ~/.zcode/cli/plugins/cache/zcode-beautify/zcode-beautify/0.4.1/
+   to:   ~/.zcode/cli/plugins/cache/zcode-beautify/zcode-beautify/<version>/
    ```
    Read the exact version from `.zcode-plugin/plugin.json` — the folder name
    must equal it.
 
 5. **Record the installation** in `~/.zcode/cli/plugins/installed_plugins.json`.
-   This file only exists after a first marketplace install. If it already
-   exists, read it and append your record to the array that holds the existing
-   plugin entries (field name as found — typically `plugins`). If it does not
-   exist, create:
-   ```json
-   { "version": 1, "plugins": [ { ...record below... } ] }
+
+   **Use the bundled writer — do not hand-edit this file:**
+   ```bash
+   node scripts/record-install.mjs --dry-run   # show + validate the record, write nothing
+   node scripts/record-install.mjs             # back up, merge, validate, write atomically
    ```
-   The record itself:
+   It reads `marketplace.json` and `.zcode-plugin/plugin.json` for the
+   marketplace/name/version, points `installPath` at
+   `<plugins>/cache/<marketplace>/<name>/<version>`, keeps the other records and
+   any existing `installedAt`, and refuses to save a record whose `installPath`
+   is relative, missing, or contains a NUL byte. The file only exists after a
+   first marketplace install; the script creates `{ "version": 1, "plugins": [] }`
+   when it does not.
+
+   If you must write it yourself, the record is:
    ```json
    {
      "id": "zcode-beautify@zcode-beautify",
      "name": "zcode-beautify",
      "marketplace": "zcode-beautify",
-     "version": "0.4.1",
+     "version": "0.4.6",
      "installPath": "<the cache folder from step 4>",
      "installedAt": "<now, ISO-8601>",
      "updatedAt": "<now, ISO-8601>",
-     "scope": "user"
+     "scope": "user",
+     "source": { "source": "directory", "path": "<the stable clone folder from step 1>" }
    }
+   ```
+   **`installPath` must come out of a JSON serializer** (`JSON.stringify`,
+   `json.dump`, `jq --arg`, `ConvertTo-Json`) — never splice a Windows path into
+   a string or template literal. `C:\Users\...\0.4.6` typed inside a JS string
+   literal becomes `C:Users...<NUL>.4.6`; see the caveat below for the damage
+   that does.
+
+   Then validate (this is the step that catches a mangled path before the user
+   restarts ZCode):
+   ```bash
+   node scripts/record-install.mjs --verify   # exit 1 + the offending record on any fatal problem
    ```
 
 6. **Tell the user to fully restart ZCode** so the plugin loads, then continue
@@ -121,6 +140,19 @@ everything else.
 - If the clone folder from step 1 is later deleted, marketplace *refresh* may
   log a `lastRefreshFailure` (an `EPERM`/rename error). Already-installed
   plugins keep working; re-clone to the same path to clear it.
+- **One corrupted record breaks the whole plugin system.** A hand-written
+  `installPath` that lost its separators (and picked up a NUL from `\0.4.6`) is
+  still valid JSON, so nothing complains at write time — but ZCode derives
+  `<installPath>.transaction.json` and every plugin RPC then throws
+  `The argument 'path' must be a string, Uint8Array, or URL without null bytes`.
+  Symptoms: the plugin list shows **已安装 0 / no plugins installed** (even for
+  plugins whose own records are fine), and every new chat shows
+  **初始化失败，暂时无法发送** with a retry button. Diagnose and repair with
+  `node scripts/record-install.mjs --verify` (non-zero exit + the offending
+  record) and `node scripts/record-install.mjs` (rewrites `installPath` through a
+  JSON round-trip, backing up the old file), then fully restart ZCode. A record
+  whose directory is simply missing only costs that one plugin, and `--verify`
+  reports it as a warning.
 - If ZCode's plugin files look different from this document (newer versions may
   change the schema), stop and fall back to **Route A** — never guess.
 

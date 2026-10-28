@@ -149,7 +149,7 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
@@ -508,11 +508,26 @@ function buildBootstrapScript(payload) {
   function applyChatLook() {
     var C;
     try { C = JSON.parse(CHAT); } catch (e) { return; }
-    var anyOn = C.chatDim > 0 || C.maskTop > 0 || C.maskBottom > 0 || C.frost > 0;
+    var masksOn = C.chatDim > 0 || C.maskTop > 0 || C.maskBottom > 0 || C.frost > 0;
+    // Column width (\u6D88\u606F\u6D41\u5BBD\u5EA6): 0 = stock. Formulas only \u2014 a rem ceiling plus
+    // a calc(100% - inset) width keeps the column tracking the window exactly
+    // like ZCode's own container-query tiers (verified: fixed px widths would
+    // overflow on shrink and width:auto collapses the composer to ~32px).
+    var cap = Number(C.widthCapRem) > 0 ? Number(C.widthCapRem) : 0;
+    var widthOn = cap >= 40;
+    var inset = Math.max(0, Math.min(24, Number(C.widthInsetRem) || 0));
+    // \u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F: content-visibility on conversation rows. ZCode only
+    // ships this for the SHARE view \u2014 the main chat's dynamic-height
+    // virtualizer measures rows live, and a plain contain-intrinsic-size
+    // would fight it (off-screen rows would report the estimate forever).
+    // The 'auto' keyword fixes that: a row keeps its LAST MEASURED size while
+    // skipped, so the virtualizer's cached heights stay valid; only the very
+    // first pass uses the 420px estimate (same value ZCode's share view uses).
+    var perfOn = Number(C.perfSmooth) === 1;
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
-    if (!anyOn) {
+    if (!masksOn && !widthOn && !perfOn) {
       if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
@@ -529,17 +544,38 @@ function buildBootstrapScript(payload) {
     }
     st.textContent = ':root{--zb-chat-dim:' + (C.chatDim / 100) + ';--zb-mask-top:' + (C.maskTop / 100)
       + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100) + '}'
-      + '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
-      + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
-      + 'background:linear-gradient(to bottom,rgb(0 0 0 / var(--zb-mask-top)),rgb(0 0 0 / 0) 30%,rgb(0 0 0 / 0) 70%,rgb(0 0 0 / var(--zb-mask-bot)))}'
-      // The conversation scroller carries distinctive Tailwind arbitrary
-      // classes; .zb-chat-col is the version-proof fallback (markChatCol).
-      + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
-      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';;
-    if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
-    if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
-    document.documentElement.appendChild(fr);
-    document.documentElement.appendChild(zm);
+      + (masksOn
+        ? '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
+          + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
+          + 'background:linear-gradient(to bottom,rgb(0 0 0 / var(--zb-mask-top)),rgb(0 0 0 / 0) 30%,rgb(0 0 0 / 0) 70%,rgb(0 0 0 / var(--zb-mask-bot)))}'
+          // The conversation scroller carries distinctive Tailwind arbitrary
+          // classes; .zb-chat-col is the version-proof fallback (markChatCol).
+          + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
+          + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}'
+        : '')
+      + (widthOn
+        // Mirrors ZCode's own tiers against the "conversation" container so
+        // nothing changes below 864px: wide tier gets both the raised ceiling
+        // and the slimmer side inset; the mid tier only its ceiling raised
+        // (stock calc(100% - 6rem) width keeps governing it). The three
+        // aligned holders (messages \xD72 + composer) share these class names.
+        ? '@container conversation (min-width:1280px){'
+          + '[class*="conversation:max-w-6xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
+          + '}'
+          + '@container conversation (min-width:864px){'
+          + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
+          + '}'
+        : '');
+    if (masksOn) {
+      if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
+      if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
+      document.documentElement.appendChild(fr);
+      document.documentElement.appendChild(zm);
+    } else {
+      // A width-only look must not inherit stale mask sheets from before.
+      if (fr) fr.remove();
+      if (zm) zm.remove();
+    }
     // Route changes (chat <-> settings) recreate the column, so keep tagging
     // it while the darkening is on. rAF-coalesced: streaming mutates a lot.
     if (C.chatDim > 0 && !window.__zcodeBeautify.chatObs) {
@@ -552,6 +588,61 @@ function buildBootstrapScript(payload) {
       });
       obs.observe(document.documentElement, { childList: true, subtree: true });
       window.__zcodeBeautify.chatObs = obs;
+    }
+    // \u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F engine: measure-then-skip per row. A global
+    // content-visibility rule with a 420px estimate was measured to shrink
+    // the virtualizer's total size 6x (scrollbar distortion) because the
+    // dynamic-height virtualizer reads the PLACEHOLDER before any real
+    // measurement sticks. Instead: on scroll/DOM idle, rows far off-screen
+    // get their REAL height baked into an inline contain-intrinsic-size
+    // BEFORE content-visibility turns on \u2014 total size stays exact, the
+    // virtualizer never sees a lie, and off-screen rows still skip layout.
+    window.__zcodeBeautify.perfOn = perfOn;
+    if (perfOn && !window.__zcodeBeautify.perfBound) {
+      window.__zcodeBeautify.perfBound = true;
+      window.addEventListener('scroll', perfSched, true);
+      window.addEventListener('resize', perfSched);
+      var perfMo = new MutationObserver(perfSched);
+      perfMo.observe(document.documentElement, { childList: true, subtree: true });
+      window.__zcodeBeautify.perfMo = perfMo;
+      perfSched();
+    } else if (!perfOn) {
+      if (window.__zcodeBeautify.perfMo) {
+        try { window.__zcodeBeautify.perfMo.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.perfMo = null;
+      }
+      var perfRows = document.querySelectorAll('[data-zb-cv="1"]');
+      for (var pri = 0; pri < perfRows.length; pri++) {
+        perfRows[pri].style.contentVisibility = '';
+        perfRows[pri].style.containIntrinsicSize = '';
+        perfRows[pri].removeAttribute('data-zb-cv');
+      }
+    }
+  }
+  function perfSched() {
+    if (window.__zcodeBeautify.perfTimer) return;
+    window.__zcodeBeautify.perfTimer = setTimeout(function() {
+      window.__zcodeBeautify.perfTimer = null;
+      if (!window.__zcodeBeautify.perfOn) return;
+      try { perfApply(); } catch (e) {}
+    }, 250);
+  }
+  function perfApply() {
+    var rows = document.querySelectorAll('.history-message, [class~="group/assistant-turn"]');
+    if (!rows.length) return;
+    var vh = window.innerHeight || 800;
+    // First read flushes any pending layout once; the rest read cached values.
+    for (var i = 0; i < rows.length; i++) {
+      var el = rows[i];
+      var r = el.getBoundingClientRect();
+      // Well outside the viewport (a full viewport of slack both ways).
+      if (r.bottom < -vh || r.top > 2 * vh) {
+        if (el.getAttribute('data-zb-cv') !== '1') {
+          el.setAttribute('data-zb-cv', '1');
+          el.style.containIntrinsicSize = Math.round(r.width) + 'px ' + Math.round(r.height) + 'px';
+          el.style.contentVisibility = 'auto';
+        }
+      }
     }
   }
   // The composer's first TALL scroll ancestor is the conversation column.
@@ -110524,11 +110615,17 @@ var init_launch = __esm({
 import path2 from "node:path";
 function normalizeChatLook(raw) {
   const pct = (v) => typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
+  const cap = typeof raw?.widthCapRem === "number" && Number.isFinite(raw.widthCapRem) ? Math.max(0, Math.min(120, Math.round(raw.widthCapRem))) : 0;
+  const capOn = cap >= 40 ? cap : 0;
+  const inset = capOn > 0 ? typeof raw?.widthInsetRem === "number" && Number.isFinite(raw.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem))) : CHAT_WIDTH_INSET_DEFAULT : 0;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
     maskBottom: pct(raw?.maskBottom),
-    frost: pct(raw?.frost)
+    frost: pct(raw?.frost),
+    widthCapRem: capOn,
+    widthInsetRem: inset,
+    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0
   };
 }
 function normalizeBubbleLook(raw) {
@@ -110680,7 +110777,7 @@ async function resetZCode(port) {
   }
   return count;
 }
-var DEFAULT_BUBBLE_LOOK, BUBBLE_PRESETS, DEFAULT_CONFIG;
+var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, BUBBLE_PRESETS, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
@@ -110689,6 +110786,7 @@ var init_inject = __esm({
     init_monet();
     init_tokens();
     init_launch();
+    CHAT_WIDTH_INSET_DEFAULT = 12;
     DEFAULT_BUBBLE_LOOK = {
       preset: "default",
       tint: 28,
@@ -111951,7 +112049,9 @@ function baseConfig(opts, stored) {
     // Partial bubble patches merge over the stored look so callers (MCP
     // apply_options / the bubble command) can change one aspect — radius only,
     // preset only — without re-sending (and resetting) the rest.
-    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook
+    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
+    // Chat look merges the same way (masks + column width), then normalizes.
+    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -112193,7 +112293,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "0.4.4";
+    VERSION = "0.4.7";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Logocceai";
@@ -112766,7 +112866,27 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">\u804A\u5929\u533A</div>' +
     '      <div class="zb-card">' +
-    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u804A\u5929\u533A\u6697\u5EA6</span><span class="zb-set-sub">\u5BF9\u8BDD\u5217\u80CC\u540E\u7684\u989D\u5916\u538B\u6697,\u6D88\u606F\u6587\u5B57\u6D6E\u5728\u5176\u4E0A\u4E0D\u53D7\u5F71\u54CD</span></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6D88\u606F\u6D41\u5BBD\u5EA6</span><span class="zb-set-sub">\u4E2D\u95F4\u5BF9\u8BDD\u5217\u7684\u5BBD\u5EA6\u6863\u4F4D;\u59CB\u7EC8\u8DDF\u968F\u7A97\u53E3\u7F29\u653E,\u539F\u751F=\u4E0D\u6539\u5BBD\u5EA6</span></div>' +
+      '        <div class="zb-ctrl"><select id="zb-chat-width" title="\u4E2D\u95F4\u5BF9\u8BDD\u5217\u7684\u5BBD\u5EA6\u6863\u4F4D;\u516C\u5F0F\u5316\u4E0A\u9650+\u4E24\u4FA7\u7559\u767D,\u7A97\u53E3\u7F29\u653E\u65F6\u81EA\u52A8\u8DDF\u968F">' +
+      '          <option value="0">\u539F\u751F</option>' +
+      '          <option value="48:24">\u5F88\u7A84</option>' +
+      '          <option value="56:24">\u7A84</option>' +
+      '          <option value="64:24">\u504F\u7A84</option>' +
+      '          <option value="84:12">\u5BBD</option>' +
+      '          <option value="90:8">\u66F4\u5BBD</option>' +
+      '          <option value="100:4">\u6781\u9650</option>' +
+      // \u56DE\u663E\u4E13\u7528:\u5F53\u524D cap/inset \u4E0D\u5339\u914D\u4EFB\u4F55\u6863\u4F4D\u65F6\u9009\u4E2D;disabled \u9632\u6B62\u88AB\u70B9\u5230
+      '          <option value="custom" disabled>\u81EA\u5B9A\u4E49</option>' +
+      '        </select>' +
+      '        <button class="zb-btn" id="zb-chat-width-add" title="\u6253\u5F00\u81EA\u5B9A\u4E49\u5BBD\u5EA6\u7F16\u8F91:\u4E0A\u9650\u4E0E\u4E24\u4FA7\u7559\u767D(rem),\u5E94\u7528\u540E\u751F\u6548">\u2795 \u81EA\u5B9A\u4E49\u2026</button></div></div>' +
+      '      <div class="zb-set" id="zb-chat-width-custom" hidden><div class="zb-set-main"><span class="zb-set-name">\u81EA\u5B9A\u4E49\u5BBD\u5EA6</span><span class="zb-set-sub">\u4E0A\u9650=\u5BF9\u8BDD\u5217\u6700\u5927\u5BBD\u5EA6(rem,0=\u539F\u751F);\u7559\u767D=\u4E24\u4FA7\u6536\u7F29(rem,\u8D8A\u5C0F\u8D8A\u5BBD)</span></div>' +
+      '        <div class="zb-ctrl"><input type="number" id="zb-chat-width-cap" min="0" max="120" step="1" title="\u5BF9\u8BDD\u5217\u5BBD\u5EA6\u4E0A\u9650,\u5355\u4F4D rem(0=\u539F\u751F;40-120 \u6709\u6548)"><span class="zb-val">rem\u4E0A\u9650</span>' +
+      '        <input type="number" id="zb-chat-width-inset" min="0" max="24" step="1" title="\u4E24\u4FA7\u7559\u767D,\u5355\u4F4D rem(\u539F\u751F 24;0=\u8D34\u8FB9)"><span class="zb-val">rem\u7559\u767D</span>' +
+      '        <button class="zb-btn" id="zb-chat-width-ok" title="\u5E94\u7528\u8FD9\u4E24\u4E2A\u6570\u503C\u5E76\u5173\u95ED\u7F16\u8F91">\u2713 \u5E94\u7528</button>' +
+      '        <button class="zb-btn" id="zb-chat-width-cancel" title="\u653E\u5F03\u4FEE\u6539\u5E76\u5173\u95ED\u7F16\u8F91">\u2715</button></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F</span><span class="zb-set-sub">\u6D88\u606F\u884C\u5C4F\u5916\u8DF3\u8FC7\u6E32\u67D3(\u5B98\u65B9\u4EC5\u5206\u4EAB\u89C6\u56FE\u6709\u6B64\u4F18\u5316);\u5927\u4E0A\u4E0B\u6587\u4F1A\u8BDD\u7684\u6253\u5F00\u4E0E\u6EDA\u52A8\u66F4\u7701,\u9996\u6B21\u6E32\u67D3\u53EF\u80FD\u8F7B\u5FAE\u9AD8\u5EA6\u8DF3\u52A8</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="\u7ED9\u6D88\u606F\u884C\u6CE8\u5165 content-visibility:auto:\u89C6\u53E3\u5916\u7684\u884C\u8DF3\u8FC7\u7ED8\u5236\u4E0E\u5E03\u5C40,\u6EDA\u5165\u65F6\u518D\u6E32\u67D3;\u884C\u9AD8\u8BB0\u5FC6\u4E0A\u6B21\u5B9E\u6D4B\u503C,\u4E0D\u5F71\u54CD\u865A\u62DF\u6EDA\u52A8"></label></div>' +
+      '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u804A\u5929\u533A\u6697\u5EA6</span><span class="zb-set-sub">\u5BF9\u8BDD\u5217\u80CC\u540E\u7684\u989D\u5916\u538B\u6697,\u6D88\u606F\u6587\u5B57\u6D6E\u5728\u5176\u4E0A\u4E0D\u53D7\u5F71\u54CD</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u906E\u7F69\u4E0A\u7AEF</span><span class="zb-set-sub">\u7A97\u53E3\u9876\u90E8\u5411\u4E0B\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6</span></div>' +
     '        <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-top-val">0.00</span></span></div>' +
@@ -113121,7 +113241,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     if (on) {
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
-      setChatSliders(0, 0, 0, 0);
+      setChatSliders(0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -113168,7 +113288,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0);
         setBubbleUI(c.bubbleLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
@@ -113316,11 +113436,35 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   });
 
   // --- chat-area zone look (\u804A\u5929\u754C\u9762) ----------------------------------------
-  function setChatSliders(d, mu, mb, f) {
+  var CHAT_WIDTH_PRESETS = { '48:24': 1, '56:24': 1, '64:24': 1, '84:12': 1, '90:8': 1, '100:4': 1 };
+  // The custom editor is user-owned UI state: while it is open the 4s beat
+  // must NOT re-reflect (it used to snap the select back to the stored gear
+  // and silently close the editor mid-typing \u2014 the "\u81EA\u52A8\u5173\u95ED" bug).
+  var widthEditing = false;
+  // Authoritative width the SERVER holds (updated by reflect / gear / apply).
+  // pushChatLook sends these \u2014 NOT the editor inputs, so dragging a mask
+  // slider while the editor holds half-typed numbers can't leak them.
+  var widthServerCap = 0, widthServerInset = 0;
+  // cap 0 \u2192 \u539F\u751F; a stored (cap,inset) matching a preset option selects it,
+  // anything else falls to the disabled \u81EA\u5B9A\u4E49 marker option.
+  function reflectChatWidth(cap, inset) {
+    cap = Math.max(0, Math.min(120, Math.round(Number(cap) || 0)));
+    inset = Math.max(0, Math.min(24, Math.round(Number(inset) || 0)));
+    widthServerCap = cap; widthServerInset = cap > 0 ? inset : 0;
+    if (widthEditing) return;
+    var key = cap + ':' + inset;
+    $('zb-chat-width').value = cap === 0 ? '0' : (CHAT_WIDTH_PRESETS[key] ? key : 'custom');
+    $('zb-chat-width-cap').value = cap;
+    $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
+  }
+  function setChatSliders(d, mu, mb, f, cap, inset, perf) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
     $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
+    var perfEl = $('zb-chat-perf');
+    if (perfEl) perfEl.checked = perf === 1;
+    reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again \u2014 inline
     // vars outrank the stylesheet and would otherwise pin stale previews.
@@ -113349,7 +113493,10 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
           chatDim: Number($('zb-chat-dim').value),
           maskTop: Number($('zb-chat-top').value),
           maskBottom: Number($('zb-chat-bot').value),
-          frost: Number($('zb-chat-frost').value)
+          frost: Number($('zb-chat-frost').value),
+          widthCapRem: widthServerCap,
+          widthInsetRem: widthServerInset,
+          perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -113360,6 +113507,54 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
       $(pair[1]).textContent = (v / 100).toFixed(2);
       chatPreview(Number($('zb-chat-dim').value), Number($('zb-chat-top').value), Number($('zb-chat-bot').value), Number($('zb-chat-frost').value));
       pushChatLook();
+    });
+  });
+  // Column width: a gear writes both numbers and pushes immediately. The
+  // custom editor is opened by the \u2795 button and only pushes on \u2713 \u5E94\u7528 \u2014
+  // typing in it never pushes, and the beat never touches it while open.
+  $('zb-chat-width').addEventListener('change', function () {
+    if (this.value === 'custom') return; // disabled marker; reflect-only
+    if (this.value === '0') { reflectChatWidth(0, 0); pushChatLook(); return; }
+    var parts = this.value.split(':');
+    reflectChatWidth(parts[0], parts[1] || 12);
+    pushChatLook();
+  });
+  $('zb-chat-width-add').addEventListener('click', function () {
+    widthEditing = true;
+    // Prefill from the live select/inputs so editing starts from the truth.
+    if ($('zb-chat-width').value !== 'custom' && $('zb-chat-width').value !== '0') {
+      var parts = $('zb-chat-width').value.split(':');
+      $('zb-chat-width-cap').value = parts[0];
+      $('zb-chat-width-inset').value = parts[1] || 12;
+    }
+    $('zb-chat-width-custom').hidden = false;
+    $('zb-chat-width-cap').focus();
+  });
+  $('zb-chat-width-ok').addEventListener('click', function () {
+    var cap = Math.max(0, Math.min(120, Math.round(Number($('zb-chat-width-cap').value) || 0)));
+    var inset = Math.max(0, Math.min(24, Math.round(Number($('zb-chat-width-inset').value) || 0)));
+    $('zb-chat-width-cap').value = cap;
+    $('zb-chat-width-inset').value = cap > 0 ? inset : 0;
+    widthEditing = false;
+    $('zb-chat-width-custom').hidden = true;
+    reflectChatWidth(cap, $('zb-chat-width-inset').value);
+    pushChatLook();
+  });
+  // Cancel keeps the select untouched; the next beat re-reflects the stored
+  // server truth (the inputs may hold half-edited numbers).
+  $('zb-chat-width-cancel').addEventListener('click', function () {
+    widthEditing = false;
+    $('zb-chat-width-custom').hidden = true;
+  });
+  $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
+  ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
+    $(id).addEventListener('change', function () {
+      var max = id === 'zb-chat-width-cap' ? 120 : 24;
+      this.value = Math.max(0, Math.min(max, Math.round(Number(this.value) || 0)));
+    });
+    $(id).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') $('zb-chat-width-ok').click();
+      if (ev.key === 'Escape') $('zb-chat-width-cancel').click();
     });
   });
 
@@ -115870,11 +116065,16 @@ function sanitize(body) {
   const cl = body?.chatLook;
   if (cl && typeof cl === "object") {
     const pct = (v) => typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : void 0;
+    const cap = typeof cl.widthCapRem === "number" && Number.isFinite(cl.widthCapRem) ? Math.max(0, Math.min(120, Math.round(cl.widthCapRem))) : 0;
+    const capOn = cap >= 40 ? cap : 0;
     out.chatLook = {
       chatDim: pct(cl.chatDim) ?? 0,
       maskTop: pct(cl.maskTop) ?? 0,
       maskBottom: pct(cl.maskBottom) ?? 0,
-      frost: pct(cl.frost) ?? 0
+      frost: pct(cl.frost) ?? 0,
+      widthCapRem: capOn,
+      widthInsetRem: capOn > 0 ? typeof cl.widthInsetRem === "number" && Number.isFinite(cl.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(cl.widthInsetRem))) : 12 : 0,
+      perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0
     };
   }
   if (body?.bubbleLook && typeof body.bubbleLook === "object") {

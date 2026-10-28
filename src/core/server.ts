@@ -259,16 +259,28 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (body?.themeColor === null) out.themeColor = undefined;
   else if (typeof body?.themeColor === "string" && /^#[0-9a-fA-F]{6}$/.test(body.themeColor)) out.themeColor = body.themeColor;
   if (body?.fit === "cover" || body?.fit === "contain" || body?.fit === "smart") out.fit = body.fit;
-  // Chat-area zone look (聊天界面): frost/edge masks + chat column dim.
+  // Chat-area zone look (聊天界面): frost/edge masks + chat column dim +
+  // conversation column width (消息流宽度: rem ceiling, 0 = stock).
   const cl = body?.chatLook;
   if (cl && typeof cl === "object") {
     const pct = (v: unknown): number | undefined =>
       typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : undefined;
+    const cap = typeof cl.widthCapRem === "number" && Number.isFinite(cl.widthCapRem)
+      ? Math.max(0, Math.min(120, Math.round(cl.widthCapRem)))
+      : 0;
+    const capOn = cap >= 40 ? cap : 0;
     out.chatLook = {
       chatDim: pct(cl.chatDim) ?? 0,
       maskTop: pct(cl.maskTop) ?? 0,
       maskBottom: pct(cl.maskBottom) ?? 0,
       frost: pct(cl.frost) ?? 0,
+      widthCapRem: capOn,
+      widthInsetRem: capOn > 0
+        ? (typeof cl.widthInsetRem === "number" && Number.isFinite(cl.widthInsetRem)
+            ? Math.max(0, Math.min(24, Math.round(cl.widthInsetRem)))
+            : 12)
+        : 0,
+      perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
     };
   }
   // User message bubble look (聊天气泡): normalizeBubbleLook fills any field

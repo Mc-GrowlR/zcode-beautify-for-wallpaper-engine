@@ -7301,7 +7301,7 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
@@ -7660,11 +7660,26 @@ function buildBootstrapScript(payload) {
   function applyChatLook() {
     var C;
     try { C = JSON.parse(CHAT); } catch (e) { return; }
-    var anyOn = C.chatDim > 0 || C.maskTop > 0 || C.maskBottom > 0 || C.frost > 0;
+    var masksOn = C.chatDim > 0 || C.maskTop > 0 || C.maskBottom > 0 || C.frost > 0;
+    // Column width (\u6D88\u606F\u6D41\u5BBD\u5EA6): 0 = stock. Formulas only \u2014 a rem ceiling plus
+    // a calc(100% - inset) width keeps the column tracking the window exactly
+    // like ZCode's own container-query tiers (verified: fixed px widths would
+    // overflow on shrink and width:auto collapses the composer to ~32px).
+    var cap = Number(C.widthCapRem) > 0 ? Number(C.widthCapRem) : 0;
+    var widthOn = cap >= 40;
+    var inset = Math.max(0, Math.min(24, Number(C.widthInsetRem) || 0));
+    // \u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F: content-visibility on conversation rows. ZCode only
+    // ships this for the SHARE view \u2014 the main chat's dynamic-height
+    // virtualizer measures rows live, and a plain contain-intrinsic-size
+    // would fight it (off-screen rows would report the estimate forever).
+    // The 'auto' keyword fixes that: a row keeps its LAST MEASURED size while
+    // skipped, so the virtualizer's cached heights stay valid; only the very
+    // first pass uses the 420px estimate (same value ZCode's share view uses).
+    var perfOn = Number(C.perfSmooth) === 1;
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
-    if (!anyOn) {
+    if (!masksOn && !widthOn && !perfOn) {
       if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
@@ -7681,17 +7696,38 @@ function buildBootstrapScript(payload) {
     }
     st.textContent = ':root{--zb-chat-dim:' + (C.chatDim / 100) + ';--zb-mask-top:' + (C.maskTop / 100)
       + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100) + '}'
-      + '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
-      + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
-      + 'background:linear-gradient(to bottom,rgb(0 0 0 / var(--zb-mask-top)),rgb(0 0 0 / 0) 30%,rgb(0 0 0 / 0) 70%,rgb(0 0 0 / var(--zb-mask-bot)))}'
-      // The conversation scroller carries distinctive Tailwind arbitrary
-      // classes; .zb-chat-col is the version-proof fallback (markChatCol).
-      + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
-      + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}';;
-    if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
-    if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
-    document.documentElement.appendChild(fr);
-    document.documentElement.appendChild(zm);
+      + (masksOn
+        ? '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
+          + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
+          + 'background:linear-gradient(to bottom,rgb(0 0 0 / var(--zb-mask-top)),rgb(0 0 0 / 0) 30%,rgb(0 0 0 / 0) 70%,rgb(0 0 0 / var(--zb-mask-bot)))}'
+          // The conversation scroller carries distinctive Tailwind arbitrary
+          // classes; .zb-chat-col is the version-proof fallback (markChatCol).
+          + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
+          + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}'
+        : '')
+      + (widthOn
+        // Mirrors ZCode's own tiers against the "conversation" container so
+        // nothing changes below 864px: wide tier gets both the raised ceiling
+        // and the slimmer side inset; the mid tier only its ceiling raised
+        // (stock calc(100% - 6rem) width keeps governing it). The three
+        // aligned holders (messages \xD72 + composer) share these class names.
+        ? '@container conversation (min-width:1280px){'
+          + '[class*="conversation:max-w-6xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
+          + '}'
+          + '@container conversation (min-width:864px){'
+          + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
+          + '}'
+        : '');
+    if (masksOn) {
+      if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
+      if (!zm) { zm = document.createElement('div'); zm.id = MARKER + '-zonemask'; }
+      document.documentElement.appendChild(fr);
+      document.documentElement.appendChild(zm);
+    } else {
+      // A width-only look must not inherit stale mask sheets from before.
+      if (fr) fr.remove();
+      if (zm) zm.remove();
+    }
     // Route changes (chat <-> settings) recreate the column, so keep tagging
     // it while the darkening is on. rAF-coalesced: streaming mutates a lot.
     if (C.chatDim > 0 && !window.__zcodeBeautify.chatObs) {
@@ -7704,6 +7740,61 @@ function buildBootstrapScript(payload) {
       });
       obs.observe(document.documentElement, { childList: true, subtree: true });
       window.__zcodeBeautify.chatObs = obs;
+    }
+    // \u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F engine: measure-then-skip per row. A global
+    // content-visibility rule with a 420px estimate was measured to shrink
+    // the virtualizer's total size 6x (scrollbar distortion) because the
+    // dynamic-height virtualizer reads the PLACEHOLDER before any real
+    // measurement sticks. Instead: on scroll/DOM idle, rows far off-screen
+    // get their REAL height baked into an inline contain-intrinsic-size
+    // BEFORE content-visibility turns on \u2014 total size stays exact, the
+    // virtualizer never sees a lie, and off-screen rows still skip layout.
+    window.__zcodeBeautify.perfOn = perfOn;
+    if (perfOn && !window.__zcodeBeautify.perfBound) {
+      window.__zcodeBeautify.perfBound = true;
+      window.addEventListener('scroll', perfSched, true);
+      window.addEventListener('resize', perfSched);
+      var perfMo = new MutationObserver(perfSched);
+      perfMo.observe(document.documentElement, { childList: true, subtree: true });
+      window.__zcodeBeautify.perfMo = perfMo;
+      perfSched();
+    } else if (!perfOn) {
+      if (window.__zcodeBeautify.perfMo) {
+        try { window.__zcodeBeautify.perfMo.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.perfMo = null;
+      }
+      var perfRows = document.querySelectorAll('[data-zb-cv="1"]');
+      for (var pri = 0; pri < perfRows.length; pri++) {
+        perfRows[pri].style.contentVisibility = '';
+        perfRows[pri].style.containIntrinsicSize = '';
+        perfRows[pri].removeAttribute('data-zb-cv');
+      }
+    }
+  }
+  function perfSched() {
+    if (window.__zcodeBeautify.perfTimer) return;
+    window.__zcodeBeautify.perfTimer = setTimeout(function() {
+      window.__zcodeBeautify.perfTimer = null;
+      if (!window.__zcodeBeautify.perfOn) return;
+      try { perfApply(); } catch (e) {}
+    }, 250);
+  }
+  function perfApply() {
+    var rows = document.querySelectorAll('.history-message, [class~="group/assistant-turn"]');
+    if (!rows.length) return;
+    var vh = window.innerHeight || 800;
+    // First read flushes any pending layout once; the rest read cached values.
+    for (var i = 0; i < rows.length; i++) {
+      var el = rows[i];
+      var r = el.getBoundingClientRect();
+      // Well outside the viewport (a full viewport of slack both ways).
+      if (r.bottom < -vh || r.top > 2 * vh) {
+        if (el.getAttribute('data-zb-cv') !== '1') {
+          el.setAttribute('data-zb-cv', '1');
+          el.style.containIntrinsicSize = Math.round(r.width) + 'px ' + Math.round(r.height) + 'px';
+          el.style.contentVisibility = 'auto';
+        }
+      }
     }
   }
   // The composer's first TALL scroll ancestor is the conversation column.
@@ -146462,13 +146553,20 @@ function tokenRows(theme, mode, opts) {
 // dist/core/inject.js
 init_launch();
 import path2 from "node:path";
+var CHAT_WIDTH_INSET_DEFAULT = 12;
 function normalizeChatLook(raw) {
   const pct = (v) => typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
+  const cap = typeof raw?.widthCapRem === "number" && Number.isFinite(raw.widthCapRem) ? Math.max(0, Math.min(120, Math.round(raw.widthCapRem))) : 0;
+  const capOn = cap >= 40 ? cap : 0;
+  const inset = capOn > 0 ? typeof raw?.widthInsetRem === "number" && Number.isFinite(raw.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem))) : CHAT_WIDTH_INSET_DEFAULT : 0;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
     maskBottom: pct(raw?.maskBottom),
-    frost: pct(raw?.frost)
+    frost: pct(raw?.frost),
+    widthCapRem: capOn,
+    widthInsetRem: inset,
+    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0
   };
 }
 var DEFAULT_BUBBLE_LOOK = {
@@ -146693,7 +146791,9 @@ function baseConfig(opts, stored) {
     // Partial bubble patches merge over the stored look so callers (MCP
     // apply_options / the bubble command) can change one aspect — radius only,
     // preset only — without re-sending (and resetting) the rest.
-    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook
+    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
+    // Chat look merges the same way (masks + column width), then normalizes.
+    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -146765,7 +146865,7 @@ init_wallpaperType();
 init_launch();
 
 // dist/version.js
-var VERSION = "0.4.4";
+var VERSION = "0.4.7";
 
 // dist/mcp/server.js
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
@@ -146908,12 +147008,18 @@ server.registerTool("apply_options", {
       width: external_exports.number().min(40).max(90).optional().describe("Max bubble width as % of the conversation column"),
       align: external_exports.enum(["right", "left"]).optional().describe("Bubble alignment (right is ZCode stock)"),
       custom_css: external_exports.string().max(8e3).optional().describe('CSS applied when preset = "custom", written against the friendly selectors .zb-bubble (the user message bubble) and .zb-bubble-row (its conversation row). CSS only \u2014 @import, javascript: and </style are stripped. Prefer live theme tokens like var(--color-primary)/var(--color-surface) so a Monet re-theme restyles the bubble too; suffix declarations with !important')
-    }).optional().describe("User message bubble look; omitted fields keep their current value")
+    }).optional().describe("User message bubble look; omitted fields keep their current value"),
+    chat_width_cap_rem: external_exports.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (\u6D88\u606F\u6D41\u5BBD\u5EA6\u4E0A\u9650). 0 = stock responsive width; 40-120 widens the column (78 \u2248 wide, 100+ \u2248 near full width on large windows). The column still tracks window resizes \u2014 only the ceiling changes"),
+    chat_width_inset_rem: external_exports.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0")
   }
-}, async ({ blur, dim, monet, wallpaper_visible, fit, bubble }) => {
+}, async ({ blur, dim, monet, wallpaper_visible, fit, bubble, chat_width_cap_rem, chat_width_inset_rem }) => {
   try {
     const bubbleLook = bubble === void 0 ? void 0 : Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== void 0));
-    const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook });
+    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 ? void 0 : {
+      ...chat_width_cap_rem !== void 0 ? { widthCapRem: chat_width_cap_rem } : {},
+      ...chat_width_inset_rem !== void 0 ? { widthInsetRem: chat_width_inset_rem } : {}
+    };
+    const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, chatLook });
     return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };

@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, type BeautifyConfig, type BubbleLookConfig, type BuiltPayload } from "./inject.js";
+import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLook, type BeautifyConfig, type BubbleLookConfig, type ChatLookConfig, type BuiltPayload } from "./inject.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
@@ -19,6 +19,8 @@ export interface ApplyOptions {
   fit?: "cover" | "contain" | "smart";
   /** User message bubble look (聊天气泡); merged over the stored config. */
   bubbleLook?: Partial<BubbleLookConfig>;
+  /** Chat-area look patch (聊天界面); merged over the stored config. */
+  chatLook?: Partial<ChatLookConfig>;
 }
 
 /** Applies (or refreshes) the theme using the stored config. */
@@ -93,6 +95,10 @@ export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>):
     // apply_options / the bubble command) can change one aspect — radius only,
     // preset only — without re-sending (and resetting) the rest.
     bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
+    // Chat look merges the same way (masks + column width), then normalizes.
+    chatLook: normalizeChatLook(
+      opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook
+    ),
   };
 }
 

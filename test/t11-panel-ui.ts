@@ -192,7 +192,7 @@ const SCRIPT = buildPanelScript(9223, "t11-token", false);
   check("input card stays stock (no corner surgery)", !sq);
   const boot = buildBootstrapScript({
     css: "",
-    chatLook: { chatDim: 40, maskTop: 0, maskBottom: 0, frost: 0 },
+    chatLook: { chatDim: 40, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0 },
     bubbleLook: { preset: "default", tint: 28, radius: 12, width: 70, align: "right" },
   });
   check("chat-dim still paints the column", boot.includes("--zb-chat-dim"));
@@ -204,7 +204,7 @@ const FIXTURE = {
   blur: 7, dim: 25, monet: true, wallpaperVisible: true, kenBurns: false,
   videoVolume: 35, themeColor: null,
   dayNight: { enabled: true, start: "06:30", end: "18:30", dayDim: 20, nightDim: 55, dayBlur: 0, nightBlur: 6 },
-  chatLook: { chatDim: 12, maskTop: 20, maskBottom: 10, frost: 5 },
+  chatLook: { chatDim: 12, maskTop: 20, maskBottom: 10, frost: 5, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 },
   bubbleLook: { preset: "glass", tint: 28, radius: 12, width: 70, align: "left", customCss: ".zb-bubble { outline: 1px dashed test; }" },
   startupClean: true, showOnUpdater: false, importRes: { mode: "auto" },
   fit: "contain", wallpaperSet: true, hasBackup: false,
@@ -323,6 +323,12 @@ check("✕ closes the panel", $id("zb-panel").hidden);
 $id("zb-fab").click();
 await sleep(60);
 check("reopen restores last page (外观)", tabButton("外观").getAttribute("data-active") === "1");
+// Reopening the panel re-armed the 4s beat interval; freeze it again or a
+// beat tick can land inside any later assertion's async window (it did: the
+// width tests below stretched the timeline until one tick hit the bubble
+// css preview check and yanked the textarea back to the fixture value).
+for (const t of w.__zbTimers ?? []) w.clearInterval(t);
+w.__zbTimers = [];
 
 // slider tuning: live label + preview var + debounced POST
 // (wait for switchTab's refresh() to land first — a human cannot outrun it,
@@ -336,6 +342,79 @@ check("chat preview css var set", doc.documentElement.style.getPropertyValue("--
 await sleep(420); // pushChatLook debounce is 300ms
 const chatPost = calls.filter((c) => c.method === "POST" && c.path === "/api/config" && c.body && "chatLook" in c.body).pop();
 check("chat look posted to serve", !!chatPost && (chatPost.body!.chatLook as { chatDim: number }).chatDim === 40);
+
+// column width (消息流宽度): gears post cap+inset; 自定义 is a ➕ BUTTON now
+// (select option is a disabled reflect-only marker) whose editor survives the
+// 4s beat and only pushes on ✓ 应用 — the old select-option version used to
+// snap shut on the next beat.
+const chatLookPosts = () => calls.filter((c) => c.method === "POST" && c.path === "/api/config" && c.body && "chatLook" in c.body);
+const lastChatLook = () => (chatLookPosts().pop()!.body!.chatLook as Record<string, number>);
+check("perf toggle starts off", (input("zb-chat-perf") as unknown as HTMLInputElement).checked === false);
+(input("zb-chat-perf") as unknown as HTMLInputElement).checked = true;
+fire(input("zb-chat-perf"), "change");
+await sleep(420);
+check("perf toggle posts perfSmooth 1", lastChatLook().perfSmooth === 1);
+check("width select starts at 原生", select("zb-chat-width").value === "0");
+check("editor hidden at 原生", $id("zb-chat-width-custom").hidden);
+select("zb-chat-width").value = "90:8";
+fire(select("zb-chat-width"), "change");
+await sleep(420);
+check("wide gear posts cap+inset", lastChatLook().widthCapRem === 90 && lastChatLook().widthInsetRem === 8);
+check("gear fills the editor numbers", input("zb-chat-width-cap").value === "90" && input("zb-chat-width-inset").value === "8");
+check("editor stays hidden for a gear", $id("zb-chat-width-custom").hidden);
+select("zb-chat-width").value = "56:24";
+fire(select("zb-chat-width"), "change");
+await sleep(420);
+check("narrow gear posts 56:24", lastChatLook().widthCapRem === 56 && lastChatLook().widthInsetRem === 24);
+
+// ➕ 自定义 editor: opens via button, survives beats, pushes only on ✓
+$id("zb-chat-width-add").click();
+check("➕ button reveals the editor", !$id("zb-chat-width-custom").hidden);
+input("zb-chat-width-cap").value = "110";
+fire(input("zb-chat-width-cap"), "change");
+const postsBeforeBeat = chatLookPosts().length;
+// a beat (tab switch → refresh) mid-edit must NOT close the editor or snap
+// the select — the 自动关闭 regression
+FIXTURE.chatLook = { chatDim: 12, maskTop: 20, maskBottom: 10, frost: 5, widthCapRem: 56, widthInsetRem: 24 };
+tabButton("通用").click();
+tabButton("聊天").click();
+await sleep(150);
+check("beat mid-edit keeps the editor open", !$id("zb-chat-width-custom").hidden);
+check("beat mid-edit never posted the half-typed width", chatLookPosts().length === postsBeforeBeat);
+// dragging a MASK slider mid-edit must push the SERVER width, not the editor's
+input("zb-chat-dim").value = "30";
+fire(input("zb-chat-dim"), "input");
+await sleep(420);
+check("mask push mid-edit carries server width (56), not the editor (110)",
+  lastChatLook().widthCapRem === 56 && lastChatLook().widthInsetRem === 24 && lastChatLook().chatDim === 30);
+check("editor still open after the mask push", !$id("zb-chat-width-custom").hidden);
+$id("zb-chat-width-ok").click();
+await sleep(420);
+check("✓ 应用 posts the edited cap", lastChatLook().widthCapRem === 110);
+check("✓ 应用 closes the editor", $id("zb-chat-width-custom").hidden);
+check("applied value reflects to the 自定义 marker", select("zb-chat-width").value === "custom");
+
+// ✕ cancel: discards — no post, editor closed, next beat restores truth
+FIXTURE.chatLook = { chatDim: 30, maskTop: 20, maskBottom: 10, frost: 5, widthCapRem: 56, widthInsetRem: 24 };
+tabButton("通用").click();
+tabButton("聊天").click();
+await sleep(150);
+$id("zb-chat-width-add").click();
+input("zb-chat-width-cap").value = "118";
+fire(input("zb-chat-width-cap"), "change");
+const beforeCancel = chatLookPosts().length;
+$id("zb-chat-width-cancel").click();
+await sleep(420);
+check("✕ cancel posts nothing", chatLookPosts().length === beforeCancel);
+check("✕ cancel closes the editor", $id("zb-chat-width-custom").hidden);
+FIXTURE.chatLook = { chatDim: 30, maskTop: 20, maskBottom: 10, frost: 5, widthCapRem: 84, widthInsetRem: 12 };
+tabButton("通用").click();
+tabButton("聊天").click();
+await sleep(150);
+check("preset width reflects to the gear option", select("zb-chat-width").value === "84:12");
+// The ➕ editor focused zb-chat-width-cap; leaving it focused would defeat the
+// bubble textarea's activeElement guard for the tests below (jsdom keeps it).
+(input("zb-chat-width-cap") as HTMLElement).blur?.();
 
 // custom bubble style: dedicated editor WINDOW (✏️ button, still on 聊天)
 const srcdoc = () => $id("zb-bubble-pv-frame").getAttribute("srcdoc") || "";

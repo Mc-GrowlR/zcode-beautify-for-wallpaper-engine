@@ -578,7 +578,27 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">聊天区</div>' +
     '      <div class="zb-card">' +
-    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">聊天区暗度</span><span class="zb-set-sub">对话列背后的额外压暗,消息文字浮在其上不受影响</span></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">消息流宽度</span><span class="zb-set-sub">中间对话列的宽度档位;始终跟随窗口缩放,原生=不改宽度</span></div>' +
+      '        <div class="zb-ctrl"><select id="zb-chat-width" title="中间对话列的宽度档位;公式化上限+两侧留白,窗口缩放时自动跟随">' +
+      '          <option value="0">原生</option>' +
+      '          <option value="48:24">很窄</option>' +
+      '          <option value="56:24">窄</option>' +
+      '          <option value="64:24">偏窄</option>' +
+      '          <option value="84:12">宽</option>' +
+      '          <option value="90:8">更宽</option>' +
+      '          <option value="100:4">极限</option>' +
+      // 回显专用:当前 cap/inset 不匹配任何档位时选中;disabled 防止被点到
+      '          <option value="custom" disabled>自定义</option>' +
+      '        </select>' +
+      '        <button class="zb-btn" id="zb-chat-width-add" title="打开自定义宽度编辑:上限与两侧留白(rem),应用后生效">➕ 自定义…</button></div></div>' +
+      '      <div class="zb-set" id="zb-chat-width-custom" hidden><div class="zb-set-main"><span class="zb-set-name">自定义宽度</span><span class="zb-set-sub">上限=对话列最大宽度(rem,0=原生);留白=两侧收缩(rem,越小越宽)</span></div>' +
+      '        <div class="zb-ctrl"><input type="number" id="zb-chat-width-cap" min="0" max="120" step="1" title="对话列宽度上限,单位 rem(0=原生;40-120 有效)"><span class="zb-val">rem上限</span>' +
+      '        <input type="number" id="zb-chat-width-inset" min="0" max="24" step="1" title="两侧留白,单位 rem(原生 24;0=贴边)"><span class="zb-val">rem留白</span>' +
+      '        <button class="zb-btn" id="zb-chat-width-ok" title="应用这两个数值并关闭编辑">✓ 应用</button>' +
+      '        <button class="zb-btn" id="zb-chat-width-cancel" title="放弃修改并关闭编辑">✕</button></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">大会话流畅模式</span><span class="zb-set-sub">消息行屏外跳过渲染(官方仅分享视图有此优化);大上下文会话的打开与滚动更省,首次渲染可能轻微高度跳动</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="给消息行注入 content-visibility:auto:视口外的行跳过绘制与布局,滚入时再渲染;行高记忆上次实测值,不影响虚拟滚动"></label></div>' +
+      '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">聊天区暗度</span><span class="zb-set-sub">对话列背后的额外压暗,消息文字浮在其上不受影响</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">遮罩上端</span><span class="zb-set-sub">窗口顶部向下渐隐遮罩的浓度</span></div>' +
     '        <input type="range" id="zb-chat-top" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-top-val">0.00</span></span></div>' +
@@ -933,7 +953,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     if (on) {
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
-      setChatSliders(0, 0, 0, 0);
+      setChatSliders(0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -980,7 +1000,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0);
         setBubbleUI(c.bubbleLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
@@ -1128,11 +1148,35 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   });
 
   // --- chat-area zone look (聊天界面) ----------------------------------------
-  function setChatSliders(d, mu, mb, f) {
+  var CHAT_WIDTH_PRESETS = { '48:24': 1, '56:24': 1, '64:24': 1, '84:12': 1, '90:8': 1, '100:4': 1 };
+  // The custom editor is user-owned UI state: while it is open the 4s beat
+  // must NOT re-reflect (it used to snap the select back to the stored gear
+  // and silently close the editor mid-typing — the "自动关闭" bug).
+  var widthEditing = false;
+  // Authoritative width the SERVER holds (updated by reflect / gear / apply).
+  // pushChatLook sends these — NOT the editor inputs, so dragging a mask
+  // slider while the editor holds half-typed numbers can't leak them.
+  var widthServerCap = 0, widthServerInset = 0;
+  // cap 0 → 原生; a stored (cap,inset) matching a preset option selects it,
+  // anything else falls to the disabled 自定义 marker option.
+  function reflectChatWidth(cap, inset) {
+    cap = Math.max(0, Math.min(120, Math.round(Number(cap) || 0)));
+    inset = Math.max(0, Math.min(24, Math.round(Number(inset) || 0)));
+    widthServerCap = cap; widthServerInset = cap > 0 ? inset : 0;
+    if (widthEditing) return;
+    var key = cap + ':' + inset;
+    $('zb-chat-width').value = cap === 0 ? '0' : (CHAT_WIDTH_PRESETS[key] ? key : 'custom');
+    $('zb-chat-width-cap').value = cap;
+    $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
+  }
+  function setChatSliders(d, mu, mb, f, cap, inset, perf) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
     $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
+    var perfEl = $('zb-chat-perf');
+    if (perfEl) perfEl.checked = perf === 1;
+    reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again — inline
     // vars outrank the stylesheet and would otherwise pin stale previews.
@@ -1161,7 +1205,10 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           chatDim: Number($('zb-chat-dim').value),
           maskTop: Number($('zb-chat-top').value),
           maskBottom: Number($('zb-chat-bot').value),
-          frost: Number($('zb-chat-frost').value)
+          frost: Number($('zb-chat-frost').value),
+          widthCapRem: widthServerCap,
+          widthInsetRem: widthServerInset,
+          perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -1172,6 +1219,54 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       $(pair[1]).textContent = (v / 100).toFixed(2);
       chatPreview(Number($('zb-chat-dim').value), Number($('zb-chat-top').value), Number($('zb-chat-bot').value), Number($('zb-chat-frost').value));
       pushChatLook();
+    });
+  });
+  // Column width: a gear writes both numbers and pushes immediately. The
+  // custom editor is opened by the ➕ button and only pushes on ✓ 应用 —
+  // typing in it never pushes, and the beat never touches it while open.
+  $('zb-chat-width').addEventListener('change', function () {
+    if (this.value === 'custom') return; // disabled marker; reflect-only
+    if (this.value === '0') { reflectChatWidth(0, 0); pushChatLook(); return; }
+    var parts = this.value.split(':');
+    reflectChatWidth(parts[0], parts[1] || 12);
+    pushChatLook();
+  });
+  $('zb-chat-width-add').addEventListener('click', function () {
+    widthEditing = true;
+    // Prefill from the live select/inputs so editing starts from the truth.
+    if ($('zb-chat-width').value !== 'custom' && $('zb-chat-width').value !== '0') {
+      var parts = $('zb-chat-width').value.split(':');
+      $('zb-chat-width-cap').value = parts[0];
+      $('zb-chat-width-inset').value = parts[1] || 12;
+    }
+    $('zb-chat-width-custom').hidden = false;
+    $('zb-chat-width-cap').focus();
+  });
+  $('zb-chat-width-ok').addEventListener('click', function () {
+    var cap = Math.max(0, Math.min(120, Math.round(Number($('zb-chat-width-cap').value) || 0)));
+    var inset = Math.max(0, Math.min(24, Math.round(Number($('zb-chat-width-inset').value) || 0)));
+    $('zb-chat-width-cap').value = cap;
+    $('zb-chat-width-inset').value = cap > 0 ? inset : 0;
+    widthEditing = false;
+    $('zb-chat-width-custom').hidden = true;
+    reflectChatWidth(cap, $('zb-chat-width-inset').value);
+    pushChatLook();
+  });
+  // Cancel keeps the select untouched; the next beat re-reflects the stored
+  // server truth (the inputs may hold half-edited numbers).
+  $('zb-chat-width-cancel').addEventListener('click', function () {
+    widthEditing = false;
+    $('zb-chat-width-custom').hidden = true;
+  });
+  $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
+  ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
+    $(id).addEventListener('change', function () {
+      var max = id === 'zb-chat-width-cap' ? 120 : 24;
+      this.value = Math.max(0, Math.min(max, Math.round(Number(this.value) || 0)));
+    });
+    $(id).addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') $('zb-chat-width-ok').click();
+      if (ev.key === 'Escape') $('zb-chat-width-cancel').click();
     });
   });
 

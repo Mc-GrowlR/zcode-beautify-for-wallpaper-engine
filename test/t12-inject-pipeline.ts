@@ -11,6 +11,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   normalizeBubbleLook,
+  normalizeChatLook,
+  STOCK_CHAT_WIDTH,
   buildPayload,
   DEFAULT_CONFIG,
   DEFAULT_BUBBLE_LOOK,
@@ -96,7 +98,7 @@ function check(label: string, cond: boolean, extra = "") {
   const real = bubbleRecipes(BUBBLE_SELECTOR_REAL);
   const boot = buildBootstrapScript({
     css: "",
-    chatLook: { chatDim: 40, maskTop: 5, maskBottom: 6, frost: 7 },
+    chatLook: { chatDim: 40, maskTop: 5, maskBottom: 6, frost: 7, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 },
     bubbleLook: {
       preset: "custom",
       tint: 28,
@@ -140,6 +142,71 @@ function check(label: string, cond: boolean, extra = "") {
   const dimmed = buildPayload({ ...DEFAULT_CONFIG, port: 9222, dim: 25 });
   check("dim overlay present at dim>0", dimmed.css.includes("--zcode-beautify-dim"));
   check("payload transition defaults to fade", dimmed.transition === "fade");
+}
+
+// --- part F: conversation column width (消息流宽度) ------------------------------
+{
+  const d = normalizeChatLook();
+  check("width defaults to stock (0/0)", d.widthCapRem === 0 && d.widthInsetRem === 0, JSON.stringify(d));
+  const w = normalizeChatLook({ widthCapRem: 84, widthInsetRem: 12 });
+  check("cap+inset survive", w.widthCapRem === 84 && w.widthInsetRem === 12);
+  const defInset = normalizeChatLook({ widthCapRem: 90 });
+  check("cap without inset defaults inset to 12", defInset.widthInsetRem === 12);
+  const clamped = normalizeChatLook({ widthCapRem: 300, widthInsetRem: 99 });
+  check("cap clamps to 120, inset to 24", clamped.widthCapRem === 120 && clamped.widthInsetRem === 24);
+  const tiny = normalizeChatLook({ widthCapRem: 20 });
+  check("cap below 40 reads as stock (0)", tiny.widthCapRem === 0 && tiny.widthInsetRem === 0);
+  const off = normalizeChatLook({ widthCapRem: 0, widthInsetRem: 12 });
+  check("inset ignored when cap is off", off.widthInsetRem === 0);
+  check("stock constants stay documented", STOCK_CHAT_WIDTH.capRem === 72 && STOCK_CHAT_WIDTH.insetRem === 24);
+
+  const wide = buildBootstrapScript({
+    css: "",
+    chatLook: { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 90, widthInsetRem: 8 },
+  });
+  // The bootstrap assembles the CSS at RUNTIME (applyChatLook), so these
+  // assert the baked CODE, not the final string; the resulting CSS itself is
+  // verified end-to-end against a live ZCode (test/cdp-live.mjs flow).
+  check("wide tier rule construction baked",
+    wide.includes("@container conversation (min-width:1280px)") &&
+    wide.includes("[class*=\"conversation:max-w-6xl\"]"));
+  check("width stays a formula (calc + rem), never a fixed width",
+    wide.includes("width:calc(100% - ' + inset + 'rem)!important") &&
+    wide.includes("max-width:' + cap + 'rem!important"));
+  check("mid tier raises only the 4xl ceiling",
+    wide.includes("@container conversation (min-width:864px)") &&
+    wide.includes("[class*=\"conversation:max-w-4xl\"]") &&
+    !wide.includes("max-w-4xl\"]{max-width:' + cap + 'rem!important;width:"));
+  check("width-only look keeps the chatlook style mounted (widthCapRem>=40 gate baked)",
+    wide.includes("widthCapRem") && wide.includes("masksOn"));
+
+  const stock = buildBootstrapScript({
+    css: "",
+    chatLook: { chatDim: 30, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 },
+  });
+  check("stock width config bakes cap 0 (runtime emits no container rules)",
+    stock.includes('widthCapRem\\":0') && stock.includes("var widthOn = cap >= 40"));
+
+  const viaPayload = buildPayload({ ...DEFAULT_CONFIG, port: 9222, chatLook: { widthCapRem: 84 } });
+  check("buildPayload normalizes chatLook width (default inset)", viaPayload.chatLook?.widthCapRem === 84 && viaPayload.chatLook?.widthInsetRem === 12);
+
+  // perfSmooth (大会话流畅模式): content-visibility injection
+  check("perfSmooth defaults off", normalizeChatLook().perfSmooth === 0);
+  check("perfSmooth accepts 1 only", normalizeChatLook({ perfSmooth: 1 }).perfSmooth === 1
+    && normalizeChatLook({ perfSmooth: 2 }).perfSmooth === 0);
+  const smooth = buildBootstrapScript({ css: "", chatLook: { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 1 } });
+  // The engine is measure-then-skip: real height goes into an inline
+  // contain-intrinsic-size BEFORE content-visibility turns on, so the
+  // dynamic-height virtualizer's total size never lies (a global CSS rule
+  // with a 420px estimate measurably shrank it 6x — scrollbar distortion).
+  check("smooth engine bakes measure-then-skip functions",
+    smooth.includes("function perfSched") && smooth.includes("function perfApply") &&
+    smooth.includes("containIntrinsicSize") && smooth.includes("contentVisibility"));
+  check("smooth engine marks processed rows for clean teardown",
+    smooth.includes("data-zb-cv") && smooth.includes("setAttribute('data-zb-cv', '1')"));
+  check("smooth gate is perfSmooth===1", smooth.includes("Number(C.perfSmooth) === 1"));
+  check("no global CV stylesheet rule (the 6x-distortion approach stays dead)",
+    !smooth.includes("contain-intrinsic-size:auto 420px") && !smooth.includes("content-visibility:auto!important"));
 }
 
 console.log(failed ? `\nT12: ${failed} check(s) FAILED` : "\nT12: all checks passed");

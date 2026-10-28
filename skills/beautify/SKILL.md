@@ -16,6 +16,11 @@ modifies ZCode's installation files.
 - "恢复默认外观" / "reset the appearance"
 - "把聊天气泡改成毛玻璃" / style the chat bubbles → use the `/bubble` command
   (it maps the description to presets or custom CSS via `apply_options`)
+- "把消息流调宽一点" / widen the conversation column → `apply_options` with
+  `chat_width_cap_rem` (0 = stock; 84 ≈ wide, 90 ≈ wider, 100 ≈ near full width
+  on large windows) and optionally `chat_width_inset_rem` (side inset, stock 24,
+  default 12). Formula-based, so the column still tracks window resizes. The
+  same gears also live in the in-app panel's 聊天区 tab (消息流宽度).
 
 ## Workflow
 
@@ -51,7 +56,7 @@ modifies ZCode's installation files.
 | Tool | Purpose |
 |---|---|
 | `set_background` | Set wallpaper + Monet colors |
-| `apply_options` | Tune blur/dim/monet/wallpaper visibility/framing without changing the image |
+| `apply_options` | Tune blur/dim/monet/wallpaper visibility/framing, the chat bubble look, and the conversation column width (`chat_width_cap_rem`/`chat_width_inset_rem`) without changing the image |
 | `refresh_theme` | Re-inject stored theme after a restart |
 | `reset_appearance` | Remove wallpaper and overrides |
 | `beautify_status` | Show stored config |
