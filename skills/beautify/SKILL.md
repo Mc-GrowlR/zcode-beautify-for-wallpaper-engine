@@ -21,6 +21,11 @@ modifies ZCode's installation files.
   on large windows) and optionally `chat_width_inset_rem` (side inset, stock 24,
   default 12). Formula-based, so the column still tracks window resizes. The
   same gears also live in the in-app panel's 聊天区 tab (消息流宽度).
+- "大会话打开/滚动卡" / large sessions feel slow → the 聊天区 tab's
+  大会话流畅模式 toggle (chatLook.perfSmooth). Off-screen rows skip
+  paint+layout via per-row content-visibility with their REAL height baked in
+  (measured ~40% faster session open on a 51MB session, scrollbar exact).
+  Toggle it via the panel or POST /api/config `chatLook.perfSmooth: 0|1`.
 
 ## Workflow
 
