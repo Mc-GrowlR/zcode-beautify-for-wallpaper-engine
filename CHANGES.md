@@ -10,6 +10,22 @@
 > 0.4.5：消息流宽度——聊天区可调对话列宽（档位/自定义），公式化注入保持随窗口缩放。
 > 0.4.6：自定义宽度改按钮模式（修复编辑器被 4s 心跳自动收起）+ 新增三档窄宽度 + 安装记录写入器（防 Windows 路径转义事故）。
 > 0.4.7：大会话流畅模式——消息行屏外跳过渲染（content-visibility），大上下文会话打开与滚动更省。
+> 0.4.8：运行中图标——会话列表左侧"正在对话"转圈标志可换为图片 / GIF 动图；侧边栏压暗——左侧会话栏可单独加深；关于页检查更新——对照 GitHub Releases 一键查询新版本。
+
+## 0.4.8
+
+> 定位（官方源码）：侧栏会话行左侧 16px 前置槽在 `phase=prewarming/running` 时渲染 lucide LoaderIcon（`packages/ui/src/TaskListItem.tsx` 普通列表行 + `project-sidebar/grouped/task-row.tsx` 分组行，两种渲染都锚定 `data-testid^="task-item-"`）。
+
+- **新配置 `taskSpinnerLook`（运行中图标，默认原生）**：`mode`（default=完全不改 / image=换图）+ `image`（绝对路径，构建 payload 时解析为 serve 媒体 URL 或 data URI）+ `spin`（保留原生旋转，GIF 建议关）+ `size`（10-24px，原生 16）。
+- **注入端（独立 style 元素 + fast path）**：lucide 图标用 currentColor 描边——`color:transparent` 抹掉原生字形，`background:url(...)` 在同一 svg 上画用户图，普通列表行与分组行一套选择器全覆盖；`spin=false` 时对 wrapper/svg 补 `animation:none`。换图不重放壁纸过渡（spinnerKey fast path，与 chat/bubble 同构）。
+- **面板**：「聊天」页新增"运行中图标"区块——原生/自定义图片切换、📁 选图（≤2MB，gif/png/webp/jpeg/svg，经 `/api/spinner` 存入数据目录）、当前图标预览、保留旋转开关、大小滑条、✕ 恢复原生。
+- **MCP**：`apply_options` 新增 `spinner`（mode/image_path/spin/size），与 bubble 同款部分补丁合并语义。
+- **配套**：`/media/lib` 放行 gif/svg（svg 仅作 background-image 绘制，无脚本执行面）；上传固定名 `spinner.<ext>` 并清理旧变体防陈旧文件残留。
+- **侧边栏压暗（新配置 `sidebarDim`，默认 0=关）**：桌面端侧边栏（`#sidebar`，`data-workspace-sidebar-panel`）本身无背景绘制层、壁纸直接透过——注入 `#sidebar { background: rgb(0 0 0 / a) !important }` 即在壁纸与侧栏内容之间叠一层黑纱，自动跟随侧栏宽度拖动、折叠时随 `opacity-0` 淡出。与全局 `dim` 叠加复合（只能更暗）。入口：面板「显示调节 → 画面」滑条（0-80）、MCP `apply_options.sidebar_dim`、CLI `--sidebar-dim`。
+- **关于页检查更新**：serve 新增 `GET /api/update-check`——查 fork 的 GitHub Releases 最新 tag 与 `VERSION` 对比（`cmpVersion` 纯函数入 `version.ts`，GitHub API 地址从 `FORK_URL` 派生单一来源；60s 内存缓存对齐未鉴权限流；网络失败降级 `ok:false` 面板显示"检查失败"，404=尚无发布按最新处理）。面板「插件信息」卡顶部新增"版本更新"行：⟳ 检查 → 已是最新 / 发现新版本（同按钮变"打开发布页"，`window.open` 被拦截时降级为复制发布页链接，另有 ⧉ 链接按钮）。
+- **修复：运行中图标污染壁纸库**——0.4.8 初版把 spinner.<ext> 写进 dataDir 根目录，而壁纸库（/api/library）扫描的正是根目录全部图片：设置图标后库里多出一张假壁纸，且上传恰好名为 spinner.jpg 的壁纸会反向覆盖图标文件。修复=文件挪入独立 `spinner/` 子目录（上传/清理/引用解析全链跟随，新增 `/media/spinner/` 媒体路径，同款防穿越白名单），serve 启动时自动迁移旧版残留（根目录 spinner.* 挪入 spinner/ 并改写 config 引用，图标无需重传）。
+- **完成标志 / 错误标志可换图（taskSpinnerLook 新增 `unreadImage`/`errorImage`）**：ZCode 会话行前置槽四态（error>unread>loading>none）中，完成且有未读回复显示蓝点、出错显示红点——两者现在与"运行中"一样可换图片/GIF，三个槽位互相独立（换完成标志不需要开运行中换图）。注入：普通行锚 `data-unread-indicator`/`data-error-indicator` 属性，分组行锚 Tailwind 圆点类组合（bg-sky-500/bg-destructive+size-1.5，升级 ZCode 改类名时最坏退化回原生圆点）；圆点用"清背景色+拉伸到图标尺寸+画图"替换。上传端点 `/api/spinner` 加 `slot`（running/unread/error，固定名 spinner[-unread|-error].<ext>）；面板"运行中图标"区块新增"完成标志/错误标志"两行（各自预览/选图/✕ 恢复原生）；MCP `apply_options.spinner` 加 `unread_image_path`/`error_image_path`。
+- 测试：t16（normalize 钳制、解析四分支、payload 集成、partial 合并、bootstrap 选择器/spin 开关/reset 清理、serve+MCP 接线）、t18（sidebarDim 注入断言）、t19（cmpVersion 矩阵 + serve/面板接线静态断言；t13 冒烟补端点 401/形状断言，真网络两态皆合法）、t20（spinner 隔离：迁移/库无污染/上传仅写 spinner//media 路径/防穿越）、t21（终态槽位：normalize/payload 独立解析/bootstrap 三槽规则与移除门/serve slot 分支/MCP 映射/面板行）。
 
 ## 0.4.7
 

@@ -23,11 +23,11 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLook, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLook, normalizeTaskSpinnerLook, resolveSpinnerImageRef, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
 import { loadWallpaper, extractPalette, type WallpaperAssets } from "./monet.js";
 import { themeFromSourceColor, argbFromRgb } from "@material/material-color-utilities";
 import { buildPanelScript } from "../panel/panelScript.js";
-import { VERSION } from "../version.js";
+import { VERSION, FORK_URL, cmpVersion } from "../version.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
@@ -194,6 +194,40 @@ function isDayPeriod(dn: NonNullable<BeautifyConfig["dayNight"]>): boolean {
   return dn.start <= dn.end ? hhmm >= dn.start && hhmm < dn.end : hhmm >= dn.start || hhmm < dn.end;
 }
 
+/** Cached /api/update-check result (60s) — see the route handler. */
+let updateCheckCache: { at: number; body: unknown } | null = null;
+
+/**
+ * Latest GitHub release of the fork vs the running VERSION. Never throws:
+ * network/parse problems degrade to { ok:false } so the panel can render a
+ * plain "check failed" state. 404 (no releases yet) reads as "up to date".
+ */
+async function checkLatestRelease(): Promise<unknown> {
+  const api = `${FORK_URL.replace("https://github.com", "https://api.github.com/repos")}/releases/latest`;
+  try {
+    const res = await fetch(api, {
+      headers: { accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.status === 404) {
+      return { ok: true, current: VERSION, latest: null, hasUpdate: false, releaseUrl: `${FORK_URL}/releases` };
+    }
+    if (!res.ok) return { ok: false, error: `github_${res.status}`, current: VERSION };
+    const rel = (await res.json()) as { tag_name?: unknown; html_url?: unknown };
+    const latest = String(rel.tag_name ?? "").replace(/^v/, "");
+    if (!latest) return { ok: false, error: "no_tag", current: VERSION };
+    return {
+      ok: true,
+      current: VERSION,
+      latest,
+      hasUpdate: cmpVersion(latest, VERSION) > 0,
+      releaseUrl: typeof rel.html_url === "string" && rel.html_url ? rel.html_url : `${FORK_URL}/releases`,
+    };
+  } catch {
+    return { ok: false, error: "network", current: VERSION };
+  }
+}
+
 /** The dim/blur actually in effect: day/night schedule overrides the flat
  *  sliders while enabled (the sliders then edit the CURRENT period's value). */
 function effectiveLook(config: BeautifyConfig): { dim: number; blur: number } {
@@ -214,6 +248,7 @@ function publicConfig(config: BeautifyConfig) {
     dim: look.dim,
     flatBlur: config.blur,
     flatDim: config.dim,
+    sidebarDim: config.sidebarDim ?? 0,
     monet: config.monet,
     wallpaperVisible: config.wallpaperVisible,
     kenBurns: config.kenBurns ?? false,
@@ -222,6 +257,16 @@ function publicConfig(config: BeautifyConfig) {
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
     bubbleLook: normalizeBubbleLook(config.bubbleLook),
+    // 运行中图标: normalized look plus the RESOLVED paint URL so the panel can
+    // preview exactly what the sidebar will show ("" = stock spinner). The
+    // 完成未读 / 出错 slots get their own resolved preview URLs.
+    taskSpinnerLook: normalizeTaskSpinnerLook(config.taskSpinnerLook),
+    spinnerImageUrl:
+      normalizeTaskSpinnerLook(config.taskSpinnerLook).mode === "image"
+        ? resolveSpinnerImageRef(config.taskSpinnerLook?.image ?? "", config.apiPort ?? 9223, mediaToken)
+        : "",
+    spinnerUnreadUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.unreadImage ?? "", config.apiPort ?? 9223, mediaToken),
+    spinnerErrorUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.errorImage ?? "", config.apiPort ?? 9223, mediaToken),
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -240,6 +285,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   const out: Partial<BeautifyConfig> = {};
   if (typeof body?.blur === "number" && body.blur >= 0 && body.blur <= 100) out.blur = body.blur;
   if (typeof body?.dim === "number" && body.dim >= 0 && body.dim <= 100) out.dim = body.dim;
+  if (typeof body?.sidebarDim === "number" && body.sidebarDim >= 0 && body.sidebarDim <= 100) out.sidebarDim = Math.round(body.sidebarDim);
   if (typeof body?.monet === "boolean") out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean") out.wallpaperVisible = body.wallpaperVisible;
   if (typeof body?.kenBurns === "boolean") out.kenBurns = body.kenBurns;
@@ -287,6 +333,12 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   // the client omitted, so partial patches reset the rest to defaults.
   if (body?.bubbleLook && typeof body.bubbleLook === "object") {
     out.bubbleLook = normalizeBubbleLook(body.bubbleLook);
+  }
+  // 运行中图标: same contract as bubbleLook — the panel always posts the full
+  // object; normalizeTaskSpinnerLook fills/clamps the rest. The image REF is
+  // stored as-is; buildPayload resolves it to a paintable URL.
+  if (body?.taskSpinnerLook && typeof body.taskSpinnerLook === "object") {
+    out.taskSpinnerLook = normalizeTaskSpinnerLook(body.taskSpinnerLook);
   }
   // Day/night look schedule (护眼): two dim/blur presets switch at times.
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -415,6 +467,7 @@ async function holdSession(
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
+    spinnerLook: payload.taskSpinnerLook,
     startupClean: payload.startupClean,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -461,6 +514,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
+    spinnerLook: payload.taskSpinnerLook,
     startupClean: payload.startupClean,
   });
   let ok = 0;
@@ -472,7 +526,12 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
           .catch(() => {});
       }
       session.themeScriptId = await registerScript(session, bootstrap);
-      await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      const evalRes = await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      // Runtime.evaluate does NOT reject on script errors — without this the
+      // fast paths can fail silently while the caller reports success.
+      if (evalRes?.exceptionDetails) {
+        console.warn(`serve: bootstrap threw in a held session: ${JSON.stringify(evalRes.exceptionDetails).slice(0, 300)}`);
+      }
       // Audio belt-and-braces: apply the volume DIRECTLY as well. The page-side
       // assignment lives inside the bootstrap's fast path and proved flaky in
       // the wild (a stray null write); this idempotent pass guarantees the
@@ -627,6 +686,47 @@ const IMAGE_EXT: Record<string, string> = {
   "image/bmp": ".bmp",
 };
 
+/** 运行中图标 files live in <dataDir>/spinner/ — deliberately OUTSIDE the
+ *  wallpaper library's scan root (/api/library lists every image in the data
+ *  dir root). 0.4.8 first wrote them there, so the icon showed up as a fake
+ *  library wallpaper — and a wallpaper upload literally named "spinner.jpg"
+ *  would have overwritten the icon file. */
+const spinnerDir = (): string => path.join(dataDir(), "spinner");
+
+const SPINNER_FILE_RE = /^spinner\.(gif|png|webp|jpe?g|bmp|svg)$/i;
+
+/**
+ * One-shot, idempotent migration at serve start: move any legacy root-level
+ * spinner.<ext> into spinner/ and repoint config.taskSpinnerLook.image, so
+ * existing installs lose the library pollution without a re-upload.
+ */
+function migrateLegacySpinnerFiles(): void {
+  try {
+    fs.mkdirSync(spinnerDir(), { recursive: true });
+    let moved = false;
+    for (const ext of [".gif", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".svg"]) {
+      const legacy = path.join(dataDir(), "spinner" + ext);
+      if (!fs.existsSync(legacy)) continue;
+      const dest = path.join(spinnerDir(), "spinner" + ext);
+      fs.rmSync(dest, { force: true });
+      fs.renameSync(legacy, dest);
+      moved = true;
+      console.log(`serve: migrated spinner icon ${path.basename(legacy)} → spinner/`);
+    }
+    if (!moved) return;
+    const stored = loadConfig();
+    const img = stored.taskSpinnerLook?.image;
+    if (typeof img === "string" && SPINNER_FILE_RE.test(path.basename(img)) &&
+        path.dirname(path.resolve(img)).toLowerCase() === path.resolve(dataDir()).toLowerCase()) {
+      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path.join(spinnerDir(), path.basename(img)) };
+      saveConfig(stored);
+    }
+  } catch (err) {
+    /* best effort — a failed migration degrades to re-uploading the icon */
+    console.warn(`serve: spinner migration skipped — ${(err as Error).message}`);
+  }
+}
+
 export async function startServe(opts: ServeOptions): Promise<void> {
   const { cdpPort, apiPort } = opts;
   const startedAt = Date.now();
@@ -641,6 +741,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   } catch {
     /* best effort — auth degrades to tokenless only for /api/health */
   }
+  migrateLegacySpinnerFiles();
 
   // --- recently-used wallpaper history (F8) --------------------------------
   const historyFile = (): string => path.join(dataDir(), "history.json");
@@ -837,6 +938,59 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         return;
       }
 
+      // 运行中图标 upload: a small image/GIF data URI saved into the data dir
+      // under a FIXED name (spinner<ext> — only one active icon, re-uploads
+      // overwrite) and wired into config.taskSpinnerLook. spin/size fields the
+      // client keeps sending via /api/config as usual. body.slot picks which
+      // indicator slot the image is for: "running" (default, the streaming
+      // spinner), "unread" (运行完成标志) or "error" (出错标志) — the
+      // terminal slots live in the same config object but are independent of
+      // the loading slot's mode.
+      if (req.method === "POST" && url.pathname === "/api/spinner") {
+        const body = JSON.parse(await readBody(req));
+        const slot = body?.slot === "unread" || body?.slot === "error" ? body.slot : "running";
+        const dataUri = typeof body?.dataUri === "string" ? body.dataUri : "";
+        const m = /^data:(image\/(?:gif|png|webp|jpeg|bmp|svg\+xml));base64,(.+)$/.exec(dataUri);
+        if (!m) throw new Error("dataUri must be a base64 image data URI (gif/png/webp/jpeg/bmp/svg)");
+        const bytes = Buffer.from(m[2], "base64");
+        if (bytes.length > 2 * 1024 * 1024) {
+          throw new Error("image too large (max 2 MB) — a 16px icon wants a few KB");
+        }
+        const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
+        const base = slot === "running" ? "spinner" : "spinner-" + slot;
+        // Written under spinner/, NOT the data dir root — the root is the
+        // wallpaper library's namespace (/api/library scans it).
+        const dest = path.join(spinnerDir(), base + ext);
+        fs.mkdirSync(spinnerDir(), { recursive: true });
+        // Overwrite every image variant of THIS slot so a stale .gif never
+        // wins over a fresh .png (and no orphan file lingers in the dir).
+        for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
+          if (old !== ext) fs.rmSync(path.join(spinnerDir(), base + old), { force: true });
+        }
+        // Belt and braces for pre-migration strays at the root.
+        for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
+          fs.rmSync(path.join(dataDir(), base + old), { force: true });
+        }
+        fs.writeFileSync(dest, bytes);
+        const config = runtimeConfig();
+        const look = normalizeTaskSpinnerLook(config.taskSpinnerLook);
+        const nextCfg: BeautifyConfig = {
+          ...config,
+          taskSpinnerLook: {
+            ...look,
+            ...(slot === "running"
+              ? { mode: "image" as const, image: dest }
+              : slot === "unread"
+                ? { unreadImage: dest }
+                : { errorImage: dest }),
+          },
+        };
+        saveConfig(persisted(nextCfg));
+        const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
+        sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
+        return;
+      }
+
       if (req.method === "POST" && url.pathname === "/api/reset") {
         const stored = loadConfig();
         // Back up the wallpaper config so /api/restore can bring it back
@@ -907,6 +1061,21 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           cdpPort,
           apiPort,
         });
+        return;
+      }
+
+      // --- update check (关于页「检查更新」) ---------------------------------
+      // Served here rather than fetched from the panel: token handling stays
+      // in one place and a short cache absorbs panel refreshes (GitHub's
+      // unauthenticated API allows ~60 req/h per IP).
+      if (req.method === "GET" && url.pathname === "/api/update-check") {
+        if (updateCheckCache && Date.now() - updateCheckCache.at < 60_000) {
+          sendJson(res, 200, updateCheckCache.body);
+          return;
+        }
+        const body = await checkLatestRelease();
+        updateCheckCache = { at: Date.now(), body };
+        sendJson(res, 200, body);
         return;
       }
 
@@ -1655,13 +1824,29 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       if (req.method === "GET" && url.pathname.startsWith("/media/lib/")) {
         const name = decodeURIComponent(url.pathname.slice("/media/lib/".length));
         // Allow any single filename component (incl. CJK); block traversal.
-        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp)$/i.test(name)) {
+        // gif + svg serve the sidebar 运行中图标; svg is background-image only
+        // in the renderer (scripts never run in that paint context).
+        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp|gif|svg)$/i.test(name)) {
           sendJson(res, 400, { error: "bad library media path" });
           return;
         }
         const file = path.join(dataDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "library media not found" });
+        }
+        return;
+      }
+
+      // 运行中图标 media: same guards as /media/lib, rooted at spinner/.
+      if (req.method === "GET" && url.pathname.startsWith("/media/spinner/")) {
+        const name = decodeURIComponent(url.pathname.slice("/media/spinner/".length));
+        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp|gif|svg)$/i.test(name)) {
+          sendJson(res, 400, { error: "bad spinner media path" });
+          return;
+        }
+        const file = path.join(spinnerDir(), name);
+        if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
+          sendJson(res, 404, { error: "spinner media not found" });
         }
         return;
       }

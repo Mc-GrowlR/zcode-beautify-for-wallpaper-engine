@@ -89,6 +89,18 @@ if (booted) {
   const authed = await fetch(`${base}/api/config`, { headers: { "X-Beautify-Token": token } });
   check("config with token is accepted", authed.ok);
 
+  // --- update check (关于页「检查更新」) --------------------------------------
+  const updUnauth = await fetch(`${base}/api/update-check`);
+  check("update-check without token is rejected", updUnauth.status === 401, String(updUnauth.status));
+  const upd = (await (await fetch(`${base}/api/update-check`, { headers: { "X-Beautify-Token": token } })).json()) as Record<string, unknown>;
+  // The sandbox runs on the real network: success and failure are both valid
+  // outcomes, but both must be well-formed for the panel to render.
+  check("update-check: always echoes the running version", upd.current === VERSION, JSON.stringify(upd).slice(0, 120));
+  check("update-check: ok-path carries latest+hasUpdate, error-path a reason",
+    upd.ok === true
+      ? (typeof upd.latest === "string" || upd.latest === null) && typeof upd.hasUpdate === "boolean"
+      : typeof upd.error === "string");
+
   // --- config GET defaults -------------------------------------------------------
   const cfg = (await authed.json()) as Record<string, unknown>;
   check("fresh config carries defaults", cfg.monet === true && cfg.fit === "cover" && cfg.wallpaperVisible === true);

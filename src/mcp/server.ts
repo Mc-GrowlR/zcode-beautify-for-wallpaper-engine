@@ -12,7 +12,7 @@ import { z } from "zod";
 import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { loadConfig } from "../core/launch.js";
-import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLookConfig } from "../core/inject.js";
+import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
 import { VERSION } from "../version.js";
 
 // ZCode launches MCP servers with ZCODE_BEAUTIFY_DATA_DIR pointed at a
@@ -195,13 +195,22 @@ server.registerTool(
   {
     title: "Tune ZCode appearance",
     description:
-      "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), and the user chat bubble look. Only the provided values change; the rest keep their current setting.",
+      "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, sidebar-only extra darkening (侧边栏压暗), Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), the user chat bubble look, and the sidebar session running-indicator icon (运行中图标). Only the provided values change; the rest keep their current setting.",
     inputSchema: {
       blur: z.number().min(0).max(100).optional().describe("Wallpaper blur radius in px"),
       dim: z.number().min(0).max(100).optional().describe("Wallpaper darkening 0-100"),
+      sidebar_dim: z.number().min(0).max(100).optional().describe("Extra darkening 0-100 for the left sidebar only (侧边栏压暗), additive on top of dim; 0 = off"),
       monet: z.boolean().optional().describe("Regenerate UI colors from the wallpaper (true) or keep ZCode's original colors (false)"),
       wallpaper_visible: z.boolean().optional().describe("Translucent surfaces showing the wallpaper (true) or opaque surfaces (false)"),
       fit: z.enum(["cover", "contain", "smart"]).optional().describe("Framing: cover fills and crops, contain letterboxes with a blurred backdrop, smart analyzes the picture locally and picks the best framing + focus point"),
+      spinner: z.object({
+        mode: z.enum(["default", "image"]).optional().describe("default = stock ZCode spinner, image = replace the session-list running icon with a picture (static or animated GIF)"),
+        image_path: z.string().optional().describe("Absolute path of the image/GIF to paint over the spinner (resolved serve-side; required when mode = image)"),
+        unread_image_path: z.string().optional().describe("运行完成标志: image for the unread dot sessions show after finishing with unread replies (empty/omitted = stock blue dot)"),
+        error_image_path: z.string().optional().describe("出错标志: image for the error dot (empty/omitted = stock red dot)"),
+        spin: z.boolean().optional().describe("Keep the stock rotation (true, default — good for static images) or disable it (false — for animated GIFs that bring their own motion)"),
+        size: z.number().min(10).max(24).optional().describe("Icon size in px (stock 16); applies to every replaced slot"),
+      }).optional().describe("Session-list running indicator look (运行中图标); omitted fields keep their current value"),
       bubble: z.object({
         preset: z.enum(["default", "accent", "glass", "outline", "flat", "custom"]).optional().describe("Bubble style: default = stock ZCode bubble, accent = tinted with the theme primary, glass = translucent with backdrop blur, outline = transparent with a primary border, flat = plain surface no border, custom = your own CSS via custom_css"),
         tint: z.number().min(0).max(100).optional().describe("Accent strength 0-100 (how much primary mixes into the bubble)"),
@@ -214,7 +223,7 @@ server.registerTool(
       chat_width_inset_rem: z.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
     },
   },
-  async ({ blur, dim, monet, wallpaper_visible, fit, bubble, chat_width_cap_rem, chat_width_inset_rem }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem }) => {
     try {
       // Send only the fields the caller provided: the session layer merges
       // this partial over the stored look, so one-field tweaks don't reset
@@ -223,6 +232,14 @@ server.registerTool(
         bubble === undefined
           ? undefined
           : (Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== undefined)) as Partial<BubbleLookConfig>);
+      const taskSpinnerLook =
+        spinner === undefined
+          ? undefined
+          : (Object.fromEntries(
+              Object.entries(spinner)
+                .filter(([, v]) => v !== undefined)
+                .map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]),
+            ) as Partial<TaskSpinnerLookConfig>);
       const chatLook: Partial<ChatLookConfig> | undefined =
         chat_width_cap_rem === undefined && chat_width_inset_rem === undefined
           ? undefined
@@ -230,7 +247,7 @@ server.registerTool(
               ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
               ...(chat_width_inset_rem !== undefined ? { widthInsetRem: chat_width_inset_rem } : {}),
             };
-      const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, chatLook });
+      const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
       return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };

@@ -7199,12 +7199,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs9, exportName) {
+    function addFormats(ajv, list, fs10, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs9[f2]);
+        ajv.addFormat(f2, fs10[f2]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -7303,6 +7303,7 @@ function buildBootstrapScript(payload) {
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
+  var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -7340,6 +7341,10 @@ function buildBootstrapScript(payload) {
       window.__zcodeBeautify.bubbleKey = BUBBLE;
       applyBubbleLook();
     }
+    if (window.__zcodeBeautify.spinnerKey !== SPIN) {
+      window.__zcodeBeautify.spinnerKey = SPIN;
+      applySpinnerLook();
+    }
     return;
   }
 
@@ -7354,6 +7359,7 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
@@ -7370,10 +7376,29 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.spinnerKey === SPIN
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.bubbleKey = BUBBLE;
     applyBubbleLook();
     if (bubbleOnly) return;
+  }
+
+  // Spinner-look fast path: the running-indicator rules live in their own
+  // style element, so swapping the sidebar spinner image never replays the
+  // wallpaper transition either. bubbleOnly above already refuses to bail
+  // while the spinner changed, so a combined push lands both.
+  if (window.__zcodeBeautify.spinnerKey !== SPIN) {
+    var spinnerOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.spinnerKey = SPIN;
+    applySpinnerLook();
+    if (spinnerOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -7382,7 +7407,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -7656,6 +7681,8 @@ function buildBootstrapScript(payload) {
   applyChatLook();
   window.__zcodeBeautify.bubbleKey = BUBBLE;
   applyBubbleLook();
+  window.__zcodeBeautify.spinnerKey = SPIN;
+  applySpinnerLook();
 
   function applyChatLook() {
     var C;
@@ -7845,6 +7872,68 @@ function buildBootstrapScript(payload) {
       + (B.preset === 'custom' ? CUSTOM_CSS : RECIPES[B.preset]);
   }
 
+  // --- session-list running indicator (\u8FD0\u884C\u4E2D\u56FE\u6807) -----------------------------
+  // Sidebar task rows show a spinning lucide LoaderIcon in their leading slot
+  // while a session streams. The loading state exists in TWO renderers, both
+  // anchored by data-testid^="task-item-": the plain/timeline list wraps the
+  // svg in a span that carries animate-spin, grouped rows put animate-spin on
+  // the svg itself. Lucide draws with currentColor strokes, so color:transparent
+  // erases the stock glyph and a background paints the user image in its
+  // place; spin=false drops the rotation (animated GIFs bring their own).
+  // \u8FD0\u884C\u5B8C\u6210\u6807\u5FD7 (\u5B8C\u6210\u672A\u8BFB\u70B9) and \u51FA\u9519\u6807\u5FD7 are separate slots: the plain
+  // renderer marks them with data-unread-indicator / data-error-indicator;
+  // grouped rows carry no attribute, so we anchor their Tailwind dot classes
+  // (bg-sky-500 / bg-destructive + size-1.5) \u2014 brittle across ZCode updates,
+  // but the worst case is the stock dot staying visible.
+  // mode "default" or a missing image removes the loading rules; the terminal
+  // slots live independently of mode.
+  function applySpinnerLook() {
+    var S;
+    try { S = JSON.parse(SPIN); } catch (e) { return; }
+    var loadingOn = S && S.mode === 'image' && S.image;
+    var unreadOn = S && S.unreadImage;
+    var errorOn = S && S.errorImage;
+    var st = document.getElementById(MARKER + '-spinner-style');
+    if (!loadingOn && !unreadOn && !errorOn) {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-spinner-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var size = Math.max(10, Math.min(24, Math.round(S.size || 16)));
+    var ITEM = '[data-testid^="task-item-"]';
+    var css = '';
+    if (loadingOn) {
+      var svg = ITEM + ' span.animate-spin > svg,' + ITEM + ' svg.animate-spin';
+      css += svg + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'color:transparent!important;'
+        + 'background:url("' + S.image + '") center/contain no-repeat!important;}';
+      if (!S.spin) {
+        css += ITEM + ' span.animate-spin,' + ITEM + ' svg.animate-spin{animation:none!important}';
+      }
+    }
+    // A dot is an empty span painted by background-color: clear the color,
+    // stretch it to the icon size and paint the image instead. The outer
+    // 16px slot is a centered flex box, so an enlarged dot stays centered.
+    function slotCss(sel, url) {
+      return sel + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'background-color:transparent!important;'
+        + 'background-image:url("' + url + '")!important;'
+        + 'background-size:contain!important;background-position:center!important;'
+        + 'background-repeat:no-repeat!important}';
+    }
+    if (unreadOn) {
+      css += slotCss(ITEM + ' [data-unread-indicator="true"],' + ITEM + ' span.bg-sky-500.size-1\\\\.5', S.unreadImage);
+    }
+    if (errorOn) {
+      css += slotCss(ITEM + ' [data-error-indicator="true"],' + ITEM + ' span.bg-destructive.size-1\\\\.5', S.errorImage);
+    }
+    st.textContent = css;
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops \u2014 occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -7933,6 +8022,7 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   if (window.__zcodeBeautify) {
@@ -7940,6 +8030,7 @@ function buildResetScript(marker = "zcode-beautify") {
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
     window.__zcodeBeautify.bubbleKey = null;
+    window.__zcodeBeautify.spinnerKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -12008,7 +12099,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs9 = __require("fs");
+    var fs10 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -12204,7 +12295,7 @@ var require_gifutil = __commonJS({
     }
     function _readBinary(path11) {
       return new Promise((resolve, reject) => {
-        fs9.readFile(path11, (err, buffer) => {
+        fs10.readFile(path11, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -12214,7 +12305,7 @@ var require_gifutil = __commonJS({
     }
     function _writeBinary(path11, buffer) {
       return new Promise((resolve, reject) => {
-        fs9.writeFile(path11, buffer, (err) => {
+        fs10.writeFile(path11, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -37601,7 +37692,7 @@ var init_launch = __esm({
 });
 
 // dist/core/wallpaperType.js
-import fs4 from "node:fs";
+import fs5 from "node:fs";
 import path3 from "node:path";
 function detectWallpaperType(input2) {
   const ext = path3.extname(input2).toLowerCase();
@@ -37613,7 +37704,7 @@ function detectWallpaperType(input2) {
     return "scene";
   let stat;
   try {
-    stat = fs4.statSync(input2);
+    stat = fs5.statSync(input2);
   } catch {
     return "unknown";
   }
@@ -37638,7 +37729,7 @@ function detectDirectoryType(dir) {
 }
 function readProjectJson(file2) {
   try {
-    return JSON.parse(fs4.readFileSync(file2, "utf8"));
+    return JSON.parse(fs5.readFileSync(file2, "utf8"));
   } catch {
     return void 0;
   }
@@ -37646,14 +37737,14 @@ function readProjectJson(file2) {
 function detectFromDirectoryContents(dir) {
   let entries;
   try {
-    entries = fs4.readdirSync(dir);
+    entries = fs5.readdirSync(dir);
   } catch {
     return "unknown";
   }
   let nested = [];
   if (entries.some((e2) => e2.toLowerCase() === "files")) {
     try {
-      nested = fs4.readdirSync(path3.join(dir, "files")).map((e2) => path3.join("files", e2));
+      nested = fs5.readdirSync(path3.join(dir, "files")).map((e2) => path3.join("files", e2));
     } catch {
     }
   }
@@ -37692,7 +37783,7 @@ var init_exec = __esm({
 });
 
 // dist/core/dependencyCheck.js
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 import { execFileSync } from "node:child_process";
 import path4 from "node:path";
 async function checkWallpaperEngine() {
@@ -37816,7 +37907,7 @@ function driveRoots() {
   for (let i2 = 67; i2 <= 90; i2++) {
     const drive = `${String.fromCharCode(i2)}:\\`;
     try {
-      fs5.accessSync(drive);
+      fs6.accessSync(drive);
       roots.push(drive);
     } catch {
     }
@@ -37849,14 +37940,14 @@ async function ffmpegVersion(exe) {
 }
 function isFile(p2) {
   try {
-    return fs5.statSync(p2).isFile();
+    return fs6.statSync(p2).isFile();
   } catch {
     return false;
   }
 }
 function readFileSafe(p2) {
   try {
-    return fs5.readFileSync(p2, "utf8");
+    return fs6.readFileSync(p2, "utf8");
   } catch {
     return "";
   }
@@ -38311,7 +38402,7 @@ var init_loopProcessor = __esm({
 
 // dist/core/cacheManager.js
 import crypto from "node:crypto";
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 import path7 from "node:path";
 function scenesCacheRoot() {
   return path7.join(dataDir(), "scenes");
@@ -38321,7 +38412,7 @@ function getCachePath(hash2) {
 }
 function hasCache(hash2) {
   try {
-    return fs6.statSync(getCachePath(hash2)).isFile() && fs6.statSync(getCachePath(hash2)).size > 0;
+    return fs7.statSync(getCachePath(hash2)).isFile() && fs7.statSync(getCachePath(hash2)).size > 0;
   } catch {
     return false;
   }
@@ -38336,7 +38427,7 @@ function touchCache(hash2) {
   const file2 = getCachePath(hash2);
   const now = /* @__PURE__ */ new Date();
   try {
-    fs6.utimesSync(file2, now, now);
+    fs7.utimesSync(file2, now, now);
   } catch {
   }
 }
@@ -38344,7 +38435,7 @@ function enforceLimit(maxBytes) {
   const root = scenesCacheRoot();
   let entries;
   try {
-    entries = fs6.readdirSync(root, { withFileTypes: true });
+    entries = fs7.readdirSync(root, { withFileTypes: true });
   } catch {
     return 0;
   }
@@ -38364,7 +38455,7 @@ function enforceLimit(maxBytes) {
     if (total <= maxBytes)
       break;
     try {
-      fs6.rmSync(entry.dir, { recursive: true, force: true });
+      fs7.rmSync(entry.dir, { recursive: true, force: true });
     } catch {
       continue;
     }
@@ -38382,13 +38473,13 @@ function normalizeOpts(opts) {
 function fingerprint(p2) {
   let stat;
   try {
-    stat = fs6.statSync(p2);
+    stat = fs7.statSync(p2);
   } catch {
     return `missing:${p2}`;
   }
   if (stat.isFile()) {
     const buf = crypto.createHash("md5");
-    buf.update(fs6.readFileSync(p2));
+    buf.update(fs7.readFileSync(p2));
     return `file:${stat.size}:${buf.digest("hex")}`;
   }
   if (stat.isDirectory()) {
@@ -38396,7 +38487,7 @@ function fingerprint(p2) {
     const walk = (abs, rel) => {
       let items;
       try {
-        items = fs6.readdirSync(abs, { withFileTypes: true });
+        items = fs7.readdirSync(abs, { withFileTypes: true });
       } catch {
         return;
       }
@@ -38408,13 +38499,13 @@ function fingerprint(p2) {
         } else if (item.isFile()) {
           let size = 0;
           try {
-            size = fs6.statSync(childAbs).size;
+            size = fs7.statSync(childAbs).size;
           } catch {
           }
           if (size <= 16 * 1024 * 1024) {
             let content = "";
             try {
-              content = crypto.createHash("md5").update(fs6.readFileSync(childAbs)).digest("hex");
+              content = crypto.createHash("md5").update(fs7.readFileSync(childAbs)).digest("hex");
             } catch {
               content = "unreadable";
             }
@@ -38440,7 +38531,7 @@ function dirSize(dir) {
   function walkSize(dir2) {
     let items;
     try {
-      items = fs6.readdirSync(dir2, { withFileTypes: true });
+      items = fs7.readdirSync(dir2, { withFileTypes: true });
     } catch {
       return;
     }
@@ -38450,7 +38541,7 @@ function dirSize(dir) {
         walkSize(child);
       else if (item.isFile()) {
         try {
-          total += fs6.statSync(child).size;
+          total += fs7.statSync(child).size;
         } catch {
         }
       }
@@ -38465,18 +38556,18 @@ function lastUseMs(dir) {
   };
   let items;
   try {
-    items = fs6.readdirSync(dir, { withFileTypes: true });
+    items = fs7.readdirSync(dir, { withFileTypes: true });
   } catch {
     return 0;
   }
   for (const item of items) {
     try {
-      const st = fs6.statSync(path7.join(dir, item.name));
+      const st = fs7.statSync(path7.join(dir, item.name));
       consider(st);
       if (item.isDirectory()) {
-        for (const inner of fs6.readdirSync(path7.join(dir, item.name), { withFileTypes: true })) {
+        for (const inner of fs7.readdirSync(path7.join(dir, item.name), { withFileTypes: true })) {
           try {
-            consider(fs6.statSync(path7.join(dir, item.name, inner.name)));
+            consider(fs7.statSync(path7.join(dir, item.name, inner.name)));
           } catch {
           }
         }
@@ -38503,14 +38594,14 @@ __export(scenePipeline_exports, {
   importScene: () => importScene,
   resolveSceneInput: () => resolveSceneInput
 });
-import fs7 from "node:fs";
+import fs8 from "node:fs";
 import path8 from "node:path";
 function findVideoInDir(dir) {
   for (const subdir of ["", "files"]) {
     const base = path8.join(dir, subdir);
     let entries;
     try {
-      entries = fs7.readdirSync(base);
+      entries = fs8.readdirSync(base);
     } catch {
       continue;
     }
@@ -38523,7 +38614,7 @@ function findVideoInDir(dir) {
 function resolveSceneInput(input2) {
   let stat;
   try {
-    stat = fs7.statSync(input2);
+    stat = fs8.statSync(input2);
   } catch {
     return input2;
   }
@@ -38533,7 +38624,7 @@ function resolveSceneInput(input2) {
     return input2;
   let dir = path8.dirname(path8.resolve(input2));
   for (let hop = 0; hop < 4; hop++) {
-    if (fs7.existsSync(path8.join(dir, "project.json")))
+    if (fs8.existsSync(path8.join(dir, "project.json")))
       return dir;
     const parent = path8.dirname(dir);
     if (parent === dir)
@@ -38547,7 +38638,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   onProgress("detect", pkgPath);
   let type = detectWallpaperType(pkgPath);
   try {
-    if (type === "video" && fs7.statSync(pkgPath).isDirectory()) {
+    if (type === "video" && fs8.statSync(pkgPath).isDirectory()) {
       const videoFile = findVideoInDir(pkgPath);
       if (!videoFile)
         throw new SceneImportError(`No .mp4/.webm inside video wallpaper directory: ${pkgPath}`);
@@ -38603,8 +38694,8 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
     onProgress("saving", hash2);
-    fs7.mkdirSync(path8.dirname(loopPath), { recursive: true });
-    fs7.renameSync(tmpLoop, loopPath);
+    fs8.mkdirSync(path8.dirname(loopPath), { recursive: true });
+    fs8.renameSync(tmpLoop, loopPath);
     const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
     onProgress("done", loopPath);
@@ -38612,13 +38703,13 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   }
   let pkgFile = pkgPath;
   try {
-    if (fs7.statSync(pkgPath).isDirectory()) {
+    if (fs8.statSync(pkgPath).isDirectory()) {
       let declared;
       try {
-        declared = JSON.parse(fs7.readFileSync(path8.join(pkgPath, "project.json"), "utf8")).file;
+        declared = JSON.parse(fs8.readFileSync(path8.join(pkgPath, "project.json"), "utf8")).file;
       } catch {
       }
-      const name = declared && /\.pkg$/i.test(declared) && fs7.existsSync(path8.join(pkgPath, declared)) ? declared : fs7.readdirSync(pkgPath).find((e2) => /\.pkg$/i.test(e2));
+      const name = declared && /\.pkg$/i.test(declared) && fs8.existsSync(path8.join(pkgPath, declared)) ? declared : fs8.readdirSync(pkgPath).find((e2) => /\.pkg$/i.test(e2));
       if (!name)
         throw new SceneImportError(`No scene.pkg inside: ${pkgPath}`);
       pkgFile = path8.join(pkgPath, name);
@@ -38639,7 +38730,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
       }
       onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
       const rawPath2 = path8.join(path8.dirname(loopPath), `raw-${Date.now()}.mp4`);
-      fs7.mkdirSync(path8.dirname(rawPath2), { recursive: true });
+      fs8.mkdirSync(path8.dirname(rawPath2), { recursive: true });
       await recordSceneWindow(handle, rawPath2, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height }, ffmpegPath);
       return { rawPath: rawPath2 };
     } finally {
@@ -38660,7 +38751,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     if (black) {
       onProgress(`black-retry-${pass + 1}`, "reopen window");
       try {
-        fs7.rmSync(rawPath, { force: true });
+        fs8.rmSync(rawPath, { force: true });
       } catch {
       }
       await new Promise((r2) => setTimeout(r2, 3e3));
@@ -38669,7 +38760,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   if (black) {
     try {
       if (rawPath)
-        fs7.rmSync(rawPath, { force: true });
+        fs8.rmSync(rawPath, { force: true });
     } catch {
     }
     throw new SceneImportError("\u5F55\u5236\u753B\u9762\u5168\u9ED1(\u5DF2\u81EA\u52A8\u91CD\u5F00\u7A97\u53E3\u91CD\u8BD5)\u2014\u2014\u8BF7\u7A0D\u5019\u91CD\u8BD5\u6216\u91CD\u542F Wallpaper Engine");
@@ -38681,15 +38772,15 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
     onProgress("saving", hash2);
-    fs7.mkdirSync(path8.dirname(loopPath), { recursive: true });
-    fs7.renameSync(tmpLoop, loopPath);
-    fs7.rmSync(rawPath, { force: true });
+    fs8.mkdirSync(path8.dirname(loopPath), { recursive: true });
+    fs8.renameSync(tmpLoop, loopPath);
+    fs8.rmSync(rawPath, { force: true });
     enforceLimit(opts.maxCacheBytes);
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash: hash2, blackness: { blackFraction: black ? 1 : 0, meanLuma: 0, durationSec: opts.duration }, fromCache: false };
   } finally {
     try {
-      fs7.rmSync(rawPath, { force: true });
+      fs8.rmSync(rawPath, { force: true });
     } catch {
     }
   }
@@ -38698,7 +38789,7 @@ async function extractPoster(loopFile, posterPath, ffmpegPath) {
   const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
   if (!ffmpeg)
     throw new SceneImportError("ffmpeg not found");
-  fs7.mkdirSync(path8.dirname(path8.resolve(posterPath)), { recursive: true });
+  fs8.mkdirSync(path8.dirname(path8.resolve(posterPath)), { recursive: true });
   await execFileP(ffmpeg, [
     "-y",
     "-loglevel",
@@ -68194,7 +68285,7 @@ var StdioServerTransport = class {
 };
 
 // dist/core/session.js
-import fs8 from "node:fs";
+import fs9 from "node:fs";
 import path9 from "node:path";
 
 // dist/core/inject.js
@@ -146552,6 +146643,7 @@ function tokenRows(theme, mode, opts) {
 
 // dist/core/inject.js
 init_launch();
+import fs4 from "node:fs";
 import path2 from "node:path";
 var CHAT_WIDTH_INSET_DEFAULT = 12;
 function normalizeChatLook(raw) {
@@ -146576,6 +146668,79 @@ var DEFAULT_BUBBLE_LOOK = {
   width: 70,
   align: "right"
 };
+var DEFAULT_TASK_SPINNER_LOOK = {
+  mode: "default",
+  image: "",
+  spin: true,
+  size: 16
+};
+function normalizeTaskSpinnerLook(raw) {
+  const mode = raw?.mode === "image" ? "image" : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size) ? Math.max(10, Math.min(24, Math.round(raw.size))) : DEFAULT_TASK_SPINNER_LOOK.size;
+  const ref = (v) => typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode,
+    image: ref(raw?.image),
+    unreadImage: ref(raw?.unreadImage),
+    errorImage: ref(raw?.errorImage),
+    spin: raw?.spin !== false,
+    size
+  };
+}
+var SPINNER_REF_MAX_CHARS = 5e5;
+var SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
+var SPINNER_MIME = {
+  ".gif": "image/gif",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif"
+};
+function resolveSpinnerImageRef(ref, apiPort, mediaToken) {
+  if (!ref)
+    return "";
+  if (/^(https?:|data:)/i.test(ref))
+    return ref;
+  let abs;
+  try {
+    abs = path2.resolve(ref);
+  } catch {
+    return "";
+  }
+  let stat;
+  try {
+    stat = fs4.statSync(abs);
+  } catch {
+    return "";
+  }
+  if (!stat.isFile())
+    return "";
+  const ext = path2.extname(abs).toLowerCase();
+  if (!SPINNER_MIME[ext])
+    return "";
+  const dir = path2.resolve(dataDir()).toLowerCase();
+  const spinnerDir = path2.join(dir, "spinner").toLowerCase();
+  if (abs.toLowerCase().startsWith(spinnerDir + path2.sep)) {
+    const url2 = `http://127.0.0.1:${apiPort}/media/spinner/${encodeURIComponent(path2.basename(abs))}`;
+    return mediaToken ? `${url2}?t=${mediaToken}` : url2;
+  }
+  if (abs.toLowerCase().startsWith(dir + path2.sep)) {
+    const url2 = `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path2.basename(abs))}`;
+    return mediaToken ? `${url2}?t=${mediaToken}` : url2;
+  }
+  if (stat.size > SPINNER_FILE_MAX_BYTES) {
+    console.warn(`spinner image too large to inline (${Math.round(stat.size / 1024)} KB): ${abs}`);
+    return "";
+  }
+  try {
+    return `data:${SPINNER_MIME[ext]};base64,${fs4.readFileSync(abs).toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
 var BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
 function normalizeBubbleLook(raw) {
   const num = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
@@ -146593,6 +146758,7 @@ var DEFAULT_CONFIG = {
   port: 9222,
   blur: 0,
   dim: 25,
+  sidebarDim: 0,
   monet: true,
   wallpaperVisible: true,
   fit: "cover"
@@ -146645,6 +146811,12 @@ html, body { background: transparent !important; }
   background: rgb(0 0 0 / var(--zcode-beautify-dim, ${config2.dim / 100}));
 }`);
   }
+  const sidebarDim = config2.sidebarDim ?? 0;
+  if (sidebarDim > 0) {
+    parts.push(`#sidebar {
+  background: rgb(0 0 0 / var(--zb-sidebar-dim, ${sidebarDim / 100})) !important;
+}`);
+  }
   parts.push(`[data-testid="v4-queue"] {
   --zb-queue-overlap: 28px;
   --zb-queue-radius: 16px;
@@ -146686,6 +146858,16 @@ html, body { background: transparent !important; }
   }
   const videoSrc = config2.wallpaperVisible && config2.sceneVideoUrl ? tok(config2.sceneVideoUrl) : void 0;
   const kenBurns = Boolean(config2.kenBurns) && !videoSrc && config2.blur === 0 && Boolean(wallpaperDataUri);
+  const spinnerLook = normalizeTaskSpinnerLook(config2.taskSpinnerLook);
+  if (spinnerLook.image) {
+    spinnerLook.image = resolveSpinnerImageRef(spinnerLook.image, config2.apiPort ?? 9223, mediaToken);
+  }
+  if (spinnerLook.unreadImage) {
+    spinnerLook.unreadImage = resolveSpinnerImageRef(spinnerLook.unreadImage, config2.apiPort ?? 9223, mediaToken);
+  }
+  if (spinnerLook.errorImage) {
+    spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config2.apiPort ?? 9223, mediaToken);
+  }
   return {
     css: parts.join("\n"),
     wallpaperDataUri,
@@ -146698,6 +146880,7 @@ html, body { background: transparent !important; }
     videoVolume: Math.max(0, Math.min(100, Math.round(config2.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config2.chatLook),
     bubbleLook: normalizeBubbleLook(config2.bubbleLook),
+    taskSpinnerLook: spinnerLook,
     startupClean: config2.startupClean !== false
   };
 }
@@ -146746,7 +146929,7 @@ async function reapplyStored() {
 }
 async function applyWallpaper(imagePath, opts) {
   const abs = path9.resolve(imagePath);
-  if (!fs8.existsSync(abs))
+  if (!fs9.existsSync(abs))
     throw new Error(`Image not found: ${abs}`);
   const kind = detectWallpaperType(abs);
   if (kind === "scene" || kind === "video") {
@@ -146755,10 +146938,10 @@ async function applyWallpaper(imagePath, opts) {
   }
   const stored = loadConfig();
   const config2 = { ...baseConfig(opts, stored), mediaType: "image", sceneHash: void 0 };
-  fs8.mkdirSync(dataDir(), { recursive: true });
+  fs9.mkdirSync(dataDir(), { recursive: true });
   const dest = path9.join(dataDir(), "wallpaper" + path9.extname(abs).toLowerCase());
   if (dest !== abs)
-    fs8.copyFileSync(abs, dest);
+    fs9.copyFileSync(abs, dest);
   const assets = await loadWallpaper(dest);
   const payload = buildPayload(config2, assets, serveMediaToken());
   saveConfig({ ...config2, wallpaperPath: dest });
@@ -146767,7 +146950,7 @@ async function applyWallpaper(imagePath, opts) {
 }
 function serveMediaToken() {
   try {
-    return fs8.readFileSync(path9.join(dataDir(), "serve.token"), "utf8").trim();
+    return fs9.readFileSync(path9.join(dataDir(), "serve.token"), "utf8").trim();
   } catch {
     return "";
   }
@@ -146785,6 +146968,7 @@ function baseConfig(opts, stored) {
     port: opts.port ?? stored.port ?? DEFAULT_CONFIG.port,
     blur: opts.blur ?? stored.blur ?? DEFAULT_CONFIG.blur,
     dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
+    sidebarDim: opts.sidebarDim ?? stored.sidebarDim ?? DEFAULT_CONFIG.sidebarDim,
     monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
     wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
     fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
@@ -146793,7 +146977,10 @@ function baseConfig(opts, stored) {
     // preset only — without re-sending (and resetting) the rest.
     bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
     // Chat look merges the same way (masks + column width), then normalizes.
-    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook)
+    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook),
+    // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
+    // inside buildPayload where the image reference is resolved too.
+    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -146840,9 +147027,9 @@ async function resetAppearance(port) {
 }
 async function buildPayloadFromConfig(config2) {
   let assets;
-  if (config2.mediaType === "video" && config2.wallpaperPath && fs8.existsSync(config2.wallpaperPath)) {
+  if (config2.mediaType === "video" && config2.wallpaperPath && fs9.existsSync(config2.wallpaperPath)) {
     const posterPath = path9.join(path9.dirname(config2.wallpaperPath), "poster.jpg");
-    if (fs8.existsSync(posterPath)) {
+    if (fs9.existsSync(posterPath)) {
       assets = await loadWallpaper(posterPath);
     }
     const apiPort = config2.apiPort ?? 9223;
@@ -146851,7 +147038,7 @@ async function buildPayloadFromConfig(config2) {
     }
     return buildPayload(config2, assets, serveMediaToken());
   }
-  if (config2.wallpaperPath && fs8.existsSync(config2.wallpaperPath)) {
+  if (config2.wallpaperPath && fs9.existsSync(config2.wallpaperPath)) {
     assets = await loadWallpaper(config2.wallpaperPath);
   }
   return buildPayload(config2, assets, serveMediaToken());
@@ -146865,7 +147052,7 @@ init_wallpaperType();
 init_launch();
 
 // dist/version.js
-var VERSION = "0.4.7";
+var VERSION = "0.4.8";
 
 // dist/mcp/server.js
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
@@ -146994,13 +147181,22 @@ function statSizeMb(file2) {
 }
 server.registerTool("apply_options", {
   title: "Tune ZCode appearance",
-  description: "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), and the user chat bubble look. Only the provided values change; the rest keep their current setting.",
+  description: "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, sidebar-only extra darkening (\u4FA7\u8FB9\u680F\u538B\u6697), Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), the user chat bubble look, and the sidebar session running-indicator icon (\u8FD0\u884C\u4E2D\u56FE\u6807). Only the provided values change; the rest keep their current setting.",
   inputSchema: {
     blur: external_exports.number().min(0).max(100).optional().describe("Wallpaper blur radius in px"),
     dim: external_exports.number().min(0).max(100).optional().describe("Wallpaper darkening 0-100"),
+    sidebar_dim: external_exports.number().min(0).max(100).optional().describe("Extra darkening 0-100 for the left sidebar only (\u4FA7\u8FB9\u680F\u538B\u6697), additive on top of dim; 0 = off"),
     monet: external_exports.boolean().optional().describe("Regenerate UI colors from the wallpaper (true) or keep ZCode's original colors (false)"),
     wallpaper_visible: external_exports.boolean().optional().describe("Translucent surfaces showing the wallpaper (true) or opaque surfaces (false)"),
     fit: external_exports.enum(["cover", "contain", "smart"]).optional().describe("Framing: cover fills and crops, contain letterboxes with a blurred backdrop, smart analyzes the picture locally and picks the best framing + focus point"),
+    spinner: external_exports.object({
+      mode: external_exports.enum(["default", "image"]).optional().describe("default = stock ZCode spinner, image = replace the session-list running icon with a picture (static or animated GIF)"),
+      image_path: external_exports.string().optional().describe("Absolute path of the image/GIF to paint over the spinner (resolved serve-side; required when mode = image)"),
+      unread_image_path: external_exports.string().optional().describe("\u8FD0\u884C\u5B8C\u6210\u6807\u5FD7: image for the unread dot sessions show after finishing with unread replies (empty/omitted = stock blue dot)"),
+      error_image_path: external_exports.string().optional().describe("\u51FA\u9519\u6807\u5FD7: image for the error dot (empty/omitted = stock red dot)"),
+      spin: external_exports.boolean().optional().describe("Keep the stock rotation (true, default \u2014 good for static images) or disable it (false \u2014 for animated GIFs that bring their own motion)"),
+      size: external_exports.number().min(10).max(24).optional().describe("Icon size in px (stock 16); applies to every replaced slot")
+    }).optional().describe("Session-list running indicator look (\u8FD0\u884C\u4E2D\u56FE\u6807); omitted fields keep their current value"),
     bubble: external_exports.object({
       preset: external_exports.enum(["default", "accent", "glass", "outline", "flat", "custom"]).optional().describe("Bubble style: default = stock ZCode bubble, accent = tinted with the theme primary, glass = translucent with backdrop blur, outline = transparent with a primary border, flat = plain surface no border, custom = your own CSS via custom_css"),
       tint: external_exports.number().min(0).max(100).optional().describe("Accent strength 0-100 (how much primary mixes into the bubble)"),
@@ -147012,14 +147208,15 @@ server.registerTool("apply_options", {
     chat_width_cap_rem: external_exports.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (\u6D88\u606F\u6D41\u5BBD\u5EA6\u4E0A\u9650). 0 = stock responsive width; 40-120 widens the column (78 \u2248 wide, 100+ \u2248 near full width on large windows). The column still tracks window resizes \u2014 only the ceiling changes"),
     chat_width_inset_rem: external_exports.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0")
   }
-}, async ({ blur, dim, monet, wallpaper_visible, fit, bubble, chat_width_cap_rem, chat_width_inset_rem }) => {
+}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem }) => {
   try {
     const bubbleLook = bubble === void 0 ? void 0 : Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== void 0));
+    const taskSpinnerLook = spinner === void 0 ? void 0 : Object.fromEntries(Object.entries(spinner).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]));
     const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 ? void 0 : {
       ...chat_width_cap_rem !== void 0 ? { widthCapRem: chat_width_cap_rem } : {},
       ...chat_width_inset_rem !== void 0 ? { widthInsetRem: chat_width_inset_rem } : {}
     };
-    const windows = await applyColorsOnly({ blur, dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, chatLook });
+    const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
     return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };

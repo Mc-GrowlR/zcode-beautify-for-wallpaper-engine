@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLook, type BeautifyConfig, type BubbleLookConfig, type ChatLookConfig, type BuiltPayload } from "./inject.js";
+import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLook, normalizeTaskSpinnerLook, type BeautifyConfig, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig, type BuiltPayload } from "./inject.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
@@ -14,11 +14,15 @@ export interface ApplyOptions {
   port?: number;
   blur?: number;
   dim?: number;
+  /** Extra sidebar-only darkening (侧边栏压暗), 0-100. */
+  sidebarDim?: number;
   monet?: boolean;
   wallpaperVisible?: boolean;
   fit?: "cover" | "contain" | "smart";
   /** User message bubble look (聊天气泡); merged over the stored config. */
   bubbleLook?: Partial<BubbleLookConfig>;
+  /** Session-list running indicator look (运行中图标); merged over the stored config. */
+  taskSpinnerLook?: Partial<TaskSpinnerLookConfig>;
   /** Chat-area look patch (聊天界面); merged over the stored config. */
   chatLook?: Partial<ChatLookConfig>;
 }
@@ -88,6 +92,7 @@ export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>):
     port: opts.port ?? stored.port ?? DEFAULT_CONFIG.port,
     blur: opts.blur ?? stored.blur ?? DEFAULT_CONFIG.blur,
     dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
+    sidebarDim: opts.sidebarDim ?? stored.sidebarDim ?? DEFAULT_CONFIG.sidebarDim,
     monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
     wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
     fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
@@ -98,6 +103,11 @@ export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>):
     // Chat look merges the same way (masks + column width), then normalizes.
     chatLook: normalizeChatLook(
       opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook
+    ),
+    // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
+    // inside buildPayload where the image reference is resolved too.
+    taskSpinnerLook: normalizeTaskSpinnerLook(
+      opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook
     ),
   };
 }

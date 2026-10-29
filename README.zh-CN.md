@@ -2,41 +2,52 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI——还附带实时悬浮设置面板。
+美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI；还能美化聊天区（消息气泡、对话列宽度、大会话流畅模式）——并附带实时悬浮设置面板。
 
 > 📷 欢迎贡献截图——向 `docs/screenshot.png` 提 PR 即可。
 
 ## 功能
 
-- **动态壁纸**——导入 Wallpaper Engine **场景**（`.pkg` 或工坊目录）或普通**视频**（`.mp4`/`.webm`）：场景在专属 WE 窗口中渲染，经 Desktop Duplication 捕获后处理成完美无缝循环（首帧 == 末帧）；长视频自动截取中段。循环以内容寻址缓存并经本地 HTTP 流式注入渲染器——只有动画,没有交互和声音。
-- **壁纸**——任意本地图片作为固定背景层,铺在 UI 之下;三种取景模式:`cover`(填满裁剪)、`contain`(完整显示,背后是同图模糊放大底)、`smart`(AI 适应:本地分析画面主体,自动选择最佳取景与焦点位置)。
-- **莫奈配色**——用 Google 官方 MD3 算法从壁纸提取 source color,生成 light/dark 双套调色板,映射覆盖 ZCode 的 35+ 个语义 CSS 变量。
-- **实时设置面板**——ZCode 窗口内可拖拽的悬浮面板:blur/dim 滑块、Monet 开关、壁纸透显开关、一键换图、原生文件选择器导入动态壁纸(带进度条与依赖安装引导)、分组壁纸库、还原;所有调整即时预览并自动保存。
-- **零操作服务**——MCP server 在 ZCode 启动时自动拉起后台 serve,面板无需手动启动,开箱即有。
-- **对话控制**——内置 `/beautify` 斜杠命令与 MCP 工具(`set_background`、`import_scene_wallpaper`、`apply_options` 等),让 ZCode 智能体代你设壁纸、调主题。
-- **自愈**——`serve` 运行期间主题在渲染器刷新后自动恢复;上次外观还会缓存到 `localStorage` 作为兜底。
+### 壁纸与配色
+
+- **动态壁纸**——导入 Wallpaper Engine **场景**（`.pkg` 或工坊目录）或普通**视频**（`.mp4`/`.webm`）：场景在专属 WE 窗口中渲染，经 Desktop Duplication 捕获后处理成完美无缝循环（首帧 == 末帧）；长视频自动截取中段。循环以内容寻址缓存（LRU）并通过本地 HTTP 流式注入渲染器——只有动画，没有交互和声音。
+- **Wallpaper Engine 壁纸库浏览器**——在面板内直接浏览本机 WE 壁纸（Steam 创意工坊订阅 + 自建项目，支持多 Steam 库扫描）：类型 / 文件夹两种视图、搜索、多选批量导入（带进度）、悬停预览（视频壁纸播放自己的源片，场景按需真渲染预览）、已导入角标、显示 WE 真实标题。
+- **定时播放（轮播）**——多个命名播放方案，每个方案独立的顺序模式（**顺序 / 随机不连播同张 / 每日定点**）、切换特效（fade / slide / zoom / blur / none）与可选时段（支持跨夜）。serve 重启后自动续播并从上次位置继续；手动切换壁纸时自动暂停。
+- **静态壁纸**——任意本地图片作为固定背景层铺在 UI 之下，三种取景模式：`cover`（填满裁剪）、`contain`（完整显示，背后是同图模糊放大底）、`smart`（本地 AI 式分析画面主体，自动选择最佳取景与焦点位置）。图片切换可选 Ken Burns 缓动。
+- **莫奈配色**——用 Google 官方 MD3 算法从壁纸提取 source color，生成 light/dark 双套调色板，映射覆盖 ZCode 的 35+ 个语义 CSS 变量。功能色（success/warning/destructive）刻意保持不动。
+
+### 聊天区美化
+
+- **聊天气泡**——你发出的消息气泡五种预设（`accent` 主题色染色、`glass` 毛玻璃、`outline` 描边、`flat` 扁平、`default` 原生），加上染色强度、圆角、宽度、左右对齐滑杆，气泡样式编辑器与个人样式库，以及自定义 CSS 支持。颜色全部引用实时主题 token，莫奈换主题时气泡自动跟随。
+- **消息流宽度**——加宽或收窄对话列：原生 / 宽档位 / 三档窄宽度 / 完全自定义（rem 上限 + 留白）。注入的是**公式**（rem 上限 + `calc()` 留白）而非定值宽度，随窗口缩放与原生同机制跟随，永不溢出、不破坏输入栏。
+- **大会话流畅模式**（默认关）——对远屏外的消息行先量真实高度再跳过布局与绘制（`content-visibility:auto` + 精确 `contain-intrinsic-size`）。51MB 会话实测打开耗时 **-41%**、滚动条零失真；长会话滚动更顺。
+
+### 面板与服务
+
+- **实时设置面板**——ZCode 窗口内可拖拽的悬浮面板，三个标签页：**壁纸**（分组壁纸库、带进度与依赖引导的导入、当前外观）、**定时播放**（播放方案）、**设置**——blur/dim 滑块、取景模式、Monet 与壁纸透显开关、聊天界面遮罩（整体压暗 / 渐变蒙版 / 白纱）、昼夜护眼、录制分辨率、配置导出/导入、最近使用记录、一键还原。所有调整即时预览并自动保存。
+- **零操作服务**——MCP server 在 ZCode 启动时自动拉起后台 serve，面板无需手动启动，开箱即有。
+- **启动项自修复**——`serve` 运行期间，所有 ZCode 启动项（桌面 / 开始菜单 / 任务栏快捷方式——含 OneDrive 重定向目录——以及 `zcode://` 协议处理器、资源管理器右键菜单）自动保持携带 `--remote-debugging-port`，主题因此能在 ZCode 重启甚至更新器重建快捷方式后依然存活；`repair-launchers` 可随时按需扫描修复并输出结构化报告（机器级条目只报告不修改）。主题本身在渲染器刷新后自动恢复，上次外观还会缓存到 `localStorage` 作为兜底。
+- **对话控制**——内置斜杠命令 `/beautify` 与 `/bubble`，加上 MCP 工具（`set_background`、`import_scene_wallpaper`、`apply_options`、`repair_launchers` 等），让 ZCode 智能体代你设壁纸、调主题，或用一句自然语言改气泡样式。
 
 ## 原理
 
-ZCode 是 Electron 应用,UI 主题由 Tailwind v4 的 `--color-*` CSS 自定义属性驱动,且 production 版**默认不带调试端口**。本插件:
+ZCode 是 Electron 应用，UI 主题由 Tailwind v4 的 `--color-*` CSS 自定义属性驱动，且 production 版**默认不带调试端口**。本插件：
 
-1. 以 `--remote-debugging-port=9222` 启动 ZCode(仅需一次 `launch`);
-2. 通过 Chrome DevTools Protocol 向 renderer 注入 CSS/JS:
-   - 固定定位的壁纸层(图片以 data URI 嵌入),
-   - 背景类变量改为半透明,让壁纸透出,
-   - MD3 light/dark 调色板覆盖 ZCode 的语义 token;
-3. `serve` 模式保持注入会话不关闭,主题与设置面板在渲染器刷新后自动存活。
+1. 以 `--remote-debugging-port=9222` 启动 ZCode（仅需一次 `launch`；此后启动项由插件自动保持修复）；
+2. 通过 Chrome DevTools Protocol 向 renderer 注入 CSS/JS：
+   - 固定定位的壁纸层（图片以 data URI 嵌入，视频循环经本地 HTTP 流式加载），
+   - 背景类变量改为半透明，让壁纸透出，
+   - MD3 light/dark 调色板覆盖 ZCode 的语义 token，
+   - 可选的聊天区样式层：气泡样式、消息流宽度公式、屏外消息行跳过渲染；
+3. `serve` 模式保持注入会话不关闭，主题、设置面板与定时轮播在渲染器刷新后自动存活。
 
-不修改任何安装文件,ZCode 升级不受影响。
+不修改任何安装文件，ZCode 升级不受影响。
 
 ## 环境要求
 
-- Node.js ≥ 20,已加入 PATH。
-- ZCode 桌面客户端(Windows / macOS / Linux)。
-- 动态壁纸(可选):**Wallpaper Engine**(Steam)与 **ffmpeg ≥ 5.0**(PATH)——两者均自动检测,缺失时面板会给出安装引导。捕获依赖 Desktop Duplication API,动态导入仅限 **Windows**;静态图片壁纸全平台可用。
-
-- Node.js ≥ 20(在 PATH 中)。
-- ZCode 桌面客户端(Windows / macOS / Linux)。
+- Node.js ≥ 20，已加入 PATH。
+- ZCode 桌面客户端（Windows / macOS / Linux）。
+- 动态壁纸（可选）：**Wallpaper Engine**（Steam）与 **ffmpeg ≥ 5.0**（PATH）——两者均自动检测，缺失时面板会给出安装引导。捕获依赖 Desktop Duplication API，动态导入仅限 **Windows**；静态图片壁纸全平台可用。
 
 ## 两种包，都可以直接把链接扔给 AI 安装
 
@@ -47,7 +58,7 @@ ZCode 是 Electron 应用,UI 主题由 Tailwind v4 的 `--color-*` CSS 自定义
 | 目标 | **ZCode 桌面客户端** | **任意** Electron 应用 |
 | AI 角色 | 安装器——装好现成插件 | 开发者——从零构建工具 |
 | 你说 | "给我的 ZCode 装这个美化插件" | "给我的 XX 应用做壁纸/取色美化" |
-| 产物 | ZCode 里可用的 /beautify 命令 + MCP 工具 | 一个新的本地美化工具 |
+| 产物 | 可用的 `/beautify` + `/bubble` 命令与 MCP 工具 | 一个新的本地美化工具 |
 
 插件包复制即用的提示词：
 
@@ -60,49 +71,51 @@ https://github.com/Logocceai/zcode-beautify
 
 ## 安装（手动路径）
 
-### 方式 A —— ZCode 插件市场(推荐)
+### 方式 A —— ZCode 插件市场（推荐）
 
 1. 打开 ZCode → **设置 → 插件管理 → 发现**。
-2. 点 **+**,添加本仓库(GitHub URL 或本地 clone 路径)。
-3. 在 *zcode-beautify* 卡片上点 **获取**。`/beautify` 命令与 MCP 工具立即可用。
+2. 点 **+**，添加本仓库（GitHub URL 或本地 clone 路径）。
+3. 在 *zcode-beautify* 卡片上点 **获取**。`/beautify`、`/bubble` 命令与 MCP 工具立即可用。
 
-仓库内已附带 `dist/` 预构建单文件产物,无需本地构建。
+仓库内已附带 `dist/` 预构建单文件产物，无需本地构建。
 
 ### 方式 B —— clone 直接运行
 
 ```bash
 git clone https://github.com/Logocceai/zcode-beautify.git
 cd zcode-beautify
-node dist/cli.js --help        # 预构建产物,零安装
+node dist/cli.js --help        # 预构建产物，零安装
 ```
 
 ## 快速开始
 
 ```bash
-# 1) 完全退出 ZCode 后执行一次,以 CDP 调试端口重启 ZCode
+# 1) 完全退出 ZCode 后执行一次，以 CDP 调试端口重启 ZCode
 node dist/cli.js launch
 
 # 2) 设置壁纸并自动适配配色
 node dist/cli.js apply "D:\pictures\wallpaper.jpg" --blur 6 --dim 30
 
-# 3) (推荐)守护模式 + 实时设置面板
-#    --detach 让服务转入后台,启动它的终端(或智能体会话)结束后面板依然可用
+# 3) （推荐）守护模式 + 实时设置面板
+#    --detach 让服务转入后台，启动它的终端（或智能体会话）结束后面板依然可用
 node dist/cli.js serve --detach
 ```
 
-`serve` 运行时,ZCode 右下角出现 🎨 按钮。点开即可实时调 blur/dim、循环切换取景模式(cover → contain → smart)、开关 Monet 配色与壁纸透显、更换壁纸图片或一键还原——所有调整即时预览、自动保存。服务未运行时,面板会明确显示 ⚠ 离线提示,而不是装作配置全为 0。
+`serve` 运行时，ZCode 右下角出现 🎨 按钮。面板有三个标签页——**壁纸**（壁纸库、导入、当前外观）、**定时播放**（播放方案）、**设置**——以及聊天区分区：气泡预设与滑杆、消息流宽度档位、大会话流畅模式开关。所有调整即时预览、自动保存。服务未运行时，面板会明确显示 ⚠ 离线提示，而不是装作配置全为 0。
 
-也可以直接在 ZCode 里输入 `/beautify <图片路径>` 让智能体操作,之后说"模糊调高一点"即可(由 `apply_options` MCP 工具处理)。
+也可以直接在 ZCode 里输入 `/beautify <图片路径>` 让智能体操作，之后说"模糊调高一点"即可；或输入 `/bubble 玻璃质感 圆角大一点`，用一句话改气泡样式。
 
 ## CLI 命令
 
 | 命令 | 用途 |
 |---|---|
-| `launch [--port N]` | 以调试端口启动 ZCode(需先完全退出) |
-| `apply <image> [--blur] [--dim] [--fit] [--no-monet]` | 设壁纸并适配配色(`--fit cover\|contain\|smart`) |
-| `colors` | 不换图,重新应用已存主题 |
-| `serve [--detach] [--api-port M]` | 守护模式 + 设置面板 + 本地控制 API(默认 API 端口 9223);`--detach` 使其脱离启动它的终端存活 |
-| `watch` | 无面板守护模式:ZCode 重启后自动重注入 |
+| `launch [--port N]` | 以调试端口启动 ZCode（需先完全退出） |
+| `apply <image> [--blur] [--dim] [--fit] [--no-monet]` | 设壁纸并适配配色（`--fit cover\|contain\|smart`） |
+| `apply-scene <pkg-or-dir>` | 端到端导入 Wallpaper Engine 场景 / 视频壁纸 |
+| `colors` | 不换图，重新应用已存主题 |
+| `serve [--detach] [--api-port M]` | 守护模式 + 设置面板 + 本地控制 API（默认 API 端口 9223）；`--detach` 使其脱离启动它的终端存活 |
+| `watch` | 无面板守护模式：ZCode 重启后自动重注入 |
+| `repair-launchers [--dry-run]` | 扫描/修复所有启动项，确保 ZCode 总是带 CDP 端口启动 |
 | `reset` | 移除壁纸与配色覆盖 |
 | `status` | 查看 CDP 可达性与渲染器目标 |
 
@@ -110,57 +123,72 @@ node dist/cli.js serve --detach
 
 | 工具 | 用途 |
 |---|---|
-| `set_background` | 设壁纸 + 莫奈配色 |
-| `apply_options` | 不重传图片,单独调 blur/dim/monet/壁纸透显/取景模式 |
+| `set_background` | 设壁纸（图片或场景）+ 莫奈配色 |
+| `import_scene_wallpaper` | 端到端导入 WE 场景 / 视频壁纸 |
+| `apply_options` | 不重传图片，单独调 blur/dim/monet/透显/取景、消息流宽度、气泡样式 |
 | `refresh_theme` | 重启后重注入已存主题 |
-| `reset_appearance` | 移除壁纸与覆盖,还原默认 |
+| `reset_appearance` | 移除壁纸与覆盖，还原默认 |
 | `beautify_status` | 查看已存配置 |
+| `repair_launchers` | 扫描/修复启动项（结构化报告） |
 
 ## 项目结构
 
 ```
 ├─ src/
-│  ├─ cli.ts                 # CLI 入口:launch / apply / colors / reset / status / watch / serve
+│  ├─ cli.ts                 # CLI 入口：launch / apply / apply-scene / colors / reset / status / watch / serve / repair-launchers
 │  ├─ core/
 │  │  ├─ cdp.ts              # 精简 Chrome DevTools Protocol 客户端 + 注入脚本
-│  │  ├─ inject.ts           # 装配注入载荷(壁纸层 CSS + token 覆盖)
-│  │  ├─ launch.ts           # 配置持久化 + ZCode 启动器(感知单实例锁)
-│  │  ├─ monet.ts            # 图片解码、MD3 取色、智能适配(smart fit)分析
-│  │  ├─ server.ts           # serve 模式:本地控制 API + 持久注入会话
+│  │  ├─ inject.ts           # 装配注入载荷（壁纸层 + token 覆盖 + 聊天区样式）
+│  │  ├─ launch.ts           # 配置持久化 + ZCode 启动器（感知单实例锁）
+│  │  ├─ launchers.ts        # 启动项修复：快捷方式 + 注册表处理器保持携带 CDP 端口
+│  │  ├─ monet.ts            # 图片解码、MD3 取色、智能适配（smart fit）分析
+│  │  ├─ tokens.ts           # MD3 调色板 → ZCode 的 Tailwind v4 --color-* 变量映射
 │  │  ├─ session.ts          # CLI 与 MCP 共用的应用/还原操作
-│  │  └─ tokens.ts           # MD3 调色板 → ZCode 的 Tailwind v4 --color-* 变量映射
-│  ├─ panel/panelScript.ts   # 注入式设置面板(DOM + CSS + 逻辑)
+│  │  ├─ wallpaperType.ts    # 输入类型检测（image / scene / video / web）
+│  │  ├─ dependencyCheck.ts  # Wallpaper Engine + ffmpeg 检测与安装引导
+│  │  ├─ weLauncher.ts       # WE 窗口控制（专属窗口打开/关闭壁纸）
+│  │  ├─ weLibrary.ts        # 本机 WE 壁纸库浏览（创意工坊 + 自建项目）
+│  │  ├─ recorder.ts         # WE 窗口的 Desktop Duplication 捕获
+│  │  ├─ loopProcessor.ts    # 无缝循环构造（首帧 == 末帧）
+│  │  ├─ scenePipeline.ts    # 端到端导入流水线（检测 → 依赖 → 录制 → 循环 → 缓存）
+│  │  ├─ cacheManager.ts     # 内容寻址场景缓存（LRU）
+│  │  ├─ media.ts            # 场景循环的 HTTP 媒体端点（Range 请求）
+│  │  ├─ bubbleRecipes.ts    # 聊天气泡预设样式
+│  │  └─ server.ts           # serve 模式：控制 API + 轮播调度 + 持久注入会话
+│  ├─ panel/panelScript.ts   # 注入式设置面板（三标签：壁纸 / 定时播放 / 设置）
 │  └─ mcp/server.ts          # 向 ZCode 智能体暴露工具的 MCP 服务
 ├─ commands/beautify.md      # /beautify 斜杠命令
+├─ commands/bubble.md        # /bubble 斜杠命令（按描述改气泡样式）
 ├─ skills/beautify/SKILL.md  # 面向智能体的工作流文档
-├─ .zcode-plugin/plugin.json # ZCode 插件清单(命令、技能、MCP 服务)
-├─ marketplace.json          # 市场索引,让仓库可在 ZCode 插件市场被发现
-├─ scripts/bundle.mjs        # esbuild 打包(dist/ 为自包含产物,已入库)
+├─ .zcode-plugin/plugin.json # ZCode 插件清单（命令、技能、MCP 服务）
+├─ marketplace.json          # 市场索引，让仓库可在 ZCode 插件市场被发现
+├─ scripts/                  # bundle（dist/ 产物）、package（发布 zip）、record-install
 └─ dist/                     # 预构建 cli.js + mcp/server.js —— 用户零构建
 ```
 
-用户数据位于 `~/.zcode/cli/plugins/data/zcode-beautify/`:`config.json`(当前配置)、`config.backup.json`(还原时记住的壁纸备份)、`wallpaper.*`(壁纸副本,原图移动或删除后主题依然有效)。
+用户数据位于 `~/.zcode/cli/plugins/data/zcode-beautify/`：`config.json`（当前配置）、`config.backup.json`（还原时记住的备份）、`wallpaper.*`（壁纸副本，原图移动或删除后主题依然有效）、`scenes/`（内容寻址的动态壁纸缓存，LRU 上限）。
 
 ## 开发
 
 ```bash
 npm install
 npm run build    # 类型检查 + 编译到 dist/
-npm run bundle   # 预构建单文件产物(仓库随附)
+npm run bundle   # 预构建单文件产物（仓库随附）
 ```
 
-`dist/` 已提交入库,用户无需构建。修改 `src/` 后请运行 `npm run bundle` 并提交更新后的产物。
+`dist/` 已提交入库，用户无需构建。修改 `src/` 后请运行 `npm run bundle` 并提交更新后的产物。
 
-## 技能包(`skill-pack/`)
+## 技能包（`skill-pack/`）
 
-`skill-pack/` 是一份自包含、平台无关的 AI 编码智能体技能包(Claude、DeepSeek、Codex、豆包……均可):把文件夹交给任意智能体,它就能为**任意** Electron 应用重建这套美化能力——CDP 通道、MD3 取色、注入模板、实时调参 API,以及来自实战的踩坑清单。与本仓库同步版本。可从 [Releases 页面](https://github.com/Logocceai/zcode-beautify/releases)下载 zip,或直接阅读 [`skill-pack/SKILL.md`](skill-pack/SKILL.md)。
+`skill-pack/` 是一份自包含、平台无关的 AI 编码智能体技能包（Claude、DeepSeek、Codex、豆包……均可）：把文件夹交给任意智能体，它就能为**任意** Electron 应用重建这套美化能力——CDP 通道、MD3 取色、注入模板、实时调参 API，以及来自实战的踩坑清单。与本仓库同步版本。可从 [Releases 页面](https://github.com/Logocceai/zcode-beautify/releases)下载 zip，或直接阅读 [`skill-pack/SKILL.md`](skill-pack/SKILL.md)。
 
 ## 风险与限制
 
-- 注入通过 CDP(Chrome DevTools 协议)实现,属**非官方**手段,ZCode 更新可能使其失效;`reset` 可随时还原默认外观。
-- `launch` 需要重启一次 ZCode。若 `serve`/`watch` 未运行,每次 ZCode 重启主题都会丢失(CDP 会话随连接关闭)。无需手动修改:插件会自动为所有 ZCode 快捷方式(桌面/开始菜单/任务栏)补上 ` --remote-debugging-port=9222`,只要 `serve` 在运行,重启也会自动恢复。请用 `serve --detach` 启动:前台 `serve` 会随启动它的终端(或智能体会话)一起退出,面板随即显示离线。
-- 功能色(success/warning/destructive)刻意保持不动。
-- 控制 API 仅绑定 `127.0.0.1`,但按设计接受本机任意进程访问(注入面板需要 CORS)。
+- 注入通过 CDP（Chrome DevTools 协议）实现，属**非官方**手段，ZCode 更新可能使其失效；`reset` 可随时还原默认外观。
+- `launch` 需要重启一次 ZCode。若 `serve`/`watch` 未运行，每次 ZCode 重启主题都会丢失（CDP 会话随连接关闭）。无需手动修改：插件会自动为所有 ZCode 启动项（快捷方式、协议处理器、右键菜单）补上 ` --remote-debugging-port=9222`，只要 `serve` 在运行，重启也会自动恢复。请用 `serve --detach` 启动：前台 `serve` 会随启动它的终端（或智能体会话）一起退出，面板随即显示离线。
+- 聊天区样式的选择器（`[data-v4-user-input-bubble]`、`conversation:max-w-*` 容器查询）绑定 ZCode 当前 DOM 结构；ZCode 改版后可能需要更新选择器。
+- 控制 API 仅绑定 `127.0.0.1`，并使用每次启动随机生成的 token 鉴权；媒体 URL 以查询参数携带 token。
+- 动态导入（场景捕获）仅限 Windows（Desktop Duplication API）；其余功能跨平台。
 
 ## 许可证
 

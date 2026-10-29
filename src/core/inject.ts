@@ -8,6 +8,7 @@ import { sanitizeCustomBubbleCss } from "./bubbleRecipes.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
 import { dataDir } from "./launch.js";
+import fs from "node:fs";
 import path from "node:path";
 
 export type WallpaperFit = "cover" | "contain" | "smart";
@@ -161,6 +162,133 @@ export const DEFAULT_BUBBLE_LOOK: BubbleLookConfig = {
   align: "right",
 };
 
+/**
+ * Session-list running indicator (运行中图标): ZCode's sidebar task rows show
+ * a spinning lucide LoaderIcon in their leading 16px slot while a session
+ * streams. "default" injects nothing — the stock spinner stays; "image"
+ * paints the user's picture (static or animated GIF) over the spinner glyph
+ * in both row renderers (plain list + grouped rows share the
+ * `data-testid^="task-item-"` anchor).
+ */
+export type TaskSpinnerMode = "default" | "image";
+
+export interface TaskSpinnerLookConfig {
+  mode: TaskSpinnerMode;
+  /**
+   * Image reference: absolute file path (resolved to a serve media URL or a
+   * data URI at payload build time), or an http(s)/data URL passed through.
+   */
+  image: string;
+  /**
+   * 运行完成标志 (完成未读点): replaces the unread dot sessions show in
+   * their leading slot once a finished conversation has unread replies.
+   * Empty = stock dot. Independent of `mode`/`image` (the loading slot).
+   */
+  unreadImage?: string;
+  /**
+   * 出错标志: replaces the error dot. Empty = stock red dot. Also
+   * independent of the loading slot.
+   */
+  errorImage?: string;
+  /**
+   * Keep the stock rotation on the replaced icon. Static images usually want
+   * this on; animated GIFs bring their own motion and want it off.
+   */
+  spin: boolean;
+  /** Icon size in px (stock slot is 16). Applies to every replaced slot. */
+  size: number;
+}
+
+export const DEFAULT_TASK_SPINNER_LOOK: TaskSpinnerLookConfig = {
+  mode: "default",
+  image: "",
+  spin: true,
+  size: 16,
+};
+
+/** Clamp a partial spinner look over the defaults (unparsable fields fall back). */
+export function normalizeTaskSpinnerLook(raw?: Partial<TaskSpinnerLookConfig>): TaskSpinnerLookConfig {
+  const mode = raw?.mode === "image" ? "image" : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size)
+    ? Math.max(10, Math.min(24, Math.round(raw.size)))
+    : DEFAULT_TASK_SPINNER_LOOK.size;
+  const ref = (v: unknown): string =>
+    typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode,
+    image: ref(raw?.image),
+    unreadImage: ref(raw?.unreadImage),
+    errorImage: ref(raw?.errorImage),
+    spin: raw?.spin !== false,
+    size,
+  };
+}
+
+/** A pasted data URI larger than this is almost certainly a mistake at 16px. */
+export const SPINNER_REF_MAX_CHARS = 500_000;
+/** Inline fallback cap for local files outside the data dir. */
+export const SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+const SPINNER_MIME: Record<string, string> = {
+  ".gif": "image/gif",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+};
+
+/**
+ * Resolve the stored image reference into something the renderer CSS can
+ * paint: http(s)/data URLs pass through, files inside the data dir become a
+ * serve media URL (browser caches it; same trick as library wallpapers),
+ * other local files are inlined as a data URI. Returns "" when nothing
+ * usable remains — the injection treats that as the stock spinner.
+ */
+export function resolveSpinnerImageRef(ref: string, apiPort: number, mediaToken: string): string {
+  if (!ref) return "";
+  if (/^(https?:|data:)/i.test(ref)) return ref;
+  let abs: string;
+  try {
+    abs = path.resolve(ref);
+  } catch {
+    return "";
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    return "";
+  }
+  if (!stat.isFile()) return "";
+  const ext = path.extname(abs).toLowerCase();
+  if (!SPINNER_MIME[ext]) return "";
+  // Normalize separators/case so forward-slash paths match too.
+  const dir = path.resolve(dataDir()).toLowerCase();
+  // Spinner files live in the dedicated <dataDir>/spinner/ subdir (served by
+  // /media/spinner/). The root-level /media/lib/ branch stays for a user
+  // hand-placed reference inside the data dir.
+  const spinnerDir = path.join(dir, "spinner").toLowerCase();
+  if (abs.toLowerCase().startsWith(spinnerDir + path.sep)) {
+    const url = `http://127.0.0.1:${apiPort}/media/spinner/${encodeURIComponent(path.basename(abs))}`;
+    return mediaToken ? `${url}?t=${mediaToken}` : url;
+  }
+  if (abs.toLowerCase().startsWith(dir + path.sep)) {
+    const url = `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path.basename(abs))}`;
+    return mediaToken ? `${url}?t=${mediaToken}` : url;
+  }
+  if (stat.size > SPINNER_FILE_MAX_BYTES) {
+    console.warn(`spinner image too large to inline (${Math.round(stat.size / 1024)} KB): ${abs}`);
+    return "";
+  }
+  try {
+    return `data:${SPINNER_MIME[ext]};base64,${fs.readFileSync(abs).toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
 const BUBBLE_PRESETS: BubblePreset[] = ["default", "accent", "glass", "outline", "flat", "custom"];
 
 /** Clamp a partial bubble look over the defaults (unparsable fields fall back). */
@@ -183,6 +311,14 @@ export interface BeautifyConfig {
   wallpaperPath?: string;
   blur: number;
   dim: number;
+  /**
+   * Extra darkening for the left sidebar only (侧边栏压暗), 0-100, additive
+   * on top of `dim`. The desktop sidebar paints no background of its own
+   * (the wallpaper shows straight through #sidebar), so a scrim on #sidebar
+   * itself sits between the wallpaper and the sidebar content — it follows
+   * panel width drags and folds away with the sidebar's own collapse.
+   */
+  sidebarDim?: number;
   monet: boolean;
   wallpaperVisible: boolean;
   fit: WallpaperFit;
@@ -209,6 +345,8 @@ export interface BeautifyConfig {
   chatLook?: Partial<ChatLookConfig>;
   /** User message bubble look (聊天气泡); absent = stock ZCode bubble. */
   bubbleLook?: Partial<BubbleLookConfig>;
+  /** Session-list running indicator look (运行中图标); absent = stock spinner. */
+  taskSpinnerLook?: Partial<TaskSpinnerLookConfig>;
   /** Hide wallpaper+panel during ZCode's startup screen (default true). */
   startupClean?: boolean;
   /** Beautify ZCode's update-status window too (default false — stays stock). */
@@ -231,6 +369,7 @@ export const DEFAULT_CONFIG: BeautifyConfig = {
   port: 9222,
   blur: 0,
   dim: 25,
+  sidebarDim: 0,
   monet: true,
   wallpaperVisible: true,
   fit: "cover",
@@ -256,6 +395,11 @@ export interface BuiltPayload {
   chatLook?: ChatLookConfig;
   /** User message bubble look (聊天气泡), normalized; preset default = stock. */
   bubbleLook?: BubbleLookConfig;
+  /**
+   * Session-list running indicator look (运行中图标); `image` here is the
+   * RESOLVED paint URL (media endpoint / data URI), "" = stock spinner.
+   */
+  taskSpinnerLook?: TaskSpinnerLookConfig;
   /** Defer mounting until the ZCode startup screen is gone (default true). */
   startupClean?: boolean;
 }
@@ -312,6 +456,15 @@ html, body { background: transparent !important; }
   position: absolute;
   inset: 0;
   background: rgb(0 0 0 / var(--zcode-beautify-dim, ${config.dim / 100}));
+}`);
+  }
+
+  // 侧边栏压暗: additive on top of the global dim (the two scrims compose);
+  // the var indirection lets the panel live-preview like the global dim does.
+  const sidebarDim = config.sidebarDim ?? 0;
+  if (sidebarDim > 0) {
+    parts.push(`#sidebar {
+  background: rgb(0 0 0 / var(--zb-sidebar-dim, ${sidebarDim / 100})) !important;
 }`);
   }
 
@@ -387,6 +540,21 @@ html, body { background: transparent !important; }
   // a static image (a video plays its own motion) and with blur off (blur
   // already occupies the transform).
   const kenBurns = Boolean(config.kenBurns) && !videoSrc && config.blur === 0 && Boolean(wallpaperDataUri);
+  // 运行中图标: resolve the stored reference to a paintable URL here so the
+  // injected CSS never sees a bare file path. A failed resolution degrades
+  // to "" and the bootstrap falls back to the stock spinner. The 完成未读 /
+  // 出错 slots resolve through the same helper and stay independent of the
+  // loading slot's mode.
+  const spinnerLook = normalizeTaskSpinnerLook(config.taskSpinnerLook);
+  if (spinnerLook.image) {
+    spinnerLook.image = resolveSpinnerImageRef(spinnerLook.image, config.apiPort ?? 9223, mediaToken);
+  }
+  if (spinnerLook.unreadImage) {
+    spinnerLook.unreadImage = resolveSpinnerImageRef(spinnerLook.unreadImage, config.apiPort ?? 9223, mediaToken);
+  }
+  if (spinnerLook.errorImage) {
+    spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config.apiPort ?? 9223, mediaToken);
+  }
 
   return {
     css: parts.join("\n"),
@@ -400,6 +568,7 @@ html, body { background: transparent !important; }
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config.chatLook),
     bubbleLook: normalizeBubbleLook(config.bubbleLook),
+    taskSpinnerLook: spinnerLook,
     startupClean: config.startupClean !== false,
   };
 }

@@ -145,6 +145,11 @@ export interface InjectionPayload {
   chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number };
   /** User message bubble look (聊天气泡); absent/preset default = stock. */
   bubbleLook?: BubbleLookConfig;
+  /**
+   * Session-list running indicator look (运行中图标); `image` is the already
+   * resolved paint URL. absent/mode "default" = stock spinner.
+   */
+  spinnerLook?: { mode: "default" | "image"; image: string; spin: boolean; size: number };
   /** Defer mounting until the ZCode startup screen finished (default true). */
   startupClean?: boolean;
 }
@@ -203,6 +208,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
+  var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -240,6 +246,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       window.__zcodeBeautify.bubbleKey = BUBBLE;
       applyBubbleLook();
     }
+    if (window.__zcodeBeautify.spinnerKey !== SPIN) {
+      window.__zcodeBeautify.spinnerKey = SPIN;
+      applySpinnerLook();
+    }
     return;
   }
 
@@ -254,6 +264,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
@@ -270,10 +281,29 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.spinnerKey === SPIN
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.bubbleKey = BUBBLE;
     applyBubbleLook();
     if (bubbleOnly) return;
+  }
+
+  // Spinner-look fast path: the running-indicator rules live in their own
+  // style element, so swapping the sidebar spinner image never replays the
+  // wallpaper transition either. bubbleOnly above already refuses to bail
+  // while the spinner changed, so a combined push lands both.
+  if (window.__zcodeBeautify.spinnerKey !== SPIN) {
+    var spinnerOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.spinnerKey = SPIN;
+    applySpinnerLook();
+    if (spinnerOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -282,7 +312,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -556,6 +586,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   applyChatLook();
   window.__zcodeBeautify.bubbleKey = BUBBLE;
   applyBubbleLook();
+  window.__zcodeBeautify.spinnerKey = SPIN;
+  applySpinnerLook();
 
   function applyChatLook() {
     var C;
@@ -745,6 +777,68 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       + (B.preset === 'custom' ? CUSTOM_CSS : RECIPES[B.preset]);
   }
 
+  // --- session-list running indicator (运行中图标) -----------------------------
+  // Sidebar task rows show a spinning lucide LoaderIcon in their leading slot
+  // while a session streams. The loading state exists in TWO renderers, both
+  // anchored by data-testid^="task-item-": the plain/timeline list wraps the
+  // svg in a span that carries animate-spin, grouped rows put animate-spin on
+  // the svg itself. Lucide draws with currentColor strokes, so color:transparent
+  // erases the stock glyph and a background paints the user image in its
+  // place; spin=false drops the rotation (animated GIFs bring their own).
+  // 运行完成标志 (完成未读点) and 出错标志 are separate slots: the plain
+  // renderer marks them with data-unread-indicator / data-error-indicator;
+  // grouped rows carry no attribute, so we anchor their Tailwind dot classes
+  // (bg-sky-500 / bg-destructive + size-1.5) — brittle across ZCode updates,
+  // but the worst case is the stock dot staying visible.
+  // mode "default" or a missing image removes the loading rules; the terminal
+  // slots live independently of mode.
+  function applySpinnerLook() {
+    var S;
+    try { S = JSON.parse(SPIN); } catch (e) { return; }
+    var loadingOn = S && S.mode === 'image' && S.image;
+    var unreadOn = S && S.unreadImage;
+    var errorOn = S && S.errorImage;
+    var st = document.getElementById(MARKER + '-spinner-style');
+    if (!loadingOn && !unreadOn && !errorOn) {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-spinner-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var size = Math.max(10, Math.min(24, Math.round(S.size || 16)));
+    var ITEM = '[data-testid^="task-item-"]';
+    var css = '';
+    if (loadingOn) {
+      var svg = ITEM + ' span.animate-spin > svg,' + ITEM + ' svg.animate-spin';
+      css += svg + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'color:transparent!important;'
+        + 'background:url("' + S.image + '") center/contain no-repeat!important;}';
+      if (!S.spin) {
+        css += ITEM + ' span.animate-spin,' + ITEM + ' svg.animate-spin{animation:none!important}';
+      }
+    }
+    // A dot is an empty span painted by background-color: clear the color,
+    // stretch it to the icon size and paint the image instead. The outer
+    // 16px slot is a centered flex box, so an enlarged dot stays centered.
+    function slotCss(sel, url) {
+      return sel + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'background-color:transparent!important;'
+        + 'background-image:url("' + url + '")!important;'
+        + 'background-size:contain!important;background-position:center!important;'
+        + 'background-repeat:no-repeat!important}';
+    }
+    if (unreadOn) {
+      css += slotCss(ITEM + ' [data-unread-indicator="true"],' + ITEM + ' span.bg-sky-500.size-1\\\\.5', S.unreadImage);
+    }
+    if (errorOn) {
+      css += slotCss(ITEM + ' [data-error-indicator="true"],' + ITEM + ' span.bg-destructive.size-1\\\\.5', S.errorImage);
+    }
+    st.textContent = css;
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops — occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -835,6 +929,7 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   if (window.__zcodeBeautify) {
@@ -842,6 +937,7 @@ export function buildResetScript(marker = "zcode-beautify"): string {
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
     window.__zcodeBeautify.bubbleKey = null;
+    window.__zcodeBeautify.spinnerKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;

@@ -151,6 +151,7 @@ function buildBootstrapScript(payload) {
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
+  var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -188,6 +189,10 @@ function buildBootstrapScript(payload) {
       window.__zcodeBeautify.bubbleKey = BUBBLE;
       applyBubbleLook();
     }
+    if (window.__zcodeBeautify.spinnerKey !== SPIN) {
+      window.__zcodeBeautify.spinnerKey = SPIN;
+      applySpinnerLook();
+    }
     return;
   }
 
@@ -202,6 +207,7 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
@@ -218,10 +224,29 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.spinnerKey === SPIN
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.bubbleKey = BUBBLE;
     applyBubbleLook();
     if (bubbleOnly) return;
+  }
+
+  // Spinner-look fast path: the running-indicator rules live in their own
+  // style element, so swapping the sidebar spinner image never replays the
+  // wallpaper transition either. bubbleOnly above already refuses to bail
+  // while the spinner changed, so a combined push lands both.
+  if (window.__zcodeBeautify.spinnerKey !== SPIN) {
+    var spinnerOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.spinnerKey = SPIN;
+    applySpinnerLook();
+    if (spinnerOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -230,7 +255,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -504,6 +529,8 @@ function buildBootstrapScript(payload) {
   applyChatLook();
   window.__zcodeBeautify.bubbleKey = BUBBLE;
   applyBubbleLook();
+  window.__zcodeBeautify.spinnerKey = SPIN;
+  applySpinnerLook();
 
   function applyChatLook() {
     var C;
@@ -693,6 +720,68 @@ function buildBootstrapScript(payload) {
       + (B.preset === 'custom' ? CUSTOM_CSS : RECIPES[B.preset]);
   }
 
+  // --- session-list running indicator (\u8FD0\u884C\u4E2D\u56FE\u6807) -----------------------------
+  // Sidebar task rows show a spinning lucide LoaderIcon in their leading slot
+  // while a session streams. The loading state exists in TWO renderers, both
+  // anchored by data-testid^="task-item-": the plain/timeline list wraps the
+  // svg in a span that carries animate-spin, grouped rows put animate-spin on
+  // the svg itself. Lucide draws with currentColor strokes, so color:transparent
+  // erases the stock glyph and a background paints the user image in its
+  // place; spin=false drops the rotation (animated GIFs bring their own).
+  // \u8FD0\u884C\u5B8C\u6210\u6807\u5FD7 (\u5B8C\u6210\u672A\u8BFB\u70B9) and \u51FA\u9519\u6807\u5FD7 are separate slots: the plain
+  // renderer marks them with data-unread-indicator / data-error-indicator;
+  // grouped rows carry no attribute, so we anchor their Tailwind dot classes
+  // (bg-sky-500 / bg-destructive + size-1.5) \u2014 brittle across ZCode updates,
+  // but the worst case is the stock dot staying visible.
+  // mode "default" or a missing image removes the loading rules; the terminal
+  // slots live independently of mode.
+  function applySpinnerLook() {
+    var S;
+    try { S = JSON.parse(SPIN); } catch (e) { return; }
+    var loadingOn = S && S.mode === 'image' && S.image;
+    var unreadOn = S && S.unreadImage;
+    var errorOn = S && S.errorImage;
+    var st = document.getElementById(MARKER + '-spinner-style');
+    if (!loadingOn && !unreadOn && !errorOn) {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-spinner-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var size = Math.max(10, Math.min(24, Math.round(S.size || 16)));
+    var ITEM = '[data-testid^="task-item-"]';
+    var css = '';
+    if (loadingOn) {
+      var svg = ITEM + ' span.animate-spin > svg,' + ITEM + ' svg.animate-spin';
+      css += svg + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'color:transparent!important;'
+        + 'background:url("' + S.image + '") center/contain no-repeat!important;}';
+      if (!S.spin) {
+        css += ITEM + ' span.animate-spin,' + ITEM + ' svg.animate-spin{animation:none!important}';
+      }
+    }
+    // A dot is an empty span painted by background-color: clear the color,
+    // stretch it to the icon size and paint the image instead. The outer
+    // 16px slot is a centered flex box, so an enlarged dot stays centered.
+    function slotCss(sel, url) {
+      return sel + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'background-color:transparent!important;'
+        + 'background-image:url("' + url + '")!important;'
+        + 'background-size:contain!important;background-position:center!important;'
+        + 'background-repeat:no-repeat!important}';
+    }
+    if (unreadOn) {
+      css += slotCss(ITEM + ' [data-unread-indicator="true"],' + ITEM + ' span.bg-sky-500.size-1\\\\.5', S.unreadImage);
+    }
+    if (errorOn) {
+      css += slotCss(ITEM + ' [data-error-indicator="true"],' + ITEM + ' span.bg-destructive.size-1\\\\.5', S.errorImage);
+    }
+    st.textContent = css;
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops \u2014 occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -781,6 +870,7 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-backdrop')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   if (window.__zcodeBeautify) {
@@ -788,6 +878,7 @@ function buildResetScript(marker = "zcode-beautify") {
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
     window.__zcodeBeautify.bubbleKey = null;
+    window.__zcodeBeautify.spinnerKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -6675,7 +6766,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs13 = __require("fs");
+    var fs14 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -6871,7 +6962,7 @@ var require_gifutil = __commonJS({
     }
     function _readBinary(path13) {
       return new Promise((resolve, reject) => {
-        fs13.readFile(path13, (err, buffer) => {
+        fs14.readFile(path13, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -6881,7 +6972,7 @@ var require_gifutil = __commonJS({
     }
     function _writeBinary(path13, buffer) {
       return new Promise((resolve, reject) => {
-        fs13.writeFile(path13, buffer, (err) => {
+        fs14.writeFile(path13, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -110612,6 +110703,7 @@ var init_launch = __esm({
 });
 
 // dist/core/inject.js
+import fs4 from "node:fs";
 import path2 from "node:path";
 function normalizeChatLook(raw) {
   const pct = (v) => typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
@@ -110627,6 +110719,61 @@ function normalizeChatLook(raw) {
     widthInsetRem: inset,
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0
   };
+}
+function normalizeTaskSpinnerLook(raw) {
+  const mode = raw?.mode === "image" ? "image" : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size) ? Math.max(10, Math.min(24, Math.round(raw.size))) : DEFAULT_TASK_SPINNER_LOOK.size;
+  const ref = (v) => typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode,
+    image: ref(raw?.image),
+    unreadImage: ref(raw?.unreadImage),
+    errorImage: ref(raw?.errorImage),
+    spin: raw?.spin !== false,
+    size
+  };
+}
+function resolveSpinnerImageRef(ref, apiPort, mediaToken2) {
+  if (!ref)
+    return "";
+  if (/^(https?:|data:)/i.test(ref))
+    return ref;
+  let abs;
+  try {
+    abs = path2.resolve(ref);
+  } catch {
+    return "";
+  }
+  let stat;
+  try {
+    stat = fs4.statSync(abs);
+  } catch {
+    return "";
+  }
+  if (!stat.isFile())
+    return "";
+  const ext = path2.extname(abs).toLowerCase();
+  if (!SPINNER_MIME[ext])
+    return "";
+  const dir = path2.resolve(dataDir()).toLowerCase();
+  const spinnerDir2 = path2.join(dir, "spinner").toLowerCase();
+  if (abs.toLowerCase().startsWith(spinnerDir2 + path2.sep)) {
+    const url = `http://127.0.0.1:${apiPort}/media/spinner/${encodeURIComponent(path2.basename(abs))}`;
+    return mediaToken2 ? `${url}?t=${mediaToken2}` : url;
+  }
+  if (abs.toLowerCase().startsWith(dir + path2.sep)) {
+    const url = `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path2.basename(abs))}`;
+    return mediaToken2 ? `${url}?t=${mediaToken2}` : url;
+  }
+  if (stat.size > SPINNER_FILE_MAX_BYTES) {
+    console.warn(`spinner image too large to inline (${Math.round(stat.size / 1024)} KB): ${abs}`);
+    return "";
+  }
+  try {
+    return `data:${SPINNER_MIME[ext]};base64,${fs4.readFileSync(abs).toString("base64")}`;
+  } catch {
+    return "";
+  }
 }
 function normalizeBubbleLook(raw) {
   const num = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
@@ -110688,6 +110835,12 @@ html, body { background: transparent !important; }
   background: rgb(0 0 0 / var(--zcode-beautify-dim, ${config.dim / 100}));
 }`);
   }
+  const sidebarDim = config.sidebarDim ?? 0;
+  if (sidebarDim > 0) {
+    parts.push(`#sidebar {
+  background: rgb(0 0 0 / var(--zb-sidebar-dim, ${sidebarDim / 100})) !important;
+}`);
+  }
   parts.push(`[data-testid="v4-queue"] {
   --zb-queue-overlap: 28px;
   --zb-queue-radius: 16px;
@@ -110729,6 +110882,16 @@ html, body { background: transparent !important; }
   }
   const videoSrc = config.wallpaperVisible && config.sceneVideoUrl ? tok(config.sceneVideoUrl) : void 0;
   const kenBurns = Boolean(config.kenBurns) && !videoSrc && config.blur === 0 && Boolean(wallpaperDataUri);
+  const spinnerLook = normalizeTaskSpinnerLook(config.taskSpinnerLook);
+  if (spinnerLook.image) {
+    spinnerLook.image = resolveSpinnerImageRef(spinnerLook.image, config.apiPort ?? 9223, mediaToken2);
+  }
+  if (spinnerLook.unreadImage) {
+    spinnerLook.unreadImage = resolveSpinnerImageRef(spinnerLook.unreadImage, config.apiPort ?? 9223, mediaToken2);
+  }
+  if (spinnerLook.errorImage) {
+    spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config.apiPort ?? 9223, mediaToken2);
+  }
   return {
     css: parts.join("\n"),
     wallpaperDataUri,
@@ -110741,6 +110904,7 @@ html, body { background: transparent !important; }
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
     chatLook: normalizeChatLook(config.chatLook),
     bubbleLook: normalizeBubbleLook(config.bubbleLook),
+    taskSpinnerLook: spinnerLook,
     startupClean: config.startupClean !== false
   };
 }
@@ -110777,7 +110941,7 @@ async function resetZCode(port) {
   }
   return count;
 }
-var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, BUBBLE_PRESETS, DEFAULT_CONFIG;
+var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
@@ -110794,11 +110958,30 @@ var init_inject = __esm({
       width: 70,
       align: "right"
     };
+    DEFAULT_TASK_SPINNER_LOOK = {
+      mode: "default",
+      image: "",
+      spin: true,
+      size: 16
+    };
+    SPINNER_REF_MAX_CHARS = 5e5;
+    SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
+    SPINNER_MIME = {
+      ".gif": "image/gif",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+      ".bmp": "image/bmp",
+      ".svg": "image/svg+xml",
+      ".avif": "image/avif"
+    };
     BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
     DEFAULT_CONFIG = {
       port: 9222,
       blur: 0,
       dim: 25,
+      sidebarDim: 0,
       monet: true,
       wallpaperVisible: true,
       fit: "cover"
@@ -110807,7 +110990,7 @@ var init_inject = __esm({
 });
 
 // dist/core/wallpaperType.js
-import fs4 from "node:fs";
+import fs5 from "node:fs";
 import path3 from "node:path";
 function detectWallpaperType(input) {
   const ext = path3.extname(input).toLowerCase();
@@ -110819,7 +111002,7 @@ function detectWallpaperType(input) {
     return "scene";
   let stat;
   try {
-    stat = fs4.statSync(input);
+    stat = fs5.statSync(input);
   } catch {
     return "unknown";
   }
@@ -110844,7 +111027,7 @@ function detectDirectoryType(dir) {
 }
 function readProjectJson(file) {
   try {
-    return JSON.parse(fs4.readFileSync(file, "utf8"));
+    return JSON.parse(fs5.readFileSync(file, "utf8"));
   } catch {
     return void 0;
   }
@@ -110852,14 +111035,14 @@ function readProjectJson(file) {
 function detectFromDirectoryContents(dir) {
   let entries;
   try {
-    entries = fs4.readdirSync(dir);
+    entries = fs5.readdirSync(dir);
   } catch {
     return "unknown";
   }
   let nested = [];
   if (entries.some((e2) => e2.toLowerCase() === "files")) {
     try {
-      nested = fs4.readdirSync(path3.join(dir, "files")).map((e2) => path3.join("files", e2));
+      nested = fs5.readdirSync(path3.join(dir, "files")).map((e2) => path3.join("files", e2));
     } catch {
     }
   }
@@ -110898,7 +111081,7 @@ var init_exec = __esm({
 });
 
 // dist/core/dependencyCheck.js
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 import { execFileSync } from "node:child_process";
 import path4 from "node:path";
 async function checkWallpaperEngine() {
@@ -111049,7 +111232,7 @@ function driveRoots() {
   for (let i2 = 67; i2 <= 90; i2++) {
     const drive = `${String.fromCharCode(i2)}:\\`;
     try {
-      fs5.accessSync(drive);
+      fs6.accessSync(drive);
       roots.push(drive);
     } catch {
     }
@@ -111082,14 +111265,14 @@ async function ffmpegVersion(exe) {
 }
 function isFile(p2) {
   try {
-    return fs5.statSync(p2).isFile();
+    return fs6.statSync(p2).isFile();
   } catch {
     return false;
   }
 }
 function readFileSafe(p2) {
   try {
-    return fs5.readFileSync(p2, "utf8");
+    return fs6.readFileSync(p2, "utf8");
   } catch {
     return "";
   }
@@ -111544,7 +111727,7 @@ var init_loopProcessor = __esm({
 
 // dist/core/cacheManager.js
 import crypto from "node:crypto";
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 import path7 from "node:path";
 function scenesCacheRoot() {
   return path7.join(dataDir(), "scenes");
@@ -111554,7 +111737,7 @@ function getCachePath(hash) {
 }
 function hasCache(hash) {
   try {
-    return fs6.statSync(getCachePath(hash)).isFile() && fs6.statSync(getCachePath(hash)).size > 0;
+    return fs7.statSync(getCachePath(hash)).isFile() && fs7.statSync(getCachePath(hash)).size > 0;
   } catch {
     return false;
   }
@@ -111569,7 +111752,7 @@ function touchCache(hash) {
   const file = getCachePath(hash);
   const now = /* @__PURE__ */ new Date();
   try {
-    fs6.utimesSync(file, now, now);
+    fs7.utimesSync(file, now, now);
   } catch {
   }
 }
@@ -111577,7 +111760,7 @@ function enforceLimit(maxBytes) {
   const root = scenesCacheRoot();
   let entries;
   try {
-    entries = fs6.readdirSync(root, { withFileTypes: true });
+    entries = fs7.readdirSync(root, { withFileTypes: true });
   } catch {
     return 0;
   }
@@ -111597,7 +111780,7 @@ function enforceLimit(maxBytes) {
     if (total <= maxBytes)
       break;
     try {
-      fs6.rmSync(entry.dir, { recursive: true, force: true });
+      fs7.rmSync(entry.dir, { recursive: true, force: true });
     } catch {
       continue;
     }
@@ -111615,13 +111798,13 @@ function normalizeOpts(opts) {
 function fingerprint(p2) {
   let stat;
   try {
-    stat = fs6.statSync(p2);
+    stat = fs7.statSync(p2);
   } catch {
     return `missing:${p2}`;
   }
   if (stat.isFile()) {
     const buf = crypto.createHash("md5");
-    buf.update(fs6.readFileSync(p2));
+    buf.update(fs7.readFileSync(p2));
     return `file:${stat.size}:${buf.digest("hex")}`;
   }
   if (stat.isDirectory()) {
@@ -111629,7 +111812,7 @@ function fingerprint(p2) {
     const walk = (abs, rel) => {
       let items;
       try {
-        items = fs6.readdirSync(abs, { withFileTypes: true });
+        items = fs7.readdirSync(abs, { withFileTypes: true });
       } catch {
         return;
       }
@@ -111641,13 +111824,13 @@ function fingerprint(p2) {
         } else if (item.isFile()) {
           let size = 0;
           try {
-            size = fs6.statSync(childAbs).size;
+            size = fs7.statSync(childAbs).size;
           } catch {
           }
           if (size <= 16 * 1024 * 1024) {
             let content = "";
             try {
-              content = crypto.createHash("md5").update(fs6.readFileSync(childAbs)).digest("hex");
+              content = crypto.createHash("md5").update(fs7.readFileSync(childAbs)).digest("hex");
             } catch {
               content = "unreadable";
             }
@@ -111673,7 +111856,7 @@ function dirSize(dir) {
   function walkSize(dir2) {
     let items;
     try {
-      items = fs6.readdirSync(dir2, { withFileTypes: true });
+      items = fs7.readdirSync(dir2, { withFileTypes: true });
     } catch {
       return;
     }
@@ -111683,7 +111866,7 @@ function dirSize(dir) {
         walkSize(child);
       else if (item.isFile()) {
         try {
-          total += fs6.statSync(child).size;
+          total += fs7.statSync(child).size;
         } catch {
         }
       }
@@ -111698,18 +111881,18 @@ function lastUseMs(dir) {
   };
   let items;
   try {
-    items = fs6.readdirSync(dir, { withFileTypes: true });
+    items = fs7.readdirSync(dir, { withFileTypes: true });
   } catch {
     return 0;
   }
   for (const item of items) {
     try {
-      const st = fs6.statSync(path7.join(dir, item.name));
+      const st = fs7.statSync(path7.join(dir, item.name));
       consider(st);
       if (item.isDirectory()) {
-        for (const inner of fs6.readdirSync(path7.join(dir, item.name), { withFileTypes: true })) {
+        for (const inner of fs7.readdirSync(path7.join(dir, item.name), { withFileTypes: true })) {
           try {
-            consider(fs6.statSync(path7.join(dir, item.name, inner.name)));
+            consider(fs7.statSync(path7.join(dir, item.name, inner.name)));
           } catch {
           }
         }
@@ -111736,14 +111919,14 @@ __export(scenePipeline_exports, {
   importScene: () => importScene,
   resolveSceneInput: () => resolveSceneInput
 });
-import fs7 from "node:fs";
+import fs8 from "node:fs";
 import path8 from "node:path";
 function findVideoInDir(dir) {
   for (const subdir of ["", "files"]) {
     const base = path8.join(dir, subdir);
     let entries;
     try {
-      entries = fs7.readdirSync(base);
+      entries = fs8.readdirSync(base);
     } catch {
       continue;
     }
@@ -111756,7 +111939,7 @@ function findVideoInDir(dir) {
 function resolveSceneInput(input) {
   let stat;
   try {
-    stat = fs7.statSync(input);
+    stat = fs8.statSync(input);
   } catch {
     return input;
   }
@@ -111766,7 +111949,7 @@ function resolveSceneInput(input) {
     return input;
   let dir = path8.dirname(path8.resolve(input));
   for (let hop = 0; hop < 4; hop++) {
-    if (fs7.existsSync(path8.join(dir, "project.json")))
+    if (fs8.existsSync(path8.join(dir, "project.json")))
       return dir;
     const parent = path8.dirname(dir);
     if (parent === dir)
@@ -111780,7 +111963,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   onProgress("detect", pkgPath);
   let type = detectWallpaperType(pkgPath);
   try {
-    if (type === "video" && fs7.statSync(pkgPath).isDirectory()) {
+    if (type === "video" && fs8.statSync(pkgPath).isDirectory()) {
       const videoFile = findVideoInDir(pkgPath);
       if (!videoFile)
         throw new SceneImportError(`No .mp4/.webm inside video wallpaper directory: ${pkgPath}`);
@@ -111836,8 +112019,8 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath2);
     onProgress("saving", hash);
-    fs7.mkdirSync(path8.dirname(loopPath), { recursive: true });
-    fs7.renameSync(tmpLoop, loopPath);
+    fs8.mkdirSync(path8.dirname(loopPath), { recursive: true });
+    fs8.renameSync(tmpLoop, loopPath);
     const blackness = await analyzeBlackness(loopPath, ffmpegPath2);
     enforceLimit(opts.maxCacheBytes);
     onProgress("done", loopPath);
@@ -111845,13 +112028,13 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   }
   let pkgFile = pkgPath;
   try {
-    if (fs7.statSync(pkgPath).isDirectory()) {
+    if (fs8.statSync(pkgPath).isDirectory()) {
       let declared;
       try {
-        declared = JSON.parse(fs7.readFileSync(path8.join(pkgPath, "project.json"), "utf8")).file;
+        declared = JSON.parse(fs8.readFileSync(path8.join(pkgPath, "project.json"), "utf8")).file;
       } catch {
       }
-      const name = declared && /\.pkg$/i.test(declared) && fs7.existsSync(path8.join(pkgPath, declared)) ? declared : fs7.readdirSync(pkgPath).find((e2) => /\.pkg$/i.test(e2));
+      const name = declared && /\.pkg$/i.test(declared) && fs8.existsSync(path8.join(pkgPath, declared)) ? declared : fs8.readdirSync(pkgPath).find((e2) => /\.pkg$/i.test(e2));
       if (!name)
         throw new SceneImportError(`No scene.pkg inside: ${pkgPath}`);
       pkgFile = path8.join(pkgPath, name);
@@ -111872,7 +112055,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
       }
       onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
       const rawPath2 = path8.join(path8.dirname(loopPath), `raw-${Date.now()}.mp4`);
-      fs7.mkdirSync(path8.dirname(rawPath2), { recursive: true });
+      fs8.mkdirSync(path8.dirname(rawPath2), { recursive: true });
       await recordSceneWindow(handle, rawPath2, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height }, ffmpegPath2);
       return { rawPath: rawPath2 };
     } finally {
@@ -111893,7 +112076,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     if (black) {
       onProgress(`black-retry-${pass + 1}`, "reopen window");
       try {
-        fs7.rmSync(rawPath, { force: true });
+        fs8.rmSync(rawPath, { force: true });
       } catch {
       }
       await new Promise((r2) => setTimeout(r2, 3e3));
@@ -111902,7 +112085,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   if (black) {
     try {
       if (rawPath)
-        fs7.rmSync(rawPath, { force: true });
+        fs8.rmSync(rawPath, { force: true });
     } catch {
     }
     throw new SceneImportError("\u5F55\u5236\u753B\u9762\u5168\u9ED1(\u5DF2\u81EA\u52A8\u91CD\u5F00\u7A97\u53E3\u91CD\u8BD5)\u2014\u2014\u8BF7\u7A0D\u5019\u91CD\u8BD5\u6216\u91CD\u542F Wallpaper Engine");
@@ -111914,15 +112097,15 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath2);
     onProgress("saving", hash);
-    fs7.mkdirSync(path8.dirname(loopPath), { recursive: true });
-    fs7.renameSync(tmpLoop, loopPath);
-    fs7.rmSync(rawPath, { force: true });
+    fs8.mkdirSync(path8.dirname(loopPath), { recursive: true });
+    fs8.renameSync(tmpLoop, loopPath);
+    fs8.rmSync(rawPath, { force: true });
     enforceLimit(opts.maxCacheBytes);
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash, blackness: { blackFraction: black ? 1 : 0, meanLuma: 0, durationSec: opts.duration }, fromCache: false };
   } finally {
     try {
-      fs7.rmSync(rawPath, { force: true });
+      fs8.rmSync(rawPath, { force: true });
     } catch {
     }
   }
@@ -111931,7 +112114,7 @@ async function extractPoster(loopFile, posterPath, ffmpegPath2) {
   const ffmpeg = ffmpegPath2 ?? (await checkFfmpeg()).path;
   if (!ffmpeg)
     throw new SceneImportError("ffmpeg not found");
-  fs7.mkdirSync(path8.dirname(path8.resolve(posterPath)), { recursive: true });
+  fs8.mkdirSync(path8.dirname(path8.resolve(posterPath)), { recursive: true });
   await execFileP(ffmpeg, [
     "-y",
     "-loglevel",
@@ -111996,7 +112179,7 @@ __export(session_exports, {
   reapplyStored: () => reapplyStored,
   resetAppearance: () => resetAppearance
 });
-import fs8 from "node:fs";
+import fs9 from "node:fs";
 import path9 from "node:path";
 async function reapplyStored() {
   const config = mergedConfig();
@@ -112004,7 +112187,7 @@ async function reapplyStored() {
 }
 async function applyWallpaper(imagePath, opts) {
   const abs = path9.resolve(imagePath);
-  if (!fs8.existsSync(abs))
+  if (!fs9.existsSync(abs))
     throw new Error(`Image not found: ${abs}`);
   const kind = detectWallpaperType(abs);
   if (kind === "scene" || kind === "video") {
@@ -112013,10 +112196,10 @@ async function applyWallpaper(imagePath, opts) {
   }
   const stored = loadConfig();
   const config = { ...baseConfig(opts, stored), mediaType: "image", sceneHash: void 0 };
-  fs8.mkdirSync(dataDir(), { recursive: true });
+  fs9.mkdirSync(dataDir(), { recursive: true });
   const dest = path9.join(dataDir(), "wallpaper" + path9.extname(abs).toLowerCase());
   if (dest !== abs)
-    fs8.copyFileSync(abs, dest);
+    fs9.copyFileSync(abs, dest);
   const assets = await loadWallpaper(dest);
   const payload = buildPayload(config, assets, serveMediaToken());
   saveConfig({ ...config, wallpaperPath: dest });
@@ -112025,7 +112208,7 @@ async function applyWallpaper(imagePath, opts) {
 }
 function serveMediaToken() {
   try {
-    return fs8.readFileSync(path9.join(dataDir(), "serve.token"), "utf8").trim();
+    return fs9.readFileSync(path9.join(dataDir(), "serve.token"), "utf8").trim();
   } catch {
     return "";
   }
@@ -112043,6 +112226,7 @@ function baseConfig(opts, stored) {
     port: opts.port ?? stored.port ?? DEFAULT_CONFIG.port,
     blur: opts.blur ?? stored.blur ?? DEFAULT_CONFIG.blur,
     dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
+    sidebarDim: opts.sidebarDim ?? stored.sidebarDim ?? DEFAULT_CONFIG.sidebarDim,
     monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
     wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
     fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
@@ -112051,7 +112235,10 @@ function baseConfig(opts, stored) {
     // preset only — without re-sending (and resetting) the rest.
     bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
     // Chat look merges the same way (masks + column width), then normalizes.
-    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook)
+    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook),
+    // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
+    // inside buildPayload where the image reference is resolved too.
+    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -112098,9 +112285,9 @@ async function resetAppearance(port) {
 }
 async function buildPayloadFromConfig(config) {
   let assets;
-  if (config.mediaType === "video" && config.wallpaperPath && fs8.existsSync(config.wallpaperPath)) {
+  if (config.mediaType === "video" && config.wallpaperPath && fs9.existsSync(config.wallpaperPath)) {
     const posterPath = path9.join(path9.dirname(config.wallpaperPath), "poster.jpg");
-    if (fs8.existsSync(posterPath)) {
+    if (fs9.existsSync(posterPath)) {
       assets = await loadWallpaper(posterPath);
     }
     const apiPort = config.apiPort ?? 9223;
@@ -112109,7 +112296,7 @@ async function buildPayloadFromConfig(config) {
     }
     return buildPayload(config, assets, serveMediaToken());
   }
-  if (config.wallpaperPath && fs8.existsSync(config.wallpaperPath)) {
+  if (config.wallpaperPath && fs9.existsSync(config.wallpaperPath)) {
     assets = await loadWallpaper(config.wallpaperPath);
   }
   return buildPayload(config, assets, serveMediaToken());
@@ -112289,11 +112476,22 @@ var init_launchers = __esm({
 });
 
 // dist/version.js
+function cmpVersion(a2, b) {
+  const seg = (v) => String(v ?? "").replace(/^v/, "").split(".").map((n2) => Number(n2) || 0);
+  const pa = seg(a2);
+  const pb = seg(b);
+  for (let i2 = 0; i2 < Math.max(pa.length, pb.length); i2++) {
+    const d = (pa[i2] ?? 0) - (pb[i2] ?? 0);
+    if (d)
+      return d;
+  }
+  return 0;
+}
 var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "0.4.7";
+    VERSION = "0.4.8";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Logocceai";
@@ -112827,6 +113025,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '        <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"><span class="zb-val"><span id="zb-blur-val">0</span>px</span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u80CC\u666F\u538B\u6697</span><span class="zb-set-sub">\u80CC\u666F\u538B\u6697\u7A0B\u5EA6(\u767E\u5206\u6BD4,\u8D8A\u9AD8\u8D8A\u6697)</span></div>' +
     '        <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"><span class="zb-val"><span id="zb-dim-val">0</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u4FA7\u8FB9\u680F\u538B\u6697</span><span class="zb-set-sub">\u5728\u80CC\u666F\u538B\u6697\u4E4B\u4E0A\u5355\u72EC\u52A0\u6DF1\u5DE6\u4FA7\u4F1A\u8BDD\u680F;\u8DDF\u968F\u5BBD\u5EA6\u62D6\u52A8\u4E0E\u6298\u53E0</span></div>' +
+    '        <input type="range" id="zb-sidebar-dim" min="0" max="80" step="1" value="0"><span class="zb-val"><span id="zb-sidebar-dim-val">0</span>%</span></div>' +
     '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u586B\u5145\u65B9\u5F0F</span><span class="zb-set-sub">\u80CC\u666F\u94FA\u6EE1\u7A97\u53E3\u7684\u7B56\u7565</span></div>' +
     '        <select id="zb-fit" title="\u80CC\u666F\u586B\u5145\u65B9\u5F0F:\u586B\u6EE1\u88C1\u526A\u94FA\u6EE1\u7A97\u53E3 / \u5B8C\u6574\u663E\u793A\u4E0D\u88C1\u526A(\u6A21\u7CCA\u57AB\u5E95)/ \u667A\u80FD\u9002\u914D\u81EA\u52A8\u5206\u6790\u753B\u9762\u4E3B\u4F53">' +
     '          <option value="cover">\u586B\u6EE1\u88C1\u526A</option>' +
@@ -112918,6 +113118,35 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '        <input type="range" id="zb-bubble-width" min="40" max="90" step="1" value="70"><span class="zb-val"><span id="zb-bubble-width-val">70</span>%</span></div>' +
     '      </div>' +
     '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u8FD0\u884C\u4E2D\u56FE\u6807</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u8F6C\u5708\u6837\u5F0F</span><span class="zb-set-sub">\u4F1A\u8BDD\u5217\u8868\u5DE6\u4FA7\u201C\u6B63\u5728\u5BF9\u8BDD\u201D\u7684\u8F6C\u5708\u6807\u5FD7;\u539F\u751F = \u4E0D\u6539</span></div>' +
+    '        <div class="zb-ctrl"><select id="zb-spinner-mode" title="\u4F1A\u8BDD\u5217\u8868\u5DE6\u4FA7\u6B63\u5728\u5BF9\u8BDD\u6807\u5FD7:\u539F\u751F=\u4FDD\u6301 ZCode \u81EA\u5E26\u8F6C\u5708;\u81EA\u5B9A\u4E49\u56FE\u7247=\u6362\u6210\u56FE\u7247\u6216 GIF \u52A8\u56FE">' +
+    '          <option value="default">\u539F\u751F</option>' +
+    '          <option value="image">\u81EA\u5B9A\u4E49\u56FE\u7247</option>' +
+    '        </select>' +
+    '        <button class="zb-btn" id="zb-spinner-pick" title="\u9009\u62E9\u672C\u5730\u56FE\u7247\u6216 GIF \u52A8\u56FE(\u22642MB,\u652F\u6301 gif/png/webp/jpeg/svg)">\u{1F4C1} \u9009\u56FE</button>' +
+    '        <input type="file" id="zb-spinner-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set" id="zb-spinner-img-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u5F53\u524D\u56FE\u6807</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-spinner-preview" alt="\u5F53\u524D\u8FD0\u884C\u4E2D\u56FE\u6807" title="\u5F53\u524D\u8FD0\u884C\u4E2D\u56FE\u6807" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-spinner-clear" title="\u6062\u590D ZCode \u539F\u751F\u8F6C\u5708\u56FE\u6807">\u2715 \u6062\u590D\u539F\u751F</button></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5B8C\u6210\u6807\u5FD7</span><span class="zb-set-sub">\u4F1A\u8BDD\u8DD1\u5B8C\u4E14\u6709\u672A\u8BFB\u56DE\u590D\u65F6\u7684\u5706\u70B9;\u7559\u7A7A = \u539F\u751F\u84DD\u70B9</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-spinner-unread-preview" alt="\u5F53\u524D\u5B8C\u6210\u6807\u5FD7" title="\u5F53\u524D\u5B8C\u6210\u6807\u5FD7" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-spinner-unread-pick" title="\u9009\u62E9\u5B8C\u6210\u6807\u5FD7\u7684\u56FE\u7247\u6216 GIF(\u22642MB)">\u{1F4C1} \u9009\u56FE</button>' +
+    '        <button class="zb-btn" id="zb-spinner-unread-clear" title="\u6E05\u9664\u56FE\u7247,\u6062\u590D\u539F\u751F\u84DD\u70B9" hidden>\u2715</button>' +
+    '        <input type="file" id="zb-spinner-unread-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u9519\u8BEF\u6807\u5FD7</span><span class="zb-set-sub">\u4F1A\u8BDD\u51FA\u9519\u65F6\u7684\u5706\u70B9;\u7559\u7A7A = \u539F\u751F\u7EA2\u70B9</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-spinner-error-preview" alt="\u5F53\u524D\u9519\u8BEF\u6807\u5FD7" title="\u5F53\u524D\u9519\u8BEF\u6807\u5FD7" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-spinner-error-pick" title="\u9009\u62E9\u9519\u8BEF\u6807\u5FD7\u7684\u56FE\u7247\u6216 GIF(\u22642MB)">\u{1F4C1} \u9009\u56FE</button>' +
+    '        <button class="zb-btn" id="zb-spinner-error-clear" title="\u6E05\u9664\u56FE\u7247,\u6062\u590D\u539F\u751F\u7EA2\u70B9" hidden>\u2715</button>' +
+    '        <input type="file" id="zb-spinner-error-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set" id="zb-spinner-opts" hidden><div class="zb-set-main"><span class="zb-set-name">\u4FDD\u7559\u65CB\u8F6C</span><span class="zb-set-sub">\u9759\u6001\u56FE\u5EFA\u8BAE\u5F00;GIF \u52A8\u56FE\u5EFA\u8BAE\u5173(\u81EA\u5E26\u52A8\u753B)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-spinner-spin" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u662F\u5426\u6CBF\u7528\u539F\u751F\u7684\u65CB\u8F6C\u52A8\u753B"></label></div>' +
+    '      <div class="zb-set zb-slide" id="zb-spinner-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u56FE\u6807\u5927\u5C0F</span><span class="zb-set-sub">\u539F\u751F\u69FD\u4F4D\u7EA6 16px,\u8FC7\u5927\u53EF\u80FD\u6324\u5230\u884C\u5185\u5176\u4ED6\u5143\u7D20</span></div>' +
+    '        <input type="range" id="zb-spinner-size" min="10" max="24" step="1" value="16" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u7684\u663E\u793A\u5C3A\u5BF8(10-24px)"><span class="zb-val"><span id="zb-spinner-size-val">16</span>px</span></div>' +
+    '      </div>' +
+    '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-settings" hidden>' +
     '    <div class="zb-block" id="zb-card-config">' +
@@ -112966,6 +113195,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">\u63D2\u4EF6\u4FE1\u606F</div>' +
     '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u7248\u672C\u66F4\u65B0</span><span class="zb-set-sub" id="zb-ab-upd-sub">\u5BF9\u7167 GitHub \u6700\u65B0\u53D1\u5E03\u68C0\u67E5\u5F53\u524D\u5B89\u88C5</span></div>' +
+    '        <div class="zb-ctrl"><button class="zb-btn" id="zb-ab-check" title="\u5411 GitHub \u67E5\u8BE2\u6700\u65B0\u53D1\u5E03\u5E76\u4E0E\u5F53\u524D\u7248\u672C\u5BF9\u6BD4">\u27F3 \u68C0\u67E5\u66F4\u65B0</button>' +
+    '        <button class="zb-btn" id="zb-ab-copy-rel" hidden title="\u590D\u5236\u6700\u65B0\u53D1\u5E03\u7684\u4E0B\u8F7D\u9875\u5730\u5740">\u29C9 \u94FE\u63A5</button></div></div>' +
     '      <div class="zb-set zb-ab-repo"><div class="zb-set-main"><span class="zb-set-name">\u4E0A\u6E38\u4ED3\u5E93</span></div>' +
     '        <div class="zb-ctrl"><span class="zb-set-val" title="${REPO_URL}">${REPO_URL.replace(/^https?:\/\//, "")}</span>' +
     '        <button class="zb-btn" id="zb-ab-copy" title="\u590D\u5236\u4E0A\u6E38\u4ED3\u5E93\u5730\u5740">\u29C9 \u590D\u5236</button></div></div>' +
@@ -113199,10 +113431,13 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   // Local live preview; the server re-injects the authoritative CSS right after.
   function preview() {
     var w = wallpaperEl(); if (!w) return;
-    var b = Number($('zb-blur').value), d = Number($('zb-dim').value);
+    var b = Number($('zb-blur').value), d = Number($('zb-dim').value), sd = Number($('zb-sidebar-dim').value);
     w.style.filter = b > 0 ? 'blur(' + b + 'px)' : 'none';
     w.style.transform = b > 0 ? 'scale(1.04)' : 'none';
     document.documentElement.style.setProperty('--zcode-beautify-dim', String(d / 100));
+    // \u4FA7\u8FB9\u680F\u538B\u6697: the scrim rule only exists server-side once the value > 0,
+    // so the first notch appears after the push lands; adjustments preview live.
+    document.documentElement.style.setProperty('--zb-sidebar-dim', String(sd / 100));
   }
 
   var pushTimer = null;
@@ -113212,6 +113447,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
       post('/api/config', {
         blur: Number($('zb-blur').value),
         dim: Number($('zb-dim').value),
+        sidebarDim: Number($('zb-sidebar-dim').value),
         monet: $('zb-monet').checked,
         wallpaperVisible: $('zb-vis').checked,
         kenBurns: $('zb-kb').checked,
@@ -113241,6 +113477,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     if (on) {
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
+      $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
       setChatSliders(0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
@@ -113273,6 +113510,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
         lastConfig = c;
         $('zb-blur').value = c.blur; $('zb-blur-val').textContent = c.blur;
         $('zb-dim').value = c.dim; $('zb-dim-val').textContent = c.dim;
+        $('zb-sidebar-dim').value = c.sidebarDim ?? 0; $('zb-sidebar-dim-val').textContent = String(c.sidebarDim ?? 0);
         $('zb-monet').checked = !!c.monet;
         $('zb-vis').checked = !!c.wallpaperVisible;
         $('zb-kb').checked = !!c.kenBurns;
@@ -113290,6 +113528,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
         var cl = c.chatLook || {};
         setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0);
         setBubbleUI(c.bubbleLook || {});
+        setSpinnerUI(c.taskSpinnerLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
@@ -113318,6 +113557,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   });
   $('zb-dim').addEventListener('input', function () {
     $('zb-dim-val').textContent = this.value; preview(); pushConfig();
+  });
+  $('zb-sidebar-dim').addEventListener('input', function () {
+    $('zb-sidebar-dim-val').textContent = this.value; preview(); pushConfig();
   });
   $('zb-monet').addEventListener('change', pushConfig);
   $('zb-vis').addEventListener('change', pushConfig);
@@ -113635,6 +113877,130 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
       zbPvSchedule();
       pushBubbleLook();
     });
+  });
+
+  // --- session-list running indicator (\u8FD0\u884C\u4E2D\u56FE\u6807) -----------------------------
+  // mode/spin/size ride /api/config like the bubble look; the IMAGE itself is
+  // uploaded once through /api/spinner (which saves it into the data dir and
+  // flips mode to "image" serve-side). The panel never invents an image ref \u2014
+  // it echoes the stored one so partial pushes never blank the icon.
+  // The \u5B8C\u6210\u6807\u5FD7 (unread) and \u9519\u8BEF\u6807\u5FD7 (error) slots follow the same echo
+  // contract through their own refs; they are independent of the loading slot.
+  var spinnerImageRef = '';
+  var spinnerUnreadRef = '';
+  var spinnerErrorRef = '';
+  function spinnerUIState() {
+    return {
+      mode: $('zb-spinner-mode').value,
+      image: spinnerImageRef,
+      unreadImage: spinnerUnreadRef,
+      errorImage: spinnerErrorRef,
+      spin: $('zb-spinner-spin').checked,
+      size: Number($('zb-spinner-size').value)
+    };
+  }
+  function reflectSpinnerRows(mode) {
+    var on = mode === 'image' && Boolean(spinnerImageRef);
+    $('zb-spinner-img-row').hidden = !on;
+    $('zb-spinner-opts').hidden = mode !== 'image';
+    $('zb-spinner-size-row').hidden = mode !== 'image';
+    if (on && lastConfig && lastConfig.spinnerImageUrl) $('zb-spinner-preview').src = lastConfig.spinnerImageUrl;
+    reflectTerminalSlot('zb-spinner-unread-preview', 'zb-spinner-unread-clear', spinnerUnreadRef, 'spinnerUnreadUrl');
+    reflectTerminalSlot('zb-spinner-error-preview', 'zb-spinner-error-clear', spinnerErrorRef, 'spinnerErrorUrl');
+  }
+  function reflectTerminalSlot(imgId, clearId, ref, urlField) {
+    var has = Boolean(ref);
+    $(clearId).hidden = !has;
+    var img = $(imgId);
+    img.style.visibility = has ? 'visible' : 'hidden';
+    if (has && lastConfig && lastConfig[urlField]) img.src = lastConfig[urlField];
+  }
+  function setSpinnerUI(s) {
+    s = s || {};
+    var mode = s.mode === 'image' ? 'image' : 'default';
+    spinnerImageRef = typeof s.image === 'string' ? s.image : '';
+    spinnerUnreadRef = typeof s.unreadImage === 'string' ? s.unreadImage : '';
+    spinnerErrorRef = typeof s.errorImage === 'string' ? s.errorImage : '';
+    $('zb-spinner-mode').value = mode;
+    $('zb-spinner-spin').checked = s.spin !== false;
+    $('zb-spinner-size').value = s.size ?? 16;
+    $('zb-spinner-size-val').textContent = String(s.size ?? 16);
+    reflectSpinnerRows(mode);
+  }
+  function pushSpinnerLook() {
+    post('/api/config', { taskSpinnerLook: spinnerUIState() }, function (d) { if (d && d.error) status(d.error); });
+  }
+  $('zb-spinner-mode').addEventListener('change', function () {
+    reflectSpinnerRows(this.value);
+    pushSpinnerLook();
+  });
+  $('zb-spinner-spin').addEventListener('change', pushSpinnerLook);
+  $('zb-spinner-size').addEventListener('input', function () {
+    $('zb-spinner-size-val').textContent = this.value;
+  });
+  $('zb-spinner-size').addEventListener('change', pushSpinnerLook);
+  $('zb-spinner-pick').addEventListener('click', function () {
+    $('zb-spinner-file').click();
+  });
+  $('zb-spinner-file').addEventListener('change', function () {
+    spinnerUpload(this, 'running');
+  });
+  // \u5B8C\u6210\u6807\u5FD7 / \u9519\u8BEF\u6807\u5FD7 pickers share the upload pipeline with a slot tag.
+  $('zb-spinner-unread-pick').addEventListener('click', function () { $('zb-spinner-unread-file').click(); });
+  $('zb-spinner-unread-file').addEventListener('change', function () {
+    spinnerUpload(this, 'unread');
+  });
+  $('zb-spinner-error-pick').addEventListener('click', function () { $('zb-spinner-error-file').click(); });
+  $('zb-spinner-error-file').addEventListener('change', function () {
+    spinnerUpload(this, 'error');
+  });
+  function spinnerUpload(input, slot) {
+    var f = input.files && input.files[0];
+    input.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { status('\u56FE\u7247\u8D85\u8FC7 2MB,16px \u56FE\u6807\u8BF7\u9009\u5C0F\u4E00\u70B9\u7684\u6587\u4EF6'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      post('/api/spinner', { dataUri: fr.result, name: f.name, slot: slot }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        if (d && d.taskSpinnerLook) {
+          if (slot === 'running' && d.taskSpinnerLook.image) {
+            spinnerImageRef = d.taskSpinnerLook.image;
+            $('zb-spinner-mode').value = 'image';
+            reflectSpinnerRows('image');
+          } else if (slot === 'unread' && d.taskSpinnerLook.unreadImage) {
+            spinnerUnreadRef = d.taskSpinnerLook.unreadImage;
+            lastConfig = d; // resolved preview URL rides on the same payload
+            reflectSpinnerRows($('zb-spinner-mode').value);
+          } else if (slot === 'error' && d.taskSpinnerLook.errorImage) {
+            spinnerErrorRef = d.taskSpinnerLook.errorImage;
+            lastConfig = d;
+            reflectSpinnerRows($('zb-spinner-mode').value);
+          }
+        }
+        var label = slot === 'running' ? '\u8FD0\u884C\u4E2D\u56FE\u6807' : slot === 'unread' ? '\u5B8C\u6210\u6807\u5FD7' : '\u9519\u8BEF\u6807\u5FD7';
+        status(d && d.windows > 0 ? label + '\u5DF2\u5E94\u7528' : label + '\u5DF2\u4FDD\u5B58(ZCode \u672A\u8FDE\u63A5)');
+      });
+    };
+    fr.readAsDataURL(f);
+  }
+  $('zb-spinner-clear').addEventListener('click', function () {
+    $('zb-spinner-mode').value = 'default';
+    reflectSpinnerRows('default');
+    pushSpinnerLook();
+    status('\u5DF2\u6062\u590D\u539F\u751F\u8F6C\u5708\u56FE\u6807');
+  });
+  $('zb-spinner-unread-clear').addEventListener('click', function () {
+    spinnerUnreadRef = '';
+    reflectSpinnerRows($('zb-spinner-mode').value);
+    pushSpinnerLook();
+    status('\u5DF2\u6062\u590D\u539F\u751F\u5B8C\u6210\u6807\u5FD7');
+  });
+  $('zb-spinner-error-clear').addEventListener('click', function () {
+    spinnerErrorRef = '';
+    reflectSpinnerRows($('zb-spinner-mode').value);
+    pushSpinnerLook();
+    status('\u5DF2\u6062\u590D\u539F\u751F\u9519\u8BEF\u6807\u5FD7');
   });
 
   // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
@@ -115496,6 +115862,52 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
   $('zb-ab-copy').addEventListener('click', function () { zbCopyRepo(REPO_URL, '\u4E0A\u6E38\u4ED3\u5E93'); });
   $('zb-ab-copy-fork').addEventListener('click', function () { zbCopyRepo(FORK_URL, ' Fork \u4ED3\u5E93'); });
 
+  // --- \u5173\u4E8E page: check for updates (\u68C0\u67E5\u66F4\u65B0) --------------------------------
+  // One button, three states: idle "\u27F3 \u68C0\u67E5\u66F4\u65B0" \u2192 "\u68C0\u67E5\u4E2D\u2026" \u2192 result. When a
+  // newer release exists the SAME button becomes "\u6253\u5F00\u53D1\u5E03\u9875" (window.open,
+  // falling back to the \u29C9 \u94FE\u63A5 copy button when popups are blocked).
+  var zbLastReleaseUrl = '';
+  $('zb-ab-check').addEventListener('click', function () {
+    var btn = this;
+    if (btn.disabled) return;
+    if (zbLastReleaseUrl) {
+      var opened = null;
+      try { opened = window.open(zbLastReleaseUrl, '_blank'); } catch (e) { opened = null; }
+      status(opened ? '\u5DF2\u6253\u5F00\u53D1\u5E03\u9875' : '\u6253\u5F00\u88AB\u62E6\u622A,\u5DF2\u6539\u4E3A\u590D\u5236\u94FE\u63A5');
+      if (!opened) zbCopyRepo(zbLastReleaseUrl, '\u53D1\u5E03\u9875');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '\u68C0\u67E5\u4E2D\u2026';
+    $('zb-ab-upd-sub').textContent = '\u6B63\u5728\u5411 GitHub \u67E5\u8BE2\u2026';
+    apiFetch('/api/update-check')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        btn.disabled = false;
+        var sub = $('zb-ab-upd-sub');
+        if (d && d.ok && d.hasUpdate) {
+          btn.textContent = '\u6253\u5F00\u53D1\u5E03\u9875';
+          sub.textContent = '\u53D1\u73B0\u65B0\u7248\u672C v' + d.latest + '(\u5F53\u524D v' + d.current + ')';
+          zbLastReleaseUrl = d.releaseUrl || (FORK_URL + '/releases');
+          $('zb-ab-copy-rel').hidden = false;
+        } else if (d && d.ok) {
+          btn.textContent = '\u27F3 \u518D\u67E5\u4E00\u6B21';
+          sub.textContent = d.latest ? '\u5DF2\u662F\u6700\u65B0\u7248\u672C v' + d.current : '\u5C1A\u65E0\u6B63\u5F0F\u53D1\u5E03(\u5F53\u524D v' + d.current + ')';
+        } else {
+          btn.textContent = '\u27F3 \u91CD\u8BD5';
+          sub.textContent = '\u68C0\u67E5\u5931\u8D25(' + (d && d.error === 'network' ? '\u65E0\u6CD5\u8BBF\u95EE GitHub' : '\u670D\u52A1\u5F02\u5E38') + ')';
+        }
+      })
+      .catch(function () {
+        btn.disabled = false;
+        btn.textContent = '\u27F3 \u91CD\u8BD5';
+        $('zb-ab-upd-sub').textContent = '\u68C0\u67E5\u5931\u8D25(\u7F8E\u5316\u670D\u52A1\u672A\u54CD\u5E94)';
+      });
+  });
+  $('zb-ab-copy-rel').addEventListener('click', function () {
+    if (zbLastReleaseUrl) zbCopyRepo(zbLastReleaseUrl, '\u53D1\u5E03\u9875');
+  });
+
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
     p.hidden = !p.hidden;
@@ -115600,11 +116012,11 @@ var init_panelScript = __esm({
 });
 
 // dist/core/media.js
-import fs9 from "node:fs";
+import fs10 from "node:fs";
 function sendMediaFile(req, res, filePath) {
   let stat;
   try {
-    stat = fs9.statSync(filePath);
+    stat = fs10.statSync(filePath);
   } catch {
     return false;
   }
@@ -115642,10 +116054,10 @@ function sendMediaFile(req, res, filePath) {
       "Content-Range": `bytes ${start}-${end}/${stat.size}`,
       "Content-Length": end - start + 1
     });
-    fs9.createReadStream(filePath, { start, end }).on("error", () => res.destroy()).pipe(res);
+    fs10.createReadStream(filePath, { start, end }).on("error", () => res.destroy()).pipe(res);
   } else {
     res.writeHead(200, { ...headers, "Content-Length": stat.size });
-    fs9.createReadStream(filePath).on("error", () => res.destroy()).pipe(res);
+    fs10.createReadStream(filePath).on("error", () => res.destroy()).pipe(res);
   }
   return true;
 }
@@ -115666,18 +116078,18 @@ var init_media = __esm({
 });
 
 // dist/core/weLibrary.js
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 import path10 from "node:path";
 function isDirWithEntries(p2) {
   try {
-    return fs10.statSync(p2).isDirectory() && fs10.readdirSync(p2).length > 0;
+    return fs11.statSync(p2).isDirectory() && fs11.readdirSync(p2).length > 0;
   } catch {
     return false;
   }
 }
 function readJsonSafe(file) {
   try {
-    return JSON.parse(fs10.readFileSync(file, "utf8"));
+    return JSON.parse(fs11.readFileSync(file, "utf8"));
   } catch {
     return void 0;
   }
@@ -115710,7 +116122,7 @@ function weInstallDirs() {
   for (const lib of steamLibraryCandidates()) {
     dirs.add(path10.join(lib, "steamapps", "common", "wallpaper_engine"));
   }
-  return [...dirs].filter((d) => fs10.existsSync(path10.join(d, "config.json")));
+  return [...dirs].filter((d) => fs11.existsSync(path10.join(d, "config.json")));
 }
 function listWeFolders() {
   const out = [];
@@ -115755,7 +116167,7 @@ function listWeWallpapers() {
   for (const root of findWeRoots()) {
     let entries;
     try {
-      entries = fs10.readdirSync(root.dir);
+      entries = fs11.readdirSync(root.dir);
     } catch {
       continue;
     }
@@ -115763,7 +116175,7 @@ function listWeWallpapers() {
       const dir = path10.join(root.dir, name);
       let stat;
       try {
-        stat = fs10.statSync(dir);
+        stat = fs11.statSync(dir);
       } catch {
         continue;
       }
@@ -115775,8 +116187,8 @@ function listWeWallpapers() {
       const project = readJsonSafe(path10.join(dir, "project.json"));
       const title = typeof project?.title === "string" && project.title.trim() ? project.title.trim() : name;
       const declared = typeof project?.preview === "string" ? project.preview : void 0;
-      const previewName = declared && PREVIEW_NAME_RE.test(declared) ? declared : PREVIEW_FALLBACKS.find((f2) => fs10.existsSync(path10.join(dir, f2)));
-      const usable = previewName ? fs10.existsSync(path10.join(dir, previewName)) : false;
+      const previewName = declared && PREVIEW_NAME_RE.test(declared) ? declared : PREVIEW_FALLBACKS.find((f2) => fs11.existsSync(path10.join(dir, f2)));
+      const usable = previewName ? fs11.existsSync(path10.join(dir, previewName)) : false;
       let folder = folderByKey.get(name);
       if (!folder) {
         const dirLower = dir.toLowerCase();
@@ -115791,7 +116203,7 @@ function listWeWallpapers() {
       if (type === "video") {
         for (const sub of ["", "files"]) {
           try {
-            const hit = fs10.readdirSync(path10.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
+            const hit = fs11.readdirSync(path10.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
             if (hit) {
               videoFile = path10.join(dir, sub, hit);
               break;
@@ -115859,7 +116271,7 @@ function resolveWePreview(source, id, file, nameRe = PREVIEW_NAME_RE) {
   const fileAbs = path10.resolve(dir, file);
   if (path10.dirname(fileAbs).toLowerCase() !== dir.toLowerCase())
     return void 0;
-  return fs10.existsSync(fileAbs) ? fileAbs : void 0;
+  return fs11.existsSync(fileAbs) ? fileAbs : void 0;
 }
 var PREVIEW_FALLBACKS, PREVIEW_NAME_RE;
 var init_weLibrary = __esm({
@@ -115879,7 +116291,7 @@ __export(server_exports, {
   startServe: () => startServe
 });
 import http from "node:http";
-import fs11 from "node:fs";
+import fs12 from "node:fs";
 import path11 from "node:path";
 import crypto2 from "node:crypto";
 import { execFile as execFile4, spawn as spawn3 } from "node:child_process";
@@ -115905,14 +116317,14 @@ async function themeThumbFor(source) {
     return source;
   const thumb = path11.join(thumbDir(), path11.basename(source) + ".jpg");
   try {
-    if (!fs11.existsSync(thumb)) {
+    if (!fs12.existsSync(thumb)) {
       const exe = await ffmpegPath();
       if (!exe)
         return source;
-      fs11.mkdirSync(thumbDir(), { recursive: true });
+      fs12.mkdirSync(thumbDir(), { recursive: true });
       await execFileP(exe, ["-y", "-hide_banner", "-loglevel", "error", "-i", source, "-vf", "scale=160:-2", "-frames:v", "1", "-q:v", "4", thumb], { timeout: 2e4 });
     }
-    return fs11.existsSync(thumb) ? thumb : source;
+    return fs12.existsSync(thumb) ? thumb : source;
   } catch {
     return source;
   }
@@ -115928,12 +116340,12 @@ function withPinnedTheme(assets, config) {
 }
 async function getAssets(config) {
   const wallpaperPath = config.wallpaperPath;
-  if (!wallpaperPath || !fs11.existsSync(wallpaperPath))
+  if (!wallpaperPath || !fs12.existsSync(wallpaperPath))
     return void 0;
   const sourcePath = config.mediaType === "video" ? path11.join(path11.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
-  if (!fs11.existsSync(sourcePath))
+  if (!fs12.existsSync(sourcePath))
     return void 0;
-  const mtimeMs = fs11.statSync(sourcePath).mtimeMs;
+  const mtimeMs = fs12.statSync(sourcePath).mtimeMs;
   const cached = assetsCache.get(sourcePath);
   if (cached?.mtimeMs === mtimeMs) {
     assetsCache.delete(sourcePath);
@@ -115955,30 +116367,30 @@ function backupFile() {
   return path11.join(dataDir(), "config.backup.json");
 }
 function hasBackup() {
-  return fs11.existsSync(backupFile());
+  return fs12.existsSync(backupFile());
 }
 function weImportsFile() {
   return path11.join(dataDir(), "we-imports.json");
 }
 function loadWeImports() {
   try {
-    return JSON.parse(fs11.readFileSync(weImportsFile(), "utf8"));
+    return JSON.parse(fs12.readFileSync(weImportsFile(), "utf8"));
   } catch {
     return {};
   }
 }
 function saveWeImports(map) {
   try {
-    fs11.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
+    fs12.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
   } catch {
   }
 }
 function cachedSceneNames() {
   const names3 = /* @__PURE__ */ new Map();
   try {
-    for (const d of fs11.readdirSync(scenesCacheRoot())) {
+    for (const d of fs12.readdirSync(scenesCacheRoot())) {
       try {
-        const name = JSON.parse(fs11.readFileSync(path11.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+        const name = JSON.parse(fs12.readFileSync(path11.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
         if (name && !/^[0-9a-f]{8}$/.test(name)) {
           names3.set(name, [...names3.get(name) ?? [], d]);
         }
@@ -115992,6 +116404,33 @@ function cachedSceneNames() {
 function isDayPeriod(dn) {
   const hhmm = `${String((/* @__PURE__ */ new Date()).getHours()).padStart(2, "0")}:${String((/* @__PURE__ */ new Date()).getMinutes()).padStart(2, "0")}`;
   return dn.start <= dn.end ? hhmm >= dn.start && hhmm < dn.end : hhmm >= dn.start || hhmm < dn.end;
+}
+async function checkLatestRelease() {
+  const api = `${FORK_URL.replace("https://github.com", "https://api.github.com/repos")}/releases/latest`;
+  try {
+    const res = await fetch(api, {
+      headers: { accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (res.status === 404) {
+      return { ok: true, current: VERSION, latest: null, hasUpdate: false, releaseUrl: `${FORK_URL}/releases` };
+    }
+    if (!res.ok)
+      return { ok: false, error: `github_${res.status}`, current: VERSION };
+    const rel = await res.json();
+    const latest = String(rel.tag_name ?? "").replace(/^v/, "");
+    if (!latest)
+      return { ok: false, error: "no_tag", current: VERSION };
+    return {
+      ok: true,
+      current: VERSION,
+      latest,
+      hasUpdate: cmpVersion(latest, VERSION) > 0,
+      releaseUrl: typeof rel.html_url === "string" && rel.html_url ? rel.html_url : `${FORK_URL}/releases`
+    };
+  } catch {
+    return { ok: false, error: "network", current: VERSION };
+  }
 }
 function effectiveLook(config) {
   const dn = config.dayNight;
@@ -116009,6 +116448,7 @@ function publicConfig(config) {
     dim: look.dim,
     flatBlur: config.blur,
     flatDim: config.dim,
+    sidebarDim: config.sidebarDim ?? 0,
     monet: config.monet,
     wallpaperVisible: config.wallpaperVisible,
     kenBurns: config.kenBurns ?? false,
@@ -116017,11 +116457,18 @@ function publicConfig(config) {
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
     bubbleLook: normalizeBubbleLook(config.bubbleLook),
+    // 运行中图标: normalized look plus the RESOLVED paint URL so the panel can
+    // preview exactly what the sidebar will show ("" = stock spinner). The
+    // 完成未读 / 出错 slots get their own resolved preview URLs.
+    taskSpinnerLook: normalizeTaskSpinnerLook(config.taskSpinnerLook),
+    spinnerImageUrl: normalizeTaskSpinnerLook(config.taskSpinnerLook).mode === "image" ? resolveSpinnerImageRef(config.taskSpinnerLook?.image ?? "", config.apiPort ?? 9223, mediaToken) : "",
+    spinnerUnreadUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.unreadImage ?? "", config.apiPort ?? 9223, mediaToken),
+    spinnerErrorUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.errorImage ?? "", config.apiPort ?? 9223, mediaToken),
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
     fit: config.fit,
-    wallpaperSet: Boolean(config.wallpaperPath && fs11.existsSync(config.wallpaperPath)),
+    wallpaperSet: Boolean(config.wallpaperPath && fs12.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
     cdpPort: config.port,
     mediaType: config.mediaType ?? "image",
@@ -116036,6 +116483,8 @@ function sanitize(body) {
     out.blur = body.blur;
   if (typeof body?.dim === "number" && body.dim >= 0 && body.dim <= 100)
     out.dim = body.dim;
+  if (typeof body?.sidebarDim === "number" && body.sidebarDim >= 0 && body.sidebarDim <= 100)
+    out.sidebarDim = Math.round(body.sidebarDim);
   if (typeof body?.monet === "boolean")
     out.monet = body.monet;
   if (typeof body?.wallpaperVisible === "boolean")
@@ -116079,6 +116528,9 @@ function sanitize(body) {
   }
   if (body?.bubbleLook && typeof body.bubbleLook === "object") {
     out.bubbleLook = normalizeBubbleLook(body.bubbleLook);
+  }
+  if (body?.taskSpinnerLook && typeof body.taskSpinnerLook === "object") {
+    out.taskSpinnerLook = normalizeTaskSpinnerLook(body.taskSpinnerLook);
   }
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const dn = body?.dayNight;
@@ -116154,6 +116606,7 @@ async function holdSession(target, config, apiPort, opts = {}) {
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
+    spinnerLook: payload.taskSpinnerLook,
     startupClean: payload.startupClean
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -116189,6 +116642,7 @@ async function pushConfigToSessions(config) {
     videoVolume: payload.videoVolume,
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
+    spinnerLook: payload.taskSpinnerLook,
     startupClean: payload.startupClean
   });
   let ok = 0;
@@ -116199,7 +116653,10 @@ async function pushConfigToSessions(config) {
         });
       }
       session.themeScriptId = await registerScript(session, bootstrap);
-      await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      const evalRes = await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      if (evalRes?.exceptionDetails) {
+        console.warn(`serve: bootstrap threw in a held session: ${JSON.stringify(evalRes.exceptionDetails).slice(0, 300)}`);
+      }
       const vv = Math.max(0, Math.min(100, Math.round(payload.videoVolume ?? 0)));
       await session.conn.send("Runtime.evaluate", {
         expression: `(function(){var v=document.getElementById('zcode-beautify-video');if(v){v.muted=${JSON.stringify(vv === 0)};v.volume=${(vv / 100).toFixed(3)};}})()`,
@@ -116316,19 +116773,46 @@ function readBody(req) {
     req.on("error", reject);
   });
 }
+function migrateLegacySpinnerFiles() {
+  try {
+    fs12.mkdirSync(spinnerDir(), { recursive: true });
+    let moved = false;
+    for (const ext of [".gif", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".svg"]) {
+      const legacy = path11.join(dataDir(), "spinner" + ext);
+      if (!fs12.existsSync(legacy))
+        continue;
+      const dest = path11.join(spinnerDir(), "spinner" + ext);
+      fs12.rmSync(dest, { force: true });
+      fs12.renameSync(legacy, dest);
+      moved = true;
+      console.log(`serve: migrated spinner icon ${path11.basename(legacy)} \u2192 spinner/`);
+    }
+    if (!moved)
+      return;
+    const stored = loadConfig();
+    const img = stored.taskSpinnerLook?.image;
+    if (typeof img === "string" && SPINNER_FILE_RE.test(path11.basename(img)) && path11.dirname(path11.resolve(img)).toLowerCase() === path11.resolve(dataDir()).toLowerCase()) {
+      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path11.join(spinnerDir(), path11.basename(img)) };
+      saveConfig(stored);
+    }
+  } catch (err) {
+    console.warn(`serve: spinner migration skipped \u2014 ${err.message}`);
+  }
+}
 async function startServe(opts) {
   const { cdpPort, apiPort } = opts;
   const startedAt = Date.now();
   mediaToken = crypto2.randomBytes(24).toString("hex");
   try {
-    fs11.mkdirSync(dataDir(), { recursive: true });
-    fs11.writeFileSync(path11.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
+    fs12.mkdirSync(dataDir(), { recursive: true });
+    fs12.writeFileSync(path11.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
   } catch {
   }
+  migrateLegacySpinnerFiles();
   const historyFile = () => path11.join(dataDir(), "history.json");
   function readHistory() {
     try {
-      return JSON.parse(fs11.readFileSync(historyFile(), "utf8"));
+      return JSON.parse(fs12.readFileSync(historyFile(), "utf8"));
     } catch {
       return [];
     }
@@ -116337,7 +116821,7 @@ async function startServe(opts) {
     try {
       const list = readHistory().filter((e2) => e2.hash !== entry.hash || e2.path !== entry.path);
       list.unshift({ at: Date.now(), ...entry });
-      fs11.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
+      fs12.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
     } catch {
     }
   }
@@ -116350,11 +116834,11 @@ async function startServe(opts) {
     const config = runtimeConfig();
     if (typeof ref.hash === "string") {
       const loopPath = path11.join(scenesCacheRoot(), ref.hash, "loop.mp4");
-      if (!fs11.existsSync(loopPath))
+      if (!fs12.existsSync(loopPath))
         throw new Error("unknown scene hash");
       let label = ref.hash.slice(0, 8);
       try {
-        label = JSON.parse(fs11.readFileSync(path11.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
+        label = JSON.parse(fs12.readFileSync(path11.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
       } catch {
       }
       const next = {
@@ -116369,7 +116853,7 @@ async function startServe(opts) {
       recordHistory({ label, kind: "video", hash: ref.hash, thumbUrl: `http://127.0.0.1:${apiPort}/media/poster/${ref.hash}.jpg` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
-    if (typeof ref.path === "string" && fs11.existsSync(ref.path)) {
+    if (typeof ref.path === "string" && fs12.existsSync(ref.path)) {
       const next = {
         ...config,
         wallpaperPath: ref.path,
@@ -116458,16 +116942,16 @@ async function startServe(opts) {
           throw new Error(`image too large (max ${MAX_WALLPAPER_BYTES / 1024 / 1024} MB)`);
         }
         const config = runtimeConfig();
-        fs11.mkdirSync(dataDir(), { recursive: true });
+        fs12.mkdirSync(dataDir(), { recursive: true });
         const ext = IMAGE_EXT[m[1]];
         const safeBase = (typeof body?.name === "string" ? path11.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
         let dest = path11.join(dataDir(), safeBase + ext);
-        for (let i2 = 2; fs11.existsSync(dest); i2++) {
+        for (let i2 = 2; fs12.existsSync(dest); i2++) {
           dest = path11.join(dataDir(), `${safeBase}(${i2})${ext}`);
         }
-        fs11.writeFileSync(dest, bytes);
+        fs12.writeFileSync(dest, bytes);
         const themeSrc = await themeThumbFor(dest);
-        rememberAssets(themeSrc, fs11.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
+        rememberAssets(themeSrc, fs12.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
         const nextCfg = {
           ...config,
           wallpaperPath: dest,
@@ -116481,11 +116965,48 @@ async function startServe(opts) {
         sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
         return;
       }
+      if (req.method === "POST" && url.pathname === "/api/spinner") {
+        const body = JSON.parse(await readBody(req));
+        const slot = body?.slot === "unread" || body?.slot === "error" ? body.slot : "running";
+        const dataUri = typeof body?.dataUri === "string" ? body.dataUri : "";
+        const m = /^data:(image\/(?:gif|png|webp|jpeg|bmp|svg\+xml));base64,(.+)$/.exec(dataUri);
+        if (!m)
+          throw new Error("dataUri must be a base64 image data URI (gif/png/webp/jpeg/bmp/svg)");
+        const bytes = Buffer.from(m[2], "base64");
+        if (bytes.length > 2 * 1024 * 1024) {
+          throw new Error("image too large (max 2 MB) \u2014 a 16px icon wants a few KB");
+        }
+        const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
+        const base = slot === "running" ? "spinner" : "spinner-" + slot;
+        const dest = path11.join(spinnerDir(), base + ext);
+        fs12.mkdirSync(spinnerDir(), { recursive: true });
+        for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
+          if (old !== ext)
+            fs12.rmSync(path11.join(spinnerDir(), base + old), { force: true });
+        }
+        for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
+          fs12.rmSync(path11.join(dataDir(), base + old), { force: true });
+        }
+        fs12.writeFileSync(dest, bytes);
+        const config = runtimeConfig();
+        const look = normalizeTaskSpinnerLook(config.taskSpinnerLook);
+        const nextCfg = {
+          ...config,
+          taskSpinnerLook: {
+            ...look,
+            ...slot === "running" ? { mode: "image", image: dest } : slot === "unread" ? { unreadImage: dest } : { errorImage: dest }
+          }
+        };
+        saveConfig(persisted(nextCfg));
+        const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
+        sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/api/reset") {
         const stored = loadConfig();
-        if (stored.wallpaperPath && fs11.existsSync(stored.wallpaperPath)) {
-          fs11.mkdirSync(dataDir(), { recursive: true });
-          fs11.writeFileSync(backupFile(), JSON.stringify(stored));
+        if (stored.wallpaperPath && fs12.existsSync(stored.wallpaperPath)) {
+          fs12.mkdirSync(dataDir(), { recursive: true });
+          fs12.writeFileSync(backupFile(), JSON.stringify(stored));
         }
         for (const [id, session] of held) {
           try {
@@ -116519,7 +117040,7 @@ async function startServe(opts) {
       if (req.method === "POST" && url.pathname === "/api/restore") {
         let saved;
         try {
-          saved = JSON.parse(fs11.readFileSync(backupFile(), "utf8"));
+          saved = JSON.parse(fs12.readFileSync(backupFile(), "utf8"));
         } catch {
           throw new Error("no wallpaper backup available");
         }
@@ -116539,6 +117060,16 @@ async function startServe(opts) {
           cdpPort,
           apiPort
         });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/update-check") {
+        if (updateCheckCache && Date.now() - updateCheckCache.at < 6e4) {
+          sendJson(res, 200, updateCheckCache.body);
+          return;
+        }
+        const body = await checkLatestRelease();
+        updateCheckCache = { at: Date.now(), body };
+        sendJson(res, 200, body);
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/pick-scene") {
@@ -116569,12 +117100,12 @@ async function startServe(opts) {
           } else {
             const dir = (() => {
               try {
-                return fs11.statSync(scenePath).isDirectory() ? scenePath : path11.dirname(scenePath);
+                return fs12.statSync(scenePath).isDirectory() ? scenePath : path11.dirname(scenePath);
               } catch {
                 return scenePath;
               }
             })();
-            const probe = JSON.parse(fs11.readFileSync(path11.join(dir, "project.json"), "utf8"));
+            const probe = JSON.parse(fs12.readFileSync(path11.join(dir, "project.json"), "utf8"));
             const w = Number(probe?.general?.properties?.width);
             const h = Number(probe?.general?.properties?.height);
             if (w >= 256 && w <= 3840)
@@ -116611,7 +117142,7 @@ async function startServe(opts) {
           let label = result.hash.slice(0, 8);
           let named = false;
           try {
-            label = JSON.parse(fs11.readFileSync(path11.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
+            label = JSON.parse(fs12.readFileSync(path11.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
             named = true;
           } catch {
           }
@@ -116620,7 +117151,7 @@ async function startServe(opts) {
             if (fallback) {
               label = fallback;
               try {
-                fs11.writeFileSync(path11.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
+                fs12.writeFileSync(path11.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
               } catch {
               }
             }
@@ -116672,15 +117203,15 @@ async function startServe(opts) {
       if (req.method === "GET" && url.pathname === "/api/library") {
         let fav = { hashes: [], paths: [] };
         try {
-          fav = JSON.parse(fs11.readFileSync(path11.join(dataDir(), "favorites.json"), "utf8"));
+          fav = JSON.parse(fs12.readFileSync(path11.join(dataDir(), "favorites.json"), "utf8"));
         } catch {
         }
         const images = [];
-        for (const f2 of fs11.readdirSync(dataDir())) {
+        for (const f2 of fs12.readdirSync(dataDir())) {
           if (/\.(jpe?g|png|webp|bmp)$/i.test(f2)) {
             try {
               const p2 = path11.join(dataDir(), f2);
-              images.push({ name: f2, path: p2, mtimeMs: fs11.statSync(p2).mtimeMs, favorite: fav.paths.includes(path11.resolve(p2)) });
+              images.push({ name: f2, path: p2, mtimeMs: fs12.statSync(p2).mtimeMs, favorite: fav.paths.includes(path11.resolve(p2)) });
             } catch {
             }
           }
@@ -116693,13 +117224,13 @@ async function startServe(opts) {
         }
         const scenes = [];
         try {
-          for (const d of fs11.readdirSync(scenesCacheRoot())) {
+          for (const d of fs12.readdirSync(scenesCacheRoot())) {
             const loop = path11.join(scenesCacheRoot(), d, "loop.mp4");
             try {
-              const st = fs11.statSync(loop);
+              const st = fs12.statSync(loop);
               let name;
               try {
-                name = JSON.parse(fs11.readFileSync(path11.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs12.readFileSync(path11.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               scenes.push({ hash: d, name, sizeBytes: st.size, mtimeMs: st.mtimeMs, favorite: fav.hashes.includes(d) });
@@ -116721,9 +117252,9 @@ async function startServe(opts) {
           throw new Error("invalid name");
         if (body?.kind === "scene" && typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
           const dir = path11.join(scenesCacheRoot(), body.hash);
-          if (!fs11.existsSync(dir))
+          if (!fs12.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs11.writeFileSync(path11.join(dir, "name.json"), JSON.stringify({ name }));
+          fs12.writeFileSync(path11.join(dir, "name.json"), JSON.stringify({ name }));
           sendJson(res, 200, { ok: true });
           return;
         }
@@ -116763,9 +117294,9 @@ async function startServe(opts) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
           const dir = path11.join(scenesCacheRoot(), body.hash);
-          if (!fs11.existsSync(dir))
+          if (!fs12.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs11.rmSync(dir, { recursive: true, force: true });
+          fs12.rmSync(dir, { recursive: true, force: true });
           dropFromPlans((e2) => e2.hash === body.hash);
           sendJson(res, 200, { ok: true });
           return;
@@ -116778,10 +117309,10 @@ async function startServe(opts) {
           if (!isInsideDataDir(target) || !/\.(jpe?g|png|webp|bmp)$/i.test(target)) {
             throw new Error("only plugin-managed wallpapers can be deleted here");
           }
-          fs11.rmSync(target, { force: true });
+          fs12.rmSync(target, { force: true });
           const thumb = path11.join(thumbDir(), path11.basename(target) + ".jpg");
           if (isInsideDataDir(thumb))
-            fs11.rmSync(thumb, { force: true });
+            fs12.rmSync(thumb, { force: true });
           dropFromPlans((e2) => Boolean(e2.path && path11.resolve(e2.path) === target));
           sendJson(res, 200, { ok: true });
           return;
@@ -116850,17 +117381,17 @@ async function startServe(opts) {
         let scenesBytes = 0;
         const entries = [];
         try {
-          for (const d of fs11.readdirSync(scenesCacheRoot())) {
+          for (const d of fs12.readdirSync(scenesCacheRoot())) {
             try {
               let size = 0;
               const walk = (dir) => {
-                for (const f2 of fs11.readdirSync(dir, { withFileTypes: true })) {
+                for (const f2 of fs12.readdirSync(dir, { withFileTypes: true })) {
                   const p2 = path11.join(dir, f2.name);
                   if (f2.isDirectory())
                     walk(p2);
                   else {
                     try {
-                      size += fs11.statSync(p2).size;
+                      size += fs12.statSync(p2).size;
                     } catch {
                     }
                   }
@@ -116869,7 +117400,7 @@ async function startServe(opts) {
               walk(path11.join(scenesCacheRoot(), d));
               let name;
               try {
-                name = JSON.parse(fs11.readFileSync(path11.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs12.readFileSync(path11.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               entries.push({ hash: d, name, sizeBytes: size });
@@ -116881,9 +117412,9 @@ async function startServe(opts) {
         }
         let thumbsBytes = 0;
         try {
-          for (const f2 of fs11.readdirSync(thumbDir())) {
+          for (const f2 of fs12.readdirSync(thumbDir())) {
             try {
-              thumbsBytes += fs11.statSync(path11.join(thumbDir(), f2)).size;
+              thumbsBytes += fs12.statSync(path11.join(thumbDir(), f2)).size;
             } catch {
             }
           }
@@ -116901,16 +117432,16 @@ async function startServe(opts) {
         let skipped = 0;
         let savedBytes = 0;
         try {
-          for (const d of fs11.readdirSync(scenesCacheRoot())) {
+          for (const d of fs12.readdirSync(scenesCacheRoot())) {
             const loop = path11.join(scenesCacheRoot(), d, "loop.mp4");
             try {
-              if (!fs11.statSync(loop).isFile())
+              if (!fs12.statSync(loop).isFile())
                 continue;
               if (config.sceneHash === d) {
                 skipped++;
                 continue;
               }
-              const before = fs11.statSync(loop).size;
+              const before = fs12.statSync(loop).size;
               const tmp = `${loop}.cmp-${process.pid}.mp4`;
               await execFileP(ff, [
                 "-y",
@@ -116936,13 +117467,13 @@ async function startServe(opts) {
                 "-an",
                 tmp
               ], { timeout: 3e5 });
-              const after = fs11.statSync(tmp).size;
+              const after = fs12.statSync(tmp).size;
               if (after > 0 && after < before) {
-                fs11.renameSync(tmp, loop);
+                fs12.renameSync(tmp, loop);
                 done++;
                 savedBytes += before - after;
               } else {
-                fs11.rmSync(tmp, { force: true });
+                fs12.rmSync(tmp, { force: true });
               }
             } catch {
             }
@@ -116956,11 +117487,11 @@ async function startServe(opts) {
         const config = runtimeConfig();
         let removed = 0;
         try {
-          for (const d of fs11.readdirSync(scenesCacheRoot())) {
+          for (const d of fs12.readdirSync(scenesCacheRoot())) {
             if (config.sceneHash === d)
               continue;
             try {
-              fs11.rmSync(path11.join(scenesCacheRoot(), d), { recursive: true, force: true });
+              fs12.rmSync(path11.join(scenesCacheRoot(), d), { recursive: true, force: true });
               removed++;
             } catch {
             }
@@ -116970,7 +117501,7 @@ async function startServe(opts) {
         if (removed) {
           const rot = normalizeRotation(runtimeConfig().rotation);
           for (const plan of rot.plans)
-            plan.entries = plan.entries.filter((e2) => !e2.hash || fs11.existsSync(path11.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
+            plan.entries = plan.entries.filter((e2) => !e2.hash || fs12.existsSync(path11.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
           saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
           if (rot.enabled)
             startRotation(true);
@@ -117007,11 +117538,11 @@ async function startServe(opts) {
         const incoming = body.config;
         const patch = sanitize(incoming);
         const withWp = { ...runtimeConfig(), ...patch };
-        if (typeof incoming.wallpaperPath === "string" && fs11.existsSync(incoming.wallpaperPath)) {
+        if (typeof incoming.wallpaperPath === "string" && fs12.existsSync(incoming.wallpaperPath)) {
           withWp.wallpaperPath = incoming.wallpaperPath;
           withWp.mediaType = incoming.mediaType === "video" ? "video" : "image";
           withWp.sceneHash = typeof incoming.sceneHash === "string" ? incoming.sceneHash : void 0;
-          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs11.existsSync(path11.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
+          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs12.existsSync(path11.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
             withWp.sceneHash = void 0;
             withWp.mediaType = "image";
           }
@@ -117028,7 +117559,7 @@ async function startServe(opts) {
       if (req.method === "POST" && url.pathname === "/api/open-folder") {
         const body = JSON.parse(await readBody(req));
         const target = body?.target === "scenes" ? scenesCacheRoot() : body?.target === "thumbs" ? thumbDir() : dataDir();
-        fs11.mkdirSync(target, { recursive: true });
+        fs12.mkdirSync(target, { recursive: true });
         spawn3("explorer", [target], { detached: true, stdio: "ignore" }).unref();
         sendJson(res, 200, { ok: true, path: target });
         return;
@@ -117056,7 +117587,7 @@ async function startServe(opts) {
       const favoritesFile = () => path11.join(dataDir(), "favorites.json");
       const readFavorites = () => {
         try {
-          return JSON.parse(fs11.readFileSync(favoritesFile(), "utf8"));
+          return JSON.parse(fs12.readFileSync(favoritesFile(), "utf8"));
         } catch {
           return { hashes: [], paths: [] };
         }
@@ -117078,7 +117609,7 @@ async function startServe(opts) {
         } else {
           throw new Error("hash or path required");
         }
-        fs11.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
+        fs12.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
         sendJson(res, 200, { ok: true });
         return;
       }
@@ -117086,7 +117617,7 @@ async function startServe(opts) {
         const config = runtimeConfig();
         const sourcePath = config.mediaType === "video" && config.sceneHash ? path11.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
         let colors = [];
-        if (sourcePath && fs11.existsSync(sourcePath)) {
+        if (sourcePath && fs12.existsSync(sourcePath)) {
           try {
             colors = await extractPalette(sourcePath);
           } catch {
@@ -117127,7 +117658,7 @@ async function startServe(opts) {
             type: it.type,
             dir: it.dir,
             importable: it.importable,
-            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs11.existsSync(path11.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
+            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs12.existsSync(path11.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
             source: it.source,
             folder: it.folder ?? null,
             videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path11.basename(it.videoFile))}` : null,
@@ -117176,13 +117707,25 @@ async function startServe(opts) {
       }
       if (req.method === "GET" && url.pathname.startsWith("/media/lib/")) {
         const name = decodeURIComponent(url.pathname.slice("/media/lib/".length));
-        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp)$/i.test(name)) {
+        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp|gif|svg)$/i.test(name)) {
           sendJson(res, 400, { error: "bad library media path" });
           return;
         }
         const file = path11.join(dataDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "library media not found" });
+        }
+        return;
+      }
+      if (req.method === "GET" && url.pathname.startsWith("/media/spinner/")) {
+        const name = decodeURIComponent(url.pathname.slice("/media/spinner/".length));
+        if (name.includes("..") || name.includes("/") || name.includes("\\") || !/^[^:"<>|*?]+\.(jpe?g|png|webp|bmp|gif|svg)$/i.test(name)) {
+          sendJson(res, 400, { error: "bad spinner media path" });
+          return;
+        }
+        const file = path11.join(spinnerDir(), name);
+        if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
+          sendJson(res, 404, { error: "spinner media not found" });
         }
         return;
       }
@@ -117405,7 +117948,7 @@ function validPlanEntries(mode, raw) {
     if (!e2 || typeof e2 !== "object")
       continue;
     const { seconds, time, hash, path: imgPath } = e2;
-    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs11.existsSync(path11.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs11.existsSync(imgPath) ? { path: imgPath } : void 0;
+    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs12.existsSync(path11.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs12.existsSync(imgPath) ? { path: imgPath } : void 0;
     if (!ref)
       continue;
     if (mode === "schedule") {
@@ -117492,16 +118035,16 @@ function renameLibraryImage(oldPath, name) {
   let newPath = path11.join(path11.dirname(oldPath), safe + ext);
   if (path11.resolve(newPath) !== path11.resolve(oldPath)) {
     if (newPath.toLowerCase() !== path11.resolve(oldPath).toLowerCase()) {
-      for (let i2 = 2; fs11.existsSync(newPath); i2++) {
+      for (let i2 = 2; fs12.existsSync(newPath); i2++) {
         newPath = path11.join(path11.dirname(oldPath), `${safe}(${i2})${ext}`);
       }
     }
-    fs11.renameSync(oldPath, newPath);
+    fs12.renameSync(oldPath, newPath);
   }
   const oldThumb = path11.join(thumbDir(), path11.basename(oldPath) + ".jpg");
-  if (fs11.existsSync(oldThumb)) {
+  if (fs12.existsSync(oldThumb)) {
     try {
-      fs11.renameSync(oldThumb, path11.join(thumbDir(), path11.basename(newPath) + ".jpg"));
+      fs12.renameSync(oldThumb, path11.join(thumbDir(), path11.basename(newPath) + ".jpg"));
     } catch {
     }
   }
@@ -117511,7 +118054,7 @@ function isInsideDataDir(target) {
   const rel = path11.relative(path11.resolve(dataDir()), path11.resolve(target));
   return rel !== "" && !rel.startsWith("..");
 }
-var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, assetsCache, ffmpegPathCache, importJob, held, scrubbedUpdaters, mediaToken, IMAGE_EXT;
+var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, assetsCache, ffmpegPathCache, updateCheckCache, importJob, held, scrubbedUpdaters, mediaToken, IMAGE_EXT, spinnerDir, SPINNER_FILE_RE;
 var init_server = __esm({
   "dist/core/server.js"() {
     "use strict";
@@ -117532,6 +118075,7 @@ var init_server = __esm({
     MAX_BODY_BYTES = MAX_WALLPAPER_BYTES + 1024 * 1024;
     POLL_MS = 1500;
     assetsCache = /* @__PURE__ */ new Map();
+    updateCheckCache = null;
     importJob = { running: false, stage: "idle" };
     held = /* @__PURE__ */ new Map();
     scrubbedUpdaters = /* @__PURE__ */ new Set();
@@ -117543,6 +118087,8 @@ var init_server = __esm({
       "image/gif": ".gif",
       "image/bmp": ".bmp"
     };
+    spinnerDir = () => path11.join(dataDir(), "spinner");
+    SPINNER_FILE_RE = /^spinner\.(gif|png|webp|jpe?g|bmp|svg)$/i;
   }
 });
 
@@ -117550,7 +118096,7 @@ var init_server = __esm({
 init_inject();
 init_launch();
 init_session();
-import fs12 from "node:fs";
+import fs13 from "node:fs";
 import path12 from "node:path";
 var USAGE = `zcode-beautify <command> [options]
 
@@ -117559,6 +118105,7 @@ Commands:
   apply <image> [options]        Set wallpaper and adapt colors
     --blur <px>                  Blur the wallpaper (default 0)
     --dim <0-100>                Darken the wallpaper (default 25)
+    --sidebar-dim <0-100>        Extra-darken the left sidebar (default 0)
     --fit <mode>                 cover | contain | smart (default cover)
     --no-monet                   Keep ZCode's original colors
     --port <N>                   CDP port (default 9222)
@@ -117628,6 +118175,7 @@ Quit ZCode completely (including any tray icon), then run \`zcode-beautify launc
           port,
           blur: Number(flag("--blur") ?? 0),
           dim: Number(flag("--dim") ?? 25),
+          sidebarDim: Number(flag("--sidebar-dim") ?? 0),
           monet: !has("--no-monet"),
           fit: flag("--fit")
         });
@@ -117646,6 +118194,7 @@ Quit ZCode completely (including any tray icon), then run \`zcode-beautify launc
           port,
           blur: Number(flag("--blur") ?? 0),
           dim: Number(flag("--dim") ?? 25),
+          sidebarDim: Number(flag("--sidebar-dim") ?? 0),
           monet: !has("--no-monet"),
           fit: flag("--fit"),
           onProgress: (stage, detail) => console.log(`  [${stage}]${detail ? ` ${detail}` : ""}`)
@@ -117734,12 +118283,12 @@ async function startServeDetached(cdpPort, apiPort) {
   if (already !== void 0) {
     throw new Error(`a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) \u2014 open its panel, or stop that process first`);
   }
-  fs12.mkdirSync(dataDir(), { recursive: true });
+  fs13.mkdirSync(dataDir(), { recursive: true });
   const logFile = path12.join(dataDir(), "serve.log");
-  const out = fs12.openSync(logFile, "a");
+  const out = fs13.openSync(logFile, "a");
   const child = spawn4(process.execPath, [process.argv[1], "serve", "--port", String(cdpPort), "--api-port", String(apiPort)], { detached: true, stdio: ["ignore", out, out], windowsHide: true });
   child.unref();
-  fs12.closeSync(out);
+  fs13.closeSync(out);
   for (let i2 = 0; i2 < 20; i2++) {
     await new Promise((r2) => setTimeout(r2, 500));
     try {

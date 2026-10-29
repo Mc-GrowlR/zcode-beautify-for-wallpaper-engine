@@ -539,6 +539,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="range" id="zb-blur" min="0" max="30" step="1" value="0"><span class="zb-val"><span id="zb-blur-val">0</span>px</span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">背景压暗</span><span class="zb-set-sub">背景压暗程度(百分比,越高越暗)</span></div>' +
     '        <input type="range" id="zb-dim" min="0" max="80" step="1" value="0"><span class="zb-val"><span id="zb-dim-val">0</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">侧边栏压暗</span><span class="zb-set-sub">在背景压暗之上单独加深左侧会话栏;跟随宽度拖动与折叠</span></div>' +
+    '        <input type="range" id="zb-sidebar-dim" min="0" max="80" step="1" value="0"><span class="zb-val"><span id="zb-sidebar-dim-val">0</span>%</span></div>' +
     '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">填充方式</span><span class="zb-set-sub">背景铺满窗口的策略</span></div>' +
     '        <select id="zb-fit" title="背景填充方式:填满裁剪铺满窗口 / 完整显示不裁剪(模糊垫底)/ 智能适配自动分析画面主体">' +
     '          <option value="cover">填满裁剪</option>' +
@@ -630,6 +632,35 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '        <input type="range" id="zb-bubble-width" min="40" max="90" step="1" value="70"><span class="zb-val"><span id="zb-bubble-width-val">70</span>%</span></div>' +
     '      </div>' +
     '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">运行中图标</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">转圈样式</span><span class="zb-set-sub">会话列表左侧“正在对话”的转圈标志;原生 = 不改</span></div>' +
+    '        <div class="zb-ctrl"><select id="zb-spinner-mode" title="会话列表左侧正在对话标志:原生=保持 ZCode 自带转圈;自定义图片=换成图片或 GIF 动图">' +
+    '          <option value="default">原生</option>' +
+    '          <option value="image">自定义图片</option>' +
+    '        </select>' +
+    '        <button class="zb-btn" id="zb-spinner-pick" title="选择本地图片或 GIF 动图(≤2MB,支持 gif/png/webp/jpeg/svg)">📁 选图</button>' +
+    '        <input type="file" id="zb-spinner-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set" id="zb-spinner-img-row" hidden><div class="zb-set-main"><span class="zb-set-name">当前图标</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-spinner-preview" alt="当前运行中图标" title="当前运行中图标" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-spinner-clear" title="恢复 ZCode 原生转圈图标">✕ 恢复原生</button></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">完成标志</span><span class="zb-set-sub">会话跑完且有未读回复时的圆点;留空 = 原生蓝点</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-spinner-unread-preview" alt="当前完成标志" title="当前完成标志" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-spinner-unread-pick" title="选择完成标志的图片或 GIF(≤2MB)">📁 选图</button>' +
+    '        <button class="zb-btn" id="zb-spinner-unread-clear" title="清除图片,恢复原生蓝点" hidden>✕</button>' +
+    '        <input type="file" id="zb-spinner-unread-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">错误标志</span><span class="zb-set-sub">会话出错时的圆点;留空 = 原生红点</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-spinner-error-preview" alt="当前错误标志" title="当前错误标志" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-spinner-error-pick" title="选择错误标志的图片或 GIF(≤2MB)">📁 选图</button>' +
+    '        <button class="zb-btn" id="zb-spinner-error-clear" title="清除图片,恢复原生红点" hidden>✕</button>' +
+    '        <input type="file" id="zb-spinner-error-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set" id="zb-spinner-opts" hidden><div class="zb-set-main"><span class="zb-set-name">保留旋转</span><span class="zb-set-sub">静态图建议开;GIF 动图建议关(自带动画)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-spinner-spin" title="自定义图标是否沿用原生的旋转动画"></label></div>' +
+    '      <div class="zb-set zb-slide" id="zb-spinner-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">图标大小</span><span class="zb-set-sub">原生槽位约 16px,过大可能挤到行内其他元素</span></div>' +
+    '        <input type="range" id="zb-spinner-size" min="10" max="24" step="1" value="16" title="自定义图标的显示尺寸(10-24px)"><span class="zb-val"><span id="zb-spinner-size-val">16</span>px</span></div>' +
+    '      </div>' +
+    '    </div>' +
     '    </div>' +
     '    <div id="zb-tab-settings" hidden>' +
     '    <div class="zb-block" id="zb-card-config">' +
@@ -678,6 +709,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">插件信息</div>' +
     '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">版本更新</span><span class="zb-set-sub" id="zb-ab-upd-sub">对照 GitHub 最新发布检查当前安装</span></div>' +
+    '        <div class="zb-ctrl"><button class="zb-btn" id="zb-ab-check" title="向 GitHub 查询最新发布并与当前版本对比">⟳ 检查更新</button>' +
+    '        <button class="zb-btn" id="zb-ab-copy-rel" hidden title="复制最新发布的下载页地址">⧉ 链接</button></div></div>' +
     '      <div class="zb-set zb-ab-repo"><div class="zb-set-main"><span class="zb-set-name">上游仓库</span></div>' +
     '        <div class="zb-ctrl"><span class="zb-set-val" title="${REPO_URL}">${REPO_URL.replace(/^https?:\/\//, "")}</span>' +
     '        <button class="zb-btn" id="zb-ab-copy" title="复制上游仓库地址">⧉ 复制</button></div></div>' +
@@ -911,10 +945,13 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   // Local live preview; the server re-injects the authoritative CSS right after.
   function preview() {
     var w = wallpaperEl(); if (!w) return;
-    var b = Number($('zb-blur').value), d = Number($('zb-dim').value);
+    var b = Number($('zb-blur').value), d = Number($('zb-dim').value), sd = Number($('zb-sidebar-dim').value);
     w.style.filter = b > 0 ? 'blur(' + b + 'px)' : 'none';
     w.style.transform = b > 0 ? 'scale(1.04)' : 'none';
     document.documentElement.style.setProperty('--zcode-beautify-dim', String(d / 100));
+    // 侧边栏压暗: the scrim rule only exists server-side once the value > 0,
+    // so the first notch appears after the push lands; adjustments preview live.
+    document.documentElement.style.setProperty('--zb-sidebar-dim', String(sd / 100));
   }
 
   var pushTimer = null;
@@ -924,6 +961,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       post('/api/config', {
         blur: Number($('zb-blur').value),
         dim: Number($('zb-dim').value),
+        sidebarDim: Number($('zb-sidebar-dim').value),
         monet: $('zb-monet').checked,
         wallpaperVisible: $('zb-vis').checked,
         kenBurns: $('zb-kb').checked,
@@ -953,6 +991,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     if (on) {
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
+      $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
       setChatSliders(0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
@@ -985,6 +1024,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         lastConfig = c;
         $('zb-blur').value = c.blur; $('zb-blur-val').textContent = c.blur;
         $('zb-dim').value = c.dim; $('zb-dim-val').textContent = c.dim;
+        $('zb-sidebar-dim').value = c.sidebarDim ?? 0; $('zb-sidebar-dim-val').textContent = String(c.sidebarDim ?? 0);
         $('zb-monet').checked = !!c.monet;
         $('zb-vis').checked = !!c.wallpaperVisible;
         $('zb-kb').checked = !!c.kenBurns;
@@ -1002,6 +1042,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
         var cl = c.chatLook || {};
         setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0);
         setBubbleUI(c.bubbleLook || {});
+        setSpinnerUI(c.taskSpinnerLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
@@ -1030,6 +1071,9 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   });
   $('zb-dim').addEventListener('input', function () {
     $('zb-dim-val').textContent = this.value; preview(); pushConfig();
+  });
+  $('zb-sidebar-dim').addEventListener('input', function () {
+    $('zb-sidebar-dim-val').textContent = this.value; preview(); pushConfig();
   });
   $('zb-monet').addEventListener('change', pushConfig);
   $('zb-vis').addEventListener('change', pushConfig);
@@ -1347,6 +1391,130 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       zbPvSchedule();
       pushBubbleLook();
     });
+  });
+
+  // --- session-list running indicator (运行中图标) -----------------------------
+  // mode/spin/size ride /api/config like the bubble look; the IMAGE itself is
+  // uploaded once through /api/spinner (which saves it into the data dir and
+  // flips mode to "image" serve-side). The panel never invents an image ref —
+  // it echoes the stored one so partial pushes never blank the icon.
+  // The 完成标志 (unread) and 错误标志 (error) slots follow the same echo
+  // contract through their own refs; they are independent of the loading slot.
+  var spinnerImageRef = '';
+  var spinnerUnreadRef = '';
+  var spinnerErrorRef = '';
+  function spinnerUIState() {
+    return {
+      mode: $('zb-spinner-mode').value,
+      image: spinnerImageRef,
+      unreadImage: spinnerUnreadRef,
+      errorImage: spinnerErrorRef,
+      spin: $('zb-spinner-spin').checked,
+      size: Number($('zb-spinner-size').value)
+    };
+  }
+  function reflectSpinnerRows(mode) {
+    var on = mode === 'image' && Boolean(spinnerImageRef);
+    $('zb-spinner-img-row').hidden = !on;
+    $('zb-spinner-opts').hidden = mode !== 'image';
+    $('zb-spinner-size-row').hidden = mode !== 'image';
+    if (on && lastConfig && lastConfig.spinnerImageUrl) $('zb-spinner-preview').src = lastConfig.spinnerImageUrl;
+    reflectTerminalSlot('zb-spinner-unread-preview', 'zb-spinner-unread-clear', spinnerUnreadRef, 'spinnerUnreadUrl');
+    reflectTerminalSlot('zb-spinner-error-preview', 'zb-spinner-error-clear', spinnerErrorRef, 'spinnerErrorUrl');
+  }
+  function reflectTerminalSlot(imgId, clearId, ref, urlField) {
+    var has = Boolean(ref);
+    $(clearId).hidden = !has;
+    var img = $(imgId);
+    img.style.visibility = has ? 'visible' : 'hidden';
+    if (has && lastConfig && lastConfig[urlField]) img.src = lastConfig[urlField];
+  }
+  function setSpinnerUI(s) {
+    s = s || {};
+    var mode = s.mode === 'image' ? 'image' : 'default';
+    spinnerImageRef = typeof s.image === 'string' ? s.image : '';
+    spinnerUnreadRef = typeof s.unreadImage === 'string' ? s.unreadImage : '';
+    spinnerErrorRef = typeof s.errorImage === 'string' ? s.errorImage : '';
+    $('zb-spinner-mode').value = mode;
+    $('zb-spinner-spin').checked = s.spin !== false;
+    $('zb-spinner-size').value = s.size ?? 16;
+    $('zb-spinner-size-val').textContent = String(s.size ?? 16);
+    reflectSpinnerRows(mode);
+  }
+  function pushSpinnerLook() {
+    post('/api/config', { taskSpinnerLook: spinnerUIState() }, function (d) { if (d && d.error) status(d.error); });
+  }
+  $('zb-spinner-mode').addEventListener('change', function () {
+    reflectSpinnerRows(this.value);
+    pushSpinnerLook();
+  });
+  $('zb-spinner-spin').addEventListener('change', pushSpinnerLook);
+  $('zb-spinner-size').addEventListener('input', function () {
+    $('zb-spinner-size-val').textContent = this.value;
+  });
+  $('zb-spinner-size').addEventListener('change', pushSpinnerLook);
+  $('zb-spinner-pick').addEventListener('click', function () {
+    $('zb-spinner-file').click();
+  });
+  $('zb-spinner-file').addEventListener('change', function () {
+    spinnerUpload(this, 'running');
+  });
+  // 完成标志 / 错误标志 pickers share the upload pipeline with a slot tag.
+  $('zb-spinner-unread-pick').addEventListener('click', function () { $('zb-spinner-unread-file').click(); });
+  $('zb-spinner-unread-file').addEventListener('change', function () {
+    spinnerUpload(this, 'unread');
+  });
+  $('zb-spinner-error-pick').addEventListener('click', function () { $('zb-spinner-error-file').click(); });
+  $('zb-spinner-error-file').addEventListener('change', function () {
+    spinnerUpload(this, 'error');
+  });
+  function spinnerUpload(input, slot) {
+    var f = input.files && input.files[0];
+    input.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { status('图片超过 2MB,16px 图标请选小一点的文件'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      post('/api/spinner', { dataUri: fr.result, name: f.name, slot: slot }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        if (d && d.taskSpinnerLook) {
+          if (slot === 'running' && d.taskSpinnerLook.image) {
+            spinnerImageRef = d.taskSpinnerLook.image;
+            $('zb-spinner-mode').value = 'image';
+            reflectSpinnerRows('image');
+          } else if (slot === 'unread' && d.taskSpinnerLook.unreadImage) {
+            spinnerUnreadRef = d.taskSpinnerLook.unreadImage;
+            lastConfig = d; // resolved preview URL rides on the same payload
+            reflectSpinnerRows($('zb-spinner-mode').value);
+          } else if (slot === 'error' && d.taskSpinnerLook.errorImage) {
+            spinnerErrorRef = d.taskSpinnerLook.errorImage;
+            lastConfig = d;
+            reflectSpinnerRows($('zb-spinner-mode').value);
+          }
+        }
+        var label = slot === 'running' ? '运行中图标' : slot === 'unread' ? '完成标志' : '错误标志';
+        status(d && d.windows > 0 ? label + '已应用' : label + '已保存(ZCode 未连接)');
+      });
+    };
+    fr.readAsDataURL(f);
+  }
+  $('zb-spinner-clear').addEventListener('click', function () {
+    $('zb-spinner-mode').value = 'default';
+    reflectSpinnerRows('default');
+    pushSpinnerLook();
+    status('已恢复原生转圈图标');
+  });
+  $('zb-spinner-unread-clear').addEventListener('click', function () {
+    spinnerUnreadRef = '';
+    reflectSpinnerRows($('zb-spinner-mode').value);
+    pushSpinnerLook();
+    status('已恢复原生完成标志');
+  });
+  $('zb-spinner-error-clear').addEventListener('click', function () {
+    spinnerErrorRef = '';
+    reflectSpinnerRows($('zb-spinner-mode').value);
+    pushSpinnerLook();
+    status('已恢复原生错误标志');
   });
 
   // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
@@ -3207,6 +3375,52 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   }
   $('zb-ab-copy').addEventListener('click', function () { zbCopyRepo(REPO_URL, '上游仓库'); });
   $('zb-ab-copy-fork').addEventListener('click', function () { zbCopyRepo(FORK_URL, ' Fork 仓库'); });
+
+  // --- 关于 page: check for updates (检查更新) --------------------------------
+  // One button, three states: idle "⟳ 检查更新" → "检查中…" → result. When a
+  // newer release exists the SAME button becomes "打开发布页" (window.open,
+  // falling back to the ⧉ 链接 copy button when popups are blocked).
+  var zbLastReleaseUrl = '';
+  $('zb-ab-check').addEventListener('click', function () {
+    var btn = this;
+    if (btn.disabled) return;
+    if (zbLastReleaseUrl) {
+      var opened = null;
+      try { opened = window.open(zbLastReleaseUrl, '_blank'); } catch (e) { opened = null; }
+      status(opened ? '已打开发布页' : '打开被拦截,已改为复制链接');
+      if (!opened) zbCopyRepo(zbLastReleaseUrl, '发布页');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '检查中…';
+    $('zb-ab-upd-sub').textContent = '正在向 GitHub 查询…';
+    apiFetch('/api/update-check')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        btn.disabled = false;
+        var sub = $('zb-ab-upd-sub');
+        if (d && d.ok && d.hasUpdate) {
+          btn.textContent = '打开发布页';
+          sub.textContent = '发现新版本 v' + d.latest + '(当前 v' + d.current + ')';
+          zbLastReleaseUrl = d.releaseUrl || (FORK_URL + '/releases');
+          $('zb-ab-copy-rel').hidden = false;
+        } else if (d && d.ok) {
+          btn.textContent = '⟳ 再查一次';
+          sub.textContent = d.latest ? '已是最新版本 v' + d.current : '尚无正式发布(当前 v' + d.current + ')';
+        } else {
+          btn.textContent = '⟳ 重试';
+          sub.textContent = '检查失败(' + (d && d.error === 'network' ? '无法访问 GitHub' : '服务异常') + ')';
+        }
+      })
+      .catch(function () {
+        btn.disabled = false;
+        btn.textContent = '⟳ 重试';
+        $('zb-ab-upd-sub').textContent = '检查失败(美化服务未响应)';
+      });
+  });
+  $('zb-ab-copy-rel').addEventListener('click', function () {
+    if (zbLastReleaseUrl) zbCopyRepo(zbLastReleaseUrl, '发布页');
+  });
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');

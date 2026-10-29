@@ -26,6 +26,11 @@ modifies ZCode's installation files.
   paint+layout via per-row content-visibility with their REAL height baked in
   (measured ~40% faster session open on a 51MB session, scrollbar exact).
   Toggle it via the panel or POST /api/config `chatLook.perfSmooth: 0|1`.
+- "把会话列表的转圈图标换成图片/GIF" / replace the sidebar running-indicator
+  spinner → `apply_options` with `spinner: { mode: "image", image_path,
+  spin, size }` (`spin: false` for animated GIFs, `mode: "default"` to go
+  back to stock). The panel's 聊天 tab (运行中图标) does the same with a file
+  picker + preview.
 
 ## Workflow
 
@@ -61,7 +66,7 @@ modifies ZCode's installation files.
 | Tool | Purpose |
 |---|---|
 | `set_background` | Set wallpaper + Monet colors |
-| `apply_options` | Tune blur/dim/monet/wallpaper visibility/framing, the chat bubble look, and the conversation column width (`chat_width_cap_rem`/`chat_width_inset_rem`) without changing the image |
+| `apply_options` | Tune blur/dim/monet/wallpaper visibility/framing, the chat bubble look, the conversation column width (`chat_width_cap_rem`/`chat_width_inset_rem`), and the sidebar running-indicator icon (`spinner`) without changing the image |
 | `refresh_theme` | Re-inject stored theme after a restart |
 | `reset_appearance` | Remove wallpaper and overrides |
 | `beautify_status` | Show stored config |

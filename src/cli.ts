@@ -24,6 +24,7 @@ Commands:
   apply <image> [options]        Set wallpaper and adapt colors
     --blur <px>                  Blur the wallpaper (default 0)
     --dim <0-100>                Darken the wallpaper (default 25)
+    --sidebar-dim <0-100>        Extra-darken the left sidebar (default 0)
     --fit <mode>                 cover | contain | smart (default cover)
     --no-monet                   Keep ZCode's original colors
     --port <N>                   CDP port (default 9222)
@@ -98,6 +99,7 @@ async function main(): Promise<void> {
           port,
           blur: Number(flag("--blur") ?? 0),
           dim: Number(flag("--dim") ?? 25),
+          sidebarDim: Number(flag("--sidebar-dim") ?? 0),
           monet: !has("--no-monet"),
           fit: flag("--fit") as ApplyOptions["fit"],
         });
@@ -116,6 +118,7 @@ async function main(): Promise<void> {
           port,
           blur: Number(flag("--blur") ?? 0),
           dim: Number(flag("--dim") ?? 25),
+          sidebarDim: Number(flag("--sidebar-dim") ?? 0),
           monet: !has("--no-monet"),
           fit: flag("--fit") as ApplyOptions["fit"],
           onProgress: (stage, detail) => console.log(`  [${stage}]${detail ? ` ${detail}` : ""}`),
