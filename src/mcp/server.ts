@@ -221,9 +221,10 @@ server.registerTool(
       }).optional().describe("User message bubble look; omitted fields keep their current value"),
       chat_width_cap_rem: z.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (消息流宽度上限). 0 = stock responsive width; 40-120 widens the column (78 ≈ wide, 100+ ≈ near full width on large windows). The column still tracks window resizes — only the ceiling changes"),
       chat_width_inset_rem: z.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
+      chat_hide_elapsed_decimal: z.boolean().optional().describe("Hide the decimal in the running elapsed time under the conversation (耗时秒数去小数): true rewrites the live working-row seconds from \"53.4 秒\" to \"53 秒\"; false restores stock"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal }) => {
     try {
       // Send only the fields the caller provided: the session layer merges
       // this partial over the stored look, so one-field tweaks don't reset
@@ -241,11 +242,12 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]),
             ) as Partial<TaskSpinnerLookConfig>);
       const chatLook: Partial<ChatLookConfig> | undefined =
-        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined
+        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined
           ? undefined
           : {
               ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
               ...(chat_width_inset_rem !== undefined ? { widthInsetRem: chat_width_inset_rem } : {}),
+              ...(chat_hide_elapsed_decimal !== undefined ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {}),
             };
       const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
       return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };

@@ -96,6 +96,18 @@ export interface ChatLookConfig {
    * measurements stable instead of collapsing to the estimate.
    */
   perfSmooth: number;
+  /**
+   * Hide the decimal in the running elapsed time (耗时秒数去小数): 0 = off,
+   * 1 = rewrite the live "working" row's seconds. ZCode renders the elapsed
+   * time under the conversation ("1 时 17 分 53.4 秒") via a hardcoded
+   * toFixed(1) into ONE aria-hidden text span inside
+   * [data-zcode-chat-loading-animate] — CSS cannot reach mid-string text, so
+   * the bootstrap installs a MutationObserver that strips the fractional
+   * part ("53.4 秒" → "53 秒") after each 100ms React tick. The finished/
+   * history durations use a different, integer-only formatter and never
+   * carry decimals.
+   */
+  hideElapsedDecimal: number;
 }
 
 /** Stock wide-tier constants, for reference/tests: 72rem cap, 24rem inset. */
@@ -104,7 +116,7 @@ export const STOCK_CHAT_WIDTH = { capRem: 72, insetRem: 24 } as const;
 const CHAT_WIDTH_INSET_DEFAULT = 12;
 
 /** Clamp a partial chat look: masks to 0-100 ints, width cap to 0 or 40-120,
- * inset to 0-24 (12 when a cap is set but no inset arrives). */
+ * inset to 0-24 (12 when a cap is set but no inset arrives), flags to 0/1. */
 export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig {
   const pct = (v: unknown): number =>
     typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
@@ -117,6 +129,7 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
         ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem)))
         : CHAT_WIDTH_INSET_DEFAULT)
     : 0;
+  const dec = raw?.hideElapsedDecimal as unknown;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -125,6 +138,7 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
     widthCapRem: capOn,
     widthInsetRem: inset,
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
+    hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
   };
 }
 

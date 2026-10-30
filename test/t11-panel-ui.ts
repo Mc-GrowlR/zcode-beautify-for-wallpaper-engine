@@ -354,6 +354,12 @@ check("perf toggle starts off", (input("zb-chat-perf") as unknown as HTMLInputEl
 fire(input("zb-chat-perf"), "change");
 await sleep(420);
 check("perf toggle posts perfSmooth 1", lastChatLook().perfSmooth === 1);
+// elapsed-decimal toggle (耗时秒数去小数) rides the same pushChatLook path
+check("elapsed toggle starts off", (input("zb-chat-elapsed") as unknown as HTMLInputElement).checked === false);
+(input("zb-chat-elapsed") as unknown as HTMLInputElement).checked = true;
+fire(input("zb-chat-elapsed"), "change");
+await sleep(420);
+check("elapsed toggle posts hideElapsedDecimal 1", lastChatLook().hideElapsedDecimal === 1);
 check("width select starts at 原生", select("zb-chat-width").value === "0");
 check("editor hidden at 原生", $id("zb-chat-width-custom").hidden);
 select("zb-chat-width").value = "90:8";

@@ -11,6 +11,16 @@
 > 0.4.6：自定义宽度改按钮模式（修复编辑器被 4s 心跳自动收起）+ 新增三档窄宽度 + 安装记录写入器（防 Windows 路径转义事故）。
 > 0.4.7：大会话流畅模式——消息行屏外跳过渲染（content-visibility），大上下文会话打开与滚动更省。
 > 0.4.8：运行中图标——会话列表左侧"正在对话"转圈标志可换为图片 / GIF 动图；侧边栏压暗——左侧会话栏可单独加深；关于页检查更新——对照 GitHub Releases 一键查询新版本。
+> 0.4.9：耗时秒数去小数——对话下方"工作中"耗时的秒数不再显示小数位（53.4 秒 → 53 秒）；作者信息改为 fork 维护者 Mc-GrowlR（关于页/插件元数据，上游溯源保留）。
+
+## 0.4.9
+
+> 定位（官方渲染层逆向）：对话下方运行耗时行 `z5t`（`data-zcode-chat-loading-animate`，3×3 像素加载图标 + "工作中" + 等宽耗时）由格式化函数 `I5t` 生成，秒数硬编码 `toFixed(1)` 一位小数，写入一个 aria-hidden 纯文本 span，每 100ms 由 React 重写。历史/完成态耗时走另一个整秒格式化函数，本就不带小数。
+
+- **新配置 `chatLook.hideElapsedDecimal`（耗时秒数去小数，默认 0=关）**：CSS 摸不到文本中段，bootstrap 的 `applyChatLook` 内安装 MutationObserver 实时改写——安装时全量扫一遍存量行，之后每 100ms 的 React 重写（firstChild.nodeValue 快路径）都会被再改写一次；改写保持单文本子节点形状，与 React 更新路径互相兼容，无小数时不写回（无循环）。关闭即断开观察器，下一个 tick 自动恢复原生显示。中英文格式（"1 时 17 分 53.4 秒" / "1h 17m 53.4s"）都处理；非目标文本的小数（如版本号）不受影响。
+- **面板**：「聊天」页「聊天区」新增"耗时秒数去小数"开关（zb-chat-elapsed），与大会话流畅模式同款 pushChatLook 链路；MCP `apply_options` 新增 `chat_hide_elapsed_decimal` 布尔参数（部分补丁语义）。
+- 测试：t22（normalize 钳制、payload 透传、jsdom 跑真实 bootstrap：安装扫除/React 式 nodeValue 改写/新挂载行/英文格式/无关文本不动/关闭断开观察器）。
+- **作者信息改为 Mc-GrowlR**：关于页「作者」行、`plugin.json`/`marketplace.json`（owner+author）/`package.json` 的作者署名统一改为 fork 维护者 Mc-GrowlR（单一来源 `src/version.ts AUTHOR`）；上游仓库行、LICENSE 版权行等溯源信息保留不动。
 
 ## 0.4.8
 

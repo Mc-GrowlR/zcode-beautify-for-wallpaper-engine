@@ -1,16 +1,16 @@
 {
   "name": "zcode-beautify",
-  "owner": "Logocceai",
+  "owner": "Mc-GrowlR",
   "plugins": [
     {
       "name": "zcode-beautify",
       "description": "Beautify the ZCode desktop client: import a background wallpaper, adapt UI colors with Material Design 3 (Monet) dynamic color, and tune everything from a live settings panel.",
       "icon": "https://raw.githubusercontent.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine/main/icon.png",
-      "version": "0.4.8",
-      "author": "Logocceai",
+      "version": "0.4.9",
+      "author": "Mc-GrowlR",
       "license": "MIT",
       "source": "./"
     }
   ],
-  "version": "0.4.8"
+  "version": "0.4.9"
 }

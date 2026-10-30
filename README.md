@@ -21,6 +21,7 @@ Beautify the **ZCode desktop client**: use any image — or any **video / Wallpa
 - **Chat bubbles** — five presets for your own message bubbles (`accent` tint, `glass` blur, `outline`, `flat`, or stock `default`), plus tint strength, corner radius, width and alignment controls, a bubble style editor with a saved personal style library, and custom CSS support. Colors reference live theme tokens, so a Monet re-theme restyles the bubbles too.
 - **Conversation width** — widen or narrow the message column: stock / wide tiers / three narrow tiers / fully custom (cap + inset in rem). Injected as a **formula** (rem cap + `calc()` inset) rather than a fixed width, so it keeps following window resizes exactly like the native layout and never overflows into the input bar.
 - **Large-session smooth mode** (off by default) — message rows far outside the viewport are measured first, then skipped for layout and painting (`content-visibility:auto` with accurate `contain-intrinsic-size`). On a 51 MB session clone this cut first-open time by **~41%** with zero scrollbar distortion; long chats scroll smoother.
+- **Elapsed-time decimal trim** (off by default) — the working-row elapsed time under the conversation drops its fractional seconds ("53.4 秒" → "53 秒"), rewritten live; toggling off restores stock.
 
 ### Panel & service
 

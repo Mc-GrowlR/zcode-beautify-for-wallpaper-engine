@@ -149,7 +149,7 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
@@ -551,16 +551,21 @@ function buildBootstrapScript(payload) {
     // skipped, so the virtualizer's cached heights stay valid; only the very
     // first pass uses the 420px estimate (same value ZCode's share view uses).
     var perfOn = Number(C.perfSmooth) === 1;
+    var decOn = Number(C.hideElapsedDecimal) === 1;
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
-    if (!masksOn && !widthOn && !perfOn) {
+    if (!masksOn && !widthOn && !perfOn && !decOn) {
       if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
       if (window.__zcodeBeautify.chatObs) {
         try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
         window.__zcodeBeautify.chatObs = null;
+      }
+      if (window.__zcodeBeautify.elapsedObs) {
+        try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.elapsedObs = null;
       }
       return;
     }
@@ -645,6 +650,60 @@ function buildBootstrapScript(payload) {
         perfRows[pri].removeAttribute('data-zb-cv');
       }
     }
+    // \u8017\u65F6\u79D2\u6570\u53BB\u5C0F\u6570: ZCode's live "working" row renders the elapsed time
+    // ("1 \u65F6 17 \u5206 53.4 \u79D2") through a hardcoded toFixed(1) into ONE
+    // aria-hidden text span under [data-zcode-chat-loading-animate]; CSS
+    // cannot reach mid-string text, so watch the DOM and strip the fraction
+    // ("53.4 \u79D2" \u2192 "53 \u79D2") after each 100ms React tick. Turning the option
+    // off just drops the observer \u2014 the next tick re-writes the stock text.
+    if (decOn && !window.__zcodeBeautify.elapsedObs) {
+      var eObs = new MutationObserver(function(muts) {
+        for (var mi = 0; mi < muts.length; mi++) {
+          var mu = muts[mi];
+          if (mu.type === 'characterData') {
+            zbStripElapsed(mu.target.parentElement);
+          } else {
+            zbStripElapsed(mu.target);
+            for (var mj = 0; mj < mu.addedNodes.length; mj++) {
+              var mn = mu.addedNodes[mj];
+              if (mn.nodeType === 1) zbElapsedSweep(mn);
+            }
+          }
+        }
+      });
+      eObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      window.__zcodeBeautify.elapsedObs = eObs;
+      zbElapsedSweep(document);
+    } else if (!decOn && window.__zcodeBeautify.elapsedObs) {
+      try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.elapsedObs = null;
+    }
+  }
+  // The duration span is a direct child of the loading row (verified in
+  // ZCode's bundle: aria-hidden + font-mono next to the zcode-loading-label).
+  function zbIsElapsedSpan(el) {
+    return !!(el && el.tagName === 'SPAN' && el.getAttribute('aria-hidden') === 'true'
+      && el.parentElement && el.parentElement.getAttribute('data-zcode-chat-loading-animate') === 'true');
+  }
+  // React keeps exactly ONE text child in that span and updates it via
+  // firstChild.nodeValue \u2014 our textContent rewrite preserves that shape, so
+  // React's fast path then edits OUR text node and the observer strips it
+  // again. A rewrite without a decimal matches nothing and writes nothing,
+  // so the loop always settles.
+  function zbStripElapsed(el) {
+    if (!zbIsElapsedSpan(el)) return;
+    var t = el.textContent;
+    if (t && t.indexOf('.') !== -1) {
+      var s = t.replace(/(\\d+)\\.\\d+/g, '$1');
+      if (s !== t) el.textContent = s;
+    }
+  }
+  function zbElapsedSweep(root) {
+    // document (nodeType 9) and elements both carry querySelectorAll \u2014 the
+    // install-time call passes document itself.
+    if (!root || !root.querySelectorAll) return;
+    var spans = root.querySelectorAll('[data-zcode-chat-loading-animate="true"] > span[aria-hidden="true"]');
+    for (var si = 0; si < spans.length; si++) zbStripElapsed(spans[si]);
   }
   function perfSched() {
     if (window.__zcodeBeautify.perfTimer) return;
@@ -882,6 +941,10 @@ function buildResetScript(marker = "zcode-beautify") {
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
+    }
+    if (window.__zcodeBeautify.elapsedObs) {
+      try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.elapsedObs = null;
     }
   }
 })();`;
@@ -110710,6 +110773,7 @@ function normalizeChatLook(raw) {
   const cap = typeof raw?.widthCapRem === "number" && Number.isFinite(raw.widthCapRem) ? Math.max(0, Math.min(120, Math.round(raw.widthCapRem))) : 0;
   const capOn = cap >= 40 ? cap : 0;
   const inset = capOn > 0 ? typeof raw?.widthInsetRem === "number" && Number.isFinite(raw.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem))) : CHAT_WIDTH_INSET_DEFAULT : 0;
+  const dec = raw?.hideElapsedDecimal;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -110717,7 +110781,8 @@ function normalizeChatLook(raw) {
     frost: pct(raw?.frost),
     widthCapRem: capOn,
     widthInsetRem: inset,
-    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0
+    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
+    hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0
   };
 }
 function normalizeTaskSpinnerLook(raw) {
@@ -112491,10 +112556,10 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "0.4.8";
+    VERSION = "0.4.9";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
-    AUTHOR = "Logocceai";
+    AUTHOR = "Mc-GrowlR";
     LICENSE = "MIT";
   }
 });
@@ -113086,6 +113151,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
       '        <button class="zb-btn" id="zb-chat-width-cancel" title="\u653E\u5F03\u4FEE\u6539\u5E76\u5173\u95ED\u7F16\u8F91">\u2715</button></div></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F</span><span class="zb-set-sub">\u6D88\u606F\u884C\u5C4F\u5916\u8DF3\u8FC7\u6E32\u67D3(\u5B98\u65B9\u4EC5\u5206\u4EAB\u89C6\u56FE\u6709\u6B64\u4F18\u5316);\u5927\u4E0A\u4E0B\u6587\u4F1A\u8BDD\u7684\u6253\u5F00\u4E0E\u6EDA\u52A8\u66F4\u7701,\u9996\u6B21\u6E32\u67D3\u53EF\u80FD\u8F7B\u5FAE\u9AD8\u5EA6\u8DF3\u52A8</span></div>' +
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="\u7ED9\u6D88\u606F\u884C\u6CE8\u5165 content-visibility:auto:\u89C6\u53E3\u5916\u7684\u884C\u8DF3\u8FC7\u7ED8\u5236\u4E0E\u5E03\u5C40,\u6EDA\u5165\u65F6\u518D\u6E32\u67D3;\u884C\u9AD8\u8BB0\u5FC6\u4E0A\u6B21\u5B9E\u6D4B\u503C,\u4E0D\u5F71\u54CD\u865A\u62DF\u6EDA\u52A8"></label></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u8017\u65F6\u79D2\u6570\u53BB\u5C0F\u6570</span><span class="zb-set-sub">\u5BF9\u8BDD\u4E0B\u65B9"\u5DE5\u4F5C\u4E2D"\u8017\u65F6\u7684\u79D2\u6570\u4E0D\u5E26\u5C0F\u6570\u4F4D(53.4 \u79D2 \u2192 53 \u79D2)</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="\u9690\u85CF\u5BF9\u8BDD\u4E0B\u65B9\u8FD0\u884C\u8017\u65F6\u7684\u79D2\u6570\u5C0F\u6570:\u5B9E\u65F6\u6539\u5199\u6E32\u67D3\u6587\u672C,\u53EA\u4FDD\u7559\u6574\u79D2;\u5173\u95ED\u540E\u6062\u590D\u539F\u751F\u663E\u793A"></label></div>' +
       '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u804A\u5929\u533A\u6697\u5EA6</span><span class="zb-set-sub">\u5BF9\u8BDD\u5217\u80CC\u540E\u7684\u989D\u5916\u538B\u6697,\u6D88\u606F\u6587\u5B57\u6D6E\u5728\u5176\u4E0A\u4E0D\u53D7\u5F71\u54CD</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u906E\u7F69\u4E0A\u7AEF</span><span class="zb-set-sub">\u7A97\u53E3\u9876\u90E8\u5411\u4E0B\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6</span></div>' +
@@ -113526,7 +113593,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
@@ -113699,13 +113766,15 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
     $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
     var perfEl = $('zb-chat-perf');
     if (perfEl) perfEl.checked = perf === 1;
+    var decEl = $('zb-chat-elapsed');
+    if (decEl) decEl.checked = dec === 1;
     reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again \u2014 inline
@@ -113738,7 +113807,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
           frost: Number($('zb-chat-frost').value),
           widthCapRem: widthServerCap,
           widthInsetRem: widthServerInset,
-          perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0
+          perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
+          hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -113789,6 +113859,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true) {
     $('zb-chat-width-custom').hidden = true;
   });
   $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
+  $('zb-chat-elapsed') && $('zb-chat-elapsed').addEventListener('change', pushChatLook);
   ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
     $(id).addEventListener('change', function () {
       var max = id === 'zb-chat-width-cap' ? 120 : 24;
@@ -116523,7 +116594,8 @@ function sanitize(body) {
       frost: pct(cl.frost) ?? 0,
       widthCapRem: capOn,
       widthInsetRem: capOn > 0 ? typeof cl.widthInsetRem === "number" && Number.isFinite(cl.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(cl.widthInsetRem))) : 12 : 0,
-      perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0
+      perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
+      hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0
     };
   }
   if (body?.bubbleLook && typeof body.bubbleLook === "object") {

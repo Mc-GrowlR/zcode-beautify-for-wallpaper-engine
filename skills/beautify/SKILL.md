@@ -26,6 +26,12 @@ modifies ZCode's installation files.
   paint+layout via per-row content-visibility with their REAL height baked in
   (measured ~40% faster session open on a 51MB session, scrollbar exact).
   Toggle it via the panel or POST /api/config `chatLook.perfSmooth: 0|1`.
+- "耗时秒数别带小数" / hide the decimal in the working-row elapsed time
+  ("53.4 秒" → "53 秒") → the 聊天区 tab's 耗时秒数去小数 toggle, or
+  `apply_options` with `chat_hide_elapsed_decimal: true` (false = stock).
+  The decimal is baked into one aria-hidden text span by the renderer
+  (toFixed(1)), so the bootstrap rewrites the text via MutationObserver —
+  finished/history durations are integer-only already and stay untouched.
 - "把会话列表的转圈图标换成图片/GIF" / replace the sidebar running-indicator
   spinner → `apply_options` with `spinner: { mode: "image", image_path,
   spin, size }` (`spin: false` for animated GIFs, `mode: "default"` to go

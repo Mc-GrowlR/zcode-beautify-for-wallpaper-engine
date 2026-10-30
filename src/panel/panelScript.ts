@@ -600,6 +600,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       '        <button class="zb-btn" id="zb-chat-width-cancel" title="放弃修改并关闭编辑">✕</button></div></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">大会话流畅模式</span><span class="zb-set-sub">消息行屏外跳过渲染(官方仅分享视图有此优化);大上下文会话的打开与滚动更省,首次渲染可能轻微高度跳动</span></div>' +
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="给消息行注入 content-visibility:auto:视口外的行跳过绘制与布局,滚入时再渲染;行高记忆上次实测值,不影响虚拟滚动"></label></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">耗时秒数去小数</span><span class="zb-set-sub">对话下方"工作中"耗时的秒数不带小数位(53.4 秒 → 53 秒)</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="隐藏对话下方运行耗时的秒数小数:实时改写渲染文本,只保留整秒;关闭后恢复原生显示"></label></div>' +
       '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">聊天区暗度</span><span class="zb-set-sub">对话列背后的额外压暗,消息文字浮在其上不受影响</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">遮罩上端</span><span class="zb-set-sub">窗口顶部向下渐隐遮罩的浓度</span></div>' +
@@ -1040,7 +1042,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
@@ -1213,13 +1215,15 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
     $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
     var perfEl = $('zb-chat-perf');
     if (perfEl) perfEl.checked = perf === 1;
+    var decEl = $('zb-chat-elapsed');
+    if (decEl) decEl.checked = dec === 1;
     reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again — inline
@@ -1252,7 +1256,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           frost: Number($('zb-chat-frost').value),
           widthCapRem: widthServerCap,
           widthInsetRem: widthServerInset,
-          perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0
+          perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
+          hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -1303,6 +1308,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     $('zb-chat-width-custom').hidden = true;
   });
   $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
+  $('zb-chat-elapsed') && $('zb-chat-elapsed').addEventListener('change', pushChatLook);
   ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
     $(id).addEventListener('change', function () {
       var max = id === 'zb-chat-width-cap' ? 120 : 24;

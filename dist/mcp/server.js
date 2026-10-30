@@ -7301,7 +7301,7 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
@@ -7703,16 +7703,21 @@ function buildBootstrapScript(payload) {
     // skipped, so the virtualizer's cached heights stay valid; only the very
     // first pass uses the 420px estimate (same value ZCode's share view uses).
     var perfOn = Number(C.perfSmooth) === 1;
+    var decOn = Number(C.hideElapsedDecimal) === 1;
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
-    if (!masksOn && !widthOn && !perfOn) {
+    if (!masksOn && !widthOn && !perfOn && !decOn) {
       if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
       if (window.__zcodeBeautify.chatObs) {
         try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
         window.__zcodeBeautify.chatObs = null;
+      }
+      if (window.__zcodeBeautify.elapsedObs) {
+        try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.elapsedObs = null;
       }
       return;
     }
@@ -7797,6 +7802,60 @@ function buildBootstrapScript(payload) {
         perfRows[pri].removeAttribute('data-zb-cv');
       }
     }
+    // \u8017\u65F6\u79D2\u6570\u53BB\u5C0F\u6570: ZCode's live "working" row renders the elapsed time
+    // ("1 \u65F6 17 \u5206 53.4 \u79D2") through a hardcoded toFixed(1) into ONE
+    // aria-hidden text span under [data-zcode-chat-loading-animate]; CSS
+    // cannot reach mid-string text, so watch the DOM and strip the fraction
+    // ("53.4 \u79D2" \u2192 "53 \u79D2") after each 100ms React tick. Turning the option
+    // off just drops the observer \u2014 the next tick re-writes the stock text.
+    if (decOn && !window.__zcodeBeautify.elapsedObs) {
+      var eObs = new MutationObserver(function(muts) {
+        for (var mi = 0; mi < muts.length; mi++) {
+          var mu = muts[mi];
+          if (mu.type === 'characterData') {
+            zbStripElapsed(mu.target.parentElement);
+          } else {
+            zbStripElapsed(mu.target);
+            for (var mj = 0; mj < mu.addedNodes.length; mj++) {
+              var mn = mu.addedNodes[mj];
+              if (mn.nodeType === 1) zbElapsedSweep(mn);
+            }
+          }
+        }
+      });
+      eObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      window.__zcodeBeautify.elapsedObs = eObs;
+      zbElapsedSweep(document);
+    } else if (!decOn && window.__zcodeBeautify.elapsedObs) {
+      try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.elapsedObs = null;
+    }
+  }
+  // The duration span is a direct child of the loading row (verified in
+  // ZCode's bundle: aria-hidden + font-mono next to the zcode-loading-label).
+  function zbIsElapsedSpan(el) {
+    return !!(el && el.tagName === 'SPAN' && el.getAttribute('aria-hidden') === 'true'
+      && el.parentElement && el.parentElement.getAttribute('data-zcode-chat-loading-animate') === 'true');
+  }
+  // React keeps exactly ONE text child in that span and updates it via
+  // firstChild.nodeValue \u2014 our textContent rewrite preserves that shape, so
+  // React's fast path then edits OUR text node and the observer strips it
+  // again. A rewrite without a decimal matches nothing and writes nothing,
+  // so the loop always settles.
+  function zbStripElapsed(el) {
+    if (!zbIsElapsedSpan(el)) return;
+    var t = el.textContent;
+    if (t && t.indexOf('.') !== -1) {
+      var s = t.replace(/(\\d+)\\.\\d+/g, '$1');
+      if (s !== t) el.textContent = s;
+    }
+  }
+  function zbElapsedSweep(root) {
+    // document (nodeType 9) and elements both carry querySelectorAll \u2014 the
+    // install-time call passes document itself.
+    if (!root || !root.querySelectorAll) return;
+    var spans = root.querySelectorAll('[data-zcode-chat-loading-animate="true"] > span[aria-hidden="true"]');
+    for (var si = 0; si < spans.length; si++) zbStripElapsed(spans[si]);
   }
   function perfSched() {
     if (window.__zcodeBeautify.perfTimer) return;
@@ -8034,6 +8093,10 @@ function buildResetScript(marker = "zcode-beautify") {
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
+    }
+    if (window.__zcodeBeautify.elapsedObs) {
+      try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.elapsedObs = null;
     }
   }
 })();`;
@@ -146651,6 +146714,7 @@ function normalizeChatLook(raw) {
   const cap = typeof raw?.widthCapRem === "number" && Number.isFinite(raw.widthCapRem) ? Math.max(0, Math.min(120, Math.round(raw.widthCapRem))) : 0;
   const capOn = cap >= 40 ? cap : 0;
   const inset = capOn > 0 ? typeof raw?.widthInsetRem === "number" && Number.isFinite(raw.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem))) : CHAT_WIDTH_INSET_DEFAULT : 0;
+  const dec = raw?.hideElapsedDecimal;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -146658,7 +146722,8 @@ function normalizeChatLook(raw) {
     frost: pct(raw?.frost),
     widthCapRem: capOn,
     widthInsetRem: inset,
-    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0
+    perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
+    hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0
   };
 }
 var DEFAULT_BUBBLE_LOOK = {
@@ -147052,7 +147117,7 @@ init_wallpaperType();
 init_launch();
 
 // dist/version.js
-var VERSION = "0.4.8";
+var VERSION = "0.4.9";
 
 // dist/mcp/server.js
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
@@ -147206,15 +147271,17 @@ server.registerTool("apply_options", {
       custom_css: external_exports.string().max(8e3).optional().describe('CSS applied when preset = "custom", written against the friendly selectors .zb-bubble (the user message bubble) and .zb-bubble-row (its conversation row). CSS only \u2014 @import, javascript: and </style are stripped. Prefer live theme tokens like var(--color-primary)/var(--color-surface) so a Monet re-theme restyles the bubble too; suffix declarations with !important')
     }).optional().describe("User message bubble look; omitted fields keep their current value"),
     chat_width_cap_rem: external_exports.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (\u6D88\u606F\u6D41\u5BBD\u5EA6\u4E0A\u9650). 0 = stock responsive width; 40-120 widens the column (78 \u2248 wide, 100+ \u2248 near full width on large windows). The column still tracks window resizes \u2014 only the ceiling changes"),
-    chat_width_inset_rem: external_exports.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0")
+    chat_width_inset_rem: external_exports.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
+    chat_hide_elapsed_decimal: external_exports.boolean().optional().describe('Hide the decimal in the running elapsed time under the conversation (\u8017\u65F6\u79D2\u6570\u53BB\u5C0F\u6570): true rewrites the live working-row seconds from "53.4 \u79D2" to "53 \u79D2"; false restores stock')
   }
-}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem }) => {
+}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal }) => {
   try {
     const bubbleLook = bubble === void 0 ? void 0 : Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== void 0));
     const taskSpinnerLook = spinner === void 0 ? void 0 : Object.fromEntries(Object.entries(spinner).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]));
-    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 ? void 0 : {
+    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 && chat_hide_elapsed_decimal === void 0 ? void 0 : {
       ...chat_width_cap_rem !== void 0 ? { widthCapRem: chat_width_cap_rem } : {},
-      ...chat_width_inset_rem !== void 0 ? { widthInsetRem: chat_width_inset_rem } : {}
+      ...chat_width_inset_rem !== void 0 ? { widthInsetRem: chat_width_inset_rem } : {},
+      ...chat_hide_elapsed_decimal !== void 0 ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {}
     };
     const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
     return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };

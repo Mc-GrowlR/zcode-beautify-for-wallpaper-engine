@@ -327,6 +327,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
             : 12)
         : 0,
       perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
+      hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0,
     };
   }
   // User message bubble look (聊天气泡): normalizeBubbleLook fills any field

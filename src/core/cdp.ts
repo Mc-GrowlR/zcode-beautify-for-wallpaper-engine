@@ -142,7 +142,7 @@ export interface InjectionPayload {
   /** Video wallpaper audio 0-100 (0/absent = muted). */
   videoVolume?: number;
   /** Zone-refined chat-area masks + column width (聊天界面); absent = stock. */
-  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number };
+  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number; hideElapsedDecimal: number };
   /** User message bubble look (聊天气泡); absent/preset default = stock. */
   bubbleLook?: BubbleLookConfig;
   /**
@@ -206,7 +206,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
@@ -608,16 +608,21 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     // skipped, so the virtualizer's cached heights stay valid; only the very
     // first pass uses the 420px estimate (same value ZCode's share view uses).
     var perfOn = Number(C.perfSmooth) === 1;
+    var decOn = Number(C.hideElapsedDecimal) === 1;
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
-    if (!masksOn && !widthOn && !perfOn) {
+    if (!masksOn && !widthOn && !perfOn && !decOn) {
       if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
       if (window.__zcodeBeautify.chatObs) {
         try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
         window.__zcodeBeautify.chatObs = null;
+      }
+      if (window.__zcodeBeautify.elapsedObs) {
+        try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.elapsedObs = null;
       }
       return;
     }
@@ -702,6 +707,60 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         perfRows[pri].removeAttribute('data-zb-cv');
       }
     }
+    // 耗时秒数去小数: ZCode's live "working" row renders the elapsed time
+    // ("1 时 17 分 53.4 秒") through a hardcoded toFixed(1) into ONE
+    // aria-hidden text span under [data-zcode-chat-loading-animate]; CSS
+    // cannot reach mid-string text, so watch the DOM and strip the fraction
+    // ("53.4 秒" → "53 秒") after each 100ms React tick. Turning the option
+    // off just drops the observer — the next tick re-writes the stock text.
+    if (decOn && !window.__zcodeBeautify.elapsedObs) {
+      var eObs = new MutationObserver(function(muts) {
+        for (var mi = 0; mi < muts.length; mi++) {
+          var mu = muts[mi];
+          if (mu.type === 'characterData') {
+            zbStripElapsed(mu.target.parentElement);
+          } else {
+            zbStripElapsed(mu.target);
+            for (var mj = 0; mj < mu.addedNodes.length; mj++) {
+              var mn = mu.addedNodes[mj];
+              if (mn.nodeType === 1) zbElapsedSweep(mn);
+            }
+          }
+        }
+      });
+      eObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      window.__zcodeBeautify.elapsedObs = eObs;
+      zbElapsedSweep(document);
+    } else if (!decOn && window.__zcodeBeautify.elapsedObs) {
+      try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.elapsedObs = null;
+    }
+  }
+  // The duration span is a direct child of the loading row (verified in
+  // ZCode's bundle: aria-hidden + font-mono next to the zcode-loading-label).
+  function zbIsElapsedSpan(el) {
+    return !!(el && el.tagName === 'SPAN' && el.getAttribute('aria-hidden') === 'true'
+      && el.parentElement && el.parentElement.getAttribute('data-zcode-chat-loading-animate') === 'true');
+  }
+  // React keeps exactly ONE text child in that span and updates it via
+  // firstChild.nodeValue — our textContent rewrite preserves that shape, so
+  // React's fast path then edits OUR text node and the observer strips it
+  // again. A rewrite without a decimal matches nothing and writes nothing,
+  // so the loop always settles.
+  function zbStripElapsed(el) {
+    if (!zbIsElapsedSpan(el)) return;
+    var t = el.textContent;
+    if (t && t.indexOf('.') !== -1) {
+      var s = t.replace(/(\\d+)\\.\\d+/g, '$1');
+      if (s !== t) el.textContent = s;
+    }
+  }
+  function zbElapsedSweep(root) {
+    // document (nodeType 9) and elements both carry querySelectorAll — the
+    // install-time call passes document itself.
+    if (!root || !root.querySelectorAll) return;
+    var spans = root.querySelectorAll('[data-zcode-chat-loading-animate="true"] > span[aria-hidden="true"]');
+    for (var si = 0; si < spans.length; si++) zbStripElapsed(spans[si]);
   }
   function perfSched() {
     if (window.__zcodeBeautify.perfTimer) return;
@@ -941,6 +1000,10 @@ export function buildResetScript(marker = "zcode-beautify"): string {
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
+    }
+    if (window.__zcodeBeautify.elapsedObs) {
+      try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.elapsedObs = null;
     }
   }
 })();`;
