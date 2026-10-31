@@ -14,19 +14,25 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyToZCode, type BeautifyConfig } from "./core/inject.js";
 import type { ApplyOptions } from "./core/session.js";
-import { launchZcode, dataDir } from "./core/launch.js";
+import { launchApp, dataDir } from "./core/launch.js";
 import { applyWallpaper, resetAppearance } from "./core/session.js";
+import { setTarget, target } from "./core/target.js";
 
 const USAGE = `zcode-beautify <command> [options]
 
+Global:
+  --target <id>                  zcode (default) | workbuddy | auto
+                                 Which desktop client to beautify. Falls back to
+                                 the BEAUTIFY_TARGET env var, then auto-detect.
+
 Commands:
-  launch [--port N]              Start ZCode with --remote-debugging-port=N
+  launch [--port N]              Start the client with --remote-debugging-port=N
   apply <image> [options]        Set wallpaper and adapt colors
     --blur <px>                  Blur the wallpaper (default 0)
     --dim <0-100>                Darken the wallpaper (default 25)
     --sidebar-dim <0-100>        Extra-darken the left sidebar (default 0)
     --fit <mode>                 cover | contain | smart (default cover)
-    --no-monet                   Keep ZCode's original colors
+    --no-monet                   Keep the client's original colors
     --port <N>                   CDP port (default 9222)
   apply-scene <pkg-or-dir> [options]
                                  Import a Wallpaper Engine scene wallpaper,
@@ -38,13 +44,13 @@ Commands:
   colors [--port N]              Re-apply stored theme without wallpaper change
   reset [--port N]               Remove wallpaper and color overrides
   status [--port N]              Show CDP reachability and renderer targets
-  watch [--port N]               Watch mode: re-inject whenever ZCode (re)starts
+  watch [--port N]               Watch mode: re-inject whenever the app (re)starts
   serve [--port N] [--api-port M] [--detach]
                                  Watch mode + settings panel + local API (default API port 9223)
                                  --detach runs it in the background, outliving this shell
   repair-launchers [--port N] [--dry-run]
-                                 Add --remote-debugging-port to ZCode launch entries
-                                 (shortcuts, zcode:// handler, context-menu verbs) missing it
+                                 Add --remote-debugging-port to the app's launch
+                                 entries (shortcuts, deep-link handler) missing it
 `;
 
 async function main(): Promise<void> {
@@ -54,14 +60,23 @@ async function main(): Promise<void> {
     return i >= 0 && i + 1 < rest.length ? rest[i + 1] : undefined;
   };
   const has = (name: string): boolean => rest.includes(name);
-  const port = Number(flag("--port") ?? 9222);
+
+  // Resolve the target before anything touches dataDir() / tokens / ports.
+  const requested = flag("--target");
+  if (requested && !["zcode", "workbuddy", "auto"].includes(requested)) {
+    console.error(`unknown --target "${requested}" (expected zcode | workbuddy | auto)`);
+    process.exitCode = 1;
+    return;
+  }
+  const app = setTarget(requested);
+  const port = Number(flag("--port") ?? app.cdpPort);
 
   try {
     switch (cmd) {
       case "launch": {
-        const r = await launchZcode(port);
+        const r = await launchApp(port, app);
         // Keep every launch path (start menu, taskbar, deep links…) able to
-        // reach CDP: repair any ZCode launch entry that lacks the flag.
+        // reach CDP: repair any entry of this app that lacks the flag.
         const { repairLaunchers } = await import("./core/launchers.js");
         const report = await repairLaunchers({ port });
         if (report.error) {
@@ -75,16 +90,16 @@ async function main(): Promise<void> {
           }
         }
         if (r.started) {
-          console.log(`ZCode started with CDP on port ${port}.`);
+          console.log(`${app.appName} started with CDP on port ${port}.`);
         } else if (r.reason === "running-without-cdp") {
           console.error(
-            `A ZCode instance is already running without the debug port, so the single-instance lock ` +
+            `A ${app.appName} instance is already running without the debug port, so the single-instance lock ` +
               `would immediately close the new process's CDP port.\n` +
-              `Quit ZCode completely (including any tray icon), then run \`zcode-beautify launch\` again.`
+              `Quit ${app.appName} completely (including any tray icon), then run \`zcode-beautify launch\` again.`
           );
           process.exitCode = 1;
         } else {
-          console.log(`ZCode already reachable on port ${port}.`);
+          console.log(`${app.appName} already reachable on port ${port}.`);
         }
         break;
       }
@@ -149,9 +164,9 @@ async function main(): Promise<void> {
         } catch (err) {
           console.log(`CDP not reachable on port ${port}: ${(err as Error).message}`);
           console.log(
-            `If ZCode is running, it was probably started from an entry that lacks the debug flag.\n` +
+            `If ${app.appName} is running, it was probably started from an entry that lacks the debug flag.\n` +
               `Run \`zcode-beautify repair-launchers\` (add --dry-run to preview) to fix every entry,\n` +
-              `then quit ZCode completely and start it from one of the fixed shortcuts.`
+              `then quit ${app.appName} completely and start it from one of the fixed shortcuts.`
           );
           process.exitCode = 1;
         }
@@ -181,7 +196,7 @@ async function main(): Promise<void> {
         break;
       }
       case "serve": {
-        const apiPort = Number(flag("--api-port") ?? 9223);
+        const apiPort = Number(flag("--api-port") ?? app.apiPort);
         if (has("--detach")) {
           await startServeDetached(port, apiPort);
           break;
@@ -260,7 +275,7 @@ async function watch(port: number): Promise<void> {
   const { buildPayloadFromConfig } = await import("./core/session.js");
   const { loadConfig } = await import("./core/launch.js");
   const config = {
-    ...{ port: 9222, blur: 0, dim: 25, monet: true, wallpaperVisible: true, fit: "cover" as const },
+    ...{ port: target().cdpPort, blur: 0, dim: 25, monet: true, wallpaperVisible: true, fit: "cover" as const },
     ...loadConfig(),
     port,
     fit: loadConfig().fit ?? "cover",

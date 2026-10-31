@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLook, normalizeTaskSpinnerLook, type BeautifyConfig, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig, type BuiltPayload } from "./inject.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
+import { target } from "./target.js";
 import { detectWallpaperType } from "./wallpaperType.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
 import { getInstallGuide } from "./dependencyCheck.js";
@@ -89,7 +90,7 @@ export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>):
   return {
     ...DEFAULT_CONFIG,
     ...stored,
-    port: opts.port ?? stored.port ?? DEFAULT_CONFIG.port,
+    port: opts.port ?? stored.port ?? target().cdpPort,
     blur: opts.blur ?? stored.blur ?? DEFAULT_CONFIG.blur,
     dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
     sidebarDim: opts.sidebarDim ?? stored.sidebarDim ?? DEFAULT_CONFIG.sidebarDim,
@@ -128,7 +129,7 @@ export async function applySceneWallpaper(
   const scene = await importScene(abs, opts.onProgress ?? (() => undefined));
   const stored = loadConfig();
   const config = baseConfig(opts, stored);
-  const apiPort = stored.apiPort ?? 9223;
+  const apiPort = stored.apiPort ?? target().apiPort;
   const sceneVideoUrl = `http://127.0.0.1:${apiPort}/media/scene/${scene.hash}.mp4`;
 
   // Serve must be reachable for the renderer to stream the loop; otherwise
@@ -163,7 +164,8 @@ export async function applySceneWallpaper(
 async function isServeAlive(apiPort: number): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1200) });
-    return ((await res.json()) as { service?: string })?.service === "zcode-beautify";
+    const body = (await res.json()) as { service?: string; target?: string };
+    return body?.service === "zcode-beautify" && (body.target ?? "zcode") === target().id;
   } catch {
     return false;
   }
@@ -186,7 +188,7 @@ export async function buildPayloadFromConfig(config: BeautifyConfig): Promise<Bu
     if (fs.existsSync(posterPath)) {
       assets = await loadWallpaper(posterPath);
     }
-    const apiPort = config.apiPort ?? 9223;
+    const apiPort = config.apiPort ?? target().apiPort;
     if (!config.sceneVideoUrl && config.sceneHash) {
       config = { ...config, sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${config.sceneHash}.mp4` };
     }
@@ -199,5 +201,5 @@ export async function buildPayloadFromConfig(config: BeautifyConfig): Promise<Bu
 }
 
 function mergedConfig(): BeautifyConfig {
-  return { ...DEFAULT_CONFIG, ...loadConfig(), port: loadConfig().port ?? DEFAULT_CONFIG.port };
+  return { ...DEFAULT_CONFIG, ...loadConfig(), port: loadConfig().port ?? target().cdpPort };
 }

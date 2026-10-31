@@ -30,6 +30,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { target } from "./target.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -71,7 +72,13 @@ export const DEFAULT_REGISTRY_KEYS = [
   "HKCU:\\Software\\Classes\\Drive\\shell\\ZCode.OpenInZCode\\command",
 ];
 
-export function psScript(port: number, dryRun: boolean, registryKeys: string[] = DEFAULT_REGISTRY_KEYS): string {
+export function psScript(
+  port: number,
+  dryRun: boolean,
+  registryKeys: string[] = DEFAULT_REGISTRY_KEYS,
+  shortcutMatch = "*ZCode.exe",
+  exeName = "ZCode.exe"
+): string {
   return `
 $ErrorActionPreference = 'Continue'
 # Without this, Chinese Windows error strings come back as mojibake through
@@ -80,6 +87,8 @@ $ErrorActionPreference = 'Continue'
 $port = ${port}
 $dryRun = $${dryRun ? "true" : "false"}
 $flag = ' --remote-debugging-port=' + $port
+$exeMatch = '${shortcutMatch.replace(/'/g, "''")}'
+$exeName = '${exeName.replace(/'/g, "''")}'
 $results = New-Object System.Collections.ArrayList
 
 function Add-Result($kind, $p, $before, $after, $status, $reason) {
@@ -113,7 +122,7 @@ $wsh = New-Object -ComObject WScript.Shell
 foreach ($item in $lnks) {
   try { $sc = $wsh.CreateShortcut($item.FullName) } catch { continue }
   $target = [string]$sc.TargetPath
-  if ($target -notlike '*ZCode.exe') { continue }
+  if ($target -notlike $exeMatch) { continue }
 
   $before = [string]$sc.Arguments
   if ($before -match 'remote-debugging-port') {
@@ -143,7 +152,7 @@ foreach ($k in $keys) {
   try {
     $key = Get-Item -LiteralPath $k
     $before = [string]$key.GetValue('')
-    if ($before -notmatch 'ZCode\\.exe') { continue }
+    if ($before -notmatch [regex]::Escape($exeName)) { continue }
     if ($before -match 'remote-debugging-port') {
       Add-Result 'registry' $k $before $before 'already-ok' $null
       continue
@@ -186,9 +195,9 @@ interface RawResult {
 }
 
 /**
- * Scans every ZCode launcher and adds the CDP flag where it is missing.
- * Never throws: a platform without these mechanisms, or a missing PowerShell,
- * comes back as a report with `error` set.
+ * Scans every launcher of the active target app and adds the CDP flag where it
+ * is missing. Never throws: a platform without these mechanisms, or a missing
+ * PowerShell, comes back as a report with `error` set.
  */
 export async function repairLaunchers(opts: RepairOptions): Promise<RepairReport> {
   const dryRun = opts.dryRun ?? false;
@@ -201,7 +210,12 @@ export async function repairLaunchers(opts: RepairOptions): Promise<RepairReport
     };
   }
 
-  const encoded = Buffer.from(psScript(opts.port, dryRun, opts.registryKeys), "utf16le").toString("base64");
+  const app = target();
+  const keys = opts.registryKeys ?? app.launcher.registryKeys;
+  const encoded = Buffer.from(
+    psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName),
+    "utf16le"
+  ).toString("base64");
   try {
     const { stdout } = await execFileAsync(
       "powershell",

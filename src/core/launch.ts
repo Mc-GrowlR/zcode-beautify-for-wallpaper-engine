@@ -1,27 +1,31 @@
 /**
- * Config persistence + ZCode launcher.
+ * Config persistence + app launcher.
  *
- * Production ZCode builds have no built-in CDP port, so the launcher starts
- * ZCode.exe with --remote-debugging-port. ZCode enforces a single instance via
- * requestSingleInstanceLock, so we detect an already-running instance first.
+ * Production Electron builds have no built-in CDP port, so the launcher starts
+ * the target app (ZCode or WorkBuddy) with --remote-debugging-port. These apps
+ * enforce a single instance via requestSingleInstanceLock, so we detect an
+ * already-running instance first.
  */
 
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { listTargets } from "./cdp.js";
+import { executableCandidates, findExecutable, target, type AppTarget } from "./target.js";
 
 export interface StoredConfig extends Partial<Omit<import("./inject.js").BeautifyConfig, "port">> {
   port?: number;
 }
 
+/** Data dir for the active target; env override wins (plugin host sets it). */
 export function dataDir(): string {
-  return (
-    process.env.ZCODE_BEAUTIFY_DATA_DIR ??
-    path.join(os.homedir(), ".zcode", "cli", "plugins", "data", "zcode-beautify")
-  );
+  const t = target();
+  for (const name of t.dataDirEnvVars) {
+    const v = process.env[name];
+    if (v && v.trim()) return v.trim();
+  }
+  return t.defaultDataDir();
 }
 
 export function configFile(): string {
@@ -103,44 +107,28 @@ export function saveConfig(config: StoredConfig): void {
   });
 }
 
-const ZCODE_EXE_CANDIDATES =
-  process.platform === "win32"
-    ? [
-        process.env.ZCODE_WINDOWS_APP_INSTALL_DIR
-          ? path.join(process.env.ZCODE_WINDOWS_APP_INSTALL_DIR, "ZCode.exe")
-          : undefined,
-        "C:\\Program Files\\ZCode\\ZCode.exe",
-        path.join(os.homedir(), "AppData", "Local", "Programs", "ZCode", "ZCode.exe"),
-      ].filter(Boolean)
-    : process.platform === "darwin"
-      ? ["/Applications/ZCode.app/Contents/MacOS/ZCode"]
-      : ["/usr/bin/zcode", "/opt/ZCode/zcode"];
-
-export function findZcodeExecutable(): string | undefined {
-  return ZCODE_EXE_CANDIDATES.map((p) => p!).find((p) => {
-    try {
-      return fs.statSync(p!).isFile();
-    } catch {
-      return false;
-    }
-  });
+export function findAppExecutable(t: AppTarget = target()): string | undefined {
+  return findExecutable(t);
 }
+
+/** @deprecated kept for callers written against the ZCode-only API. */
+export const findZcodeExecutable = findAppExecutable;
 
 const execFileAsync = promisify(execFile);
 
 /**
- * Detects a live ZCode process. A running instance without the debug port
- * triggers the Electron single-instance lock: a newly spawned ZCode binds the
- * CDP port, forwards its args to the existing instance, then exits — closing
- * the port again. Launching must refuse upfront instead of racing that window.
+ * Detects a live instance of the target app. A running instance without the
+ * debug port triggers the Electron single-instance lock: a newly spawned app
+ * binds the CDP port, forwards its args to the existing instance, then exits —
+ * closing the port again. Launching must refuse upfront instead of racing.
  */
-export async function isZcodeProcessRunning(): Promise<boolean> {
+export async function isAppProcessRunning(t: AppTarget = target()): Promise<boolean> {
   try {
     if (process.platform === "win32") {
-      const { stdout } = await execFileAsync("tasklist", ["/NH", "/FI", "IMAGENAME eq ZCode.exe"]);
-      return stdout.toLowerCase().includes("zcode.exe");
+      const { stdout } = await execFileAsync("tasklist", ["/NH", "/FI", `IMAGENAME eq ${t.exeName}`]);
+      return stdout.toLowerCase().includes(t.exeName.toLowerCase());
     }
-    const name = process.platform === "darwin" ? "ZCode" : "zcode";
+    const name = t.exeName.replace(/\.exe$/i, "");
     const { stdout } = await execFileAsync("pgrep", ["-x", name]);
     return stdout.trim().length > 0;
   } catch {
@@ -148,17 +136,20 @@ export async function isZcodeProcessRunning(): Promise<boolean> {
   }
 }
 
+/** @deprecated kept for callers written against the ZCode-only API. */
+export const isZcodeProcessRunning = isAppProcessRunning;
+
 export interface LaunchResult {
   started: boolean;
   reason?: string;
 }
 
 /**
- * Starts ZCode with the CDP port enabled. If a CDP endpoint is already
- * reachable we are done; if a ZCode instance is running *without* CDP, the
- * single-instance lock blocks us and the user must restart ZCode themselves.
+ * Starts the target app with the CDP port enabled. If a CDP endpoint is
+ * already reachable we are done; if an instance runs *without* CDP, the
+ * single-instance lock blocks us and the user must restart it themselves.
  */
-export async function launchZcode(port: number): Promise<LaunchResult> {
+export async function launchApp(port: number, t: AppTarget = target()): Promise<LaunchResult> {
   try {
     await listTargets(port);
     return { started: false, reason: "already-running-with-cdp" };
@@ -166,25 +157,21 @@ export async function launchZcode(port: number): Promise<LaunchResult> {
     /* not reachable yet */
   }
 
-  const exe = findZcodeExecutable();
-  if (!exe) throw new Error("ZCode executable not found; set ZCODE_WINDOWS_APP_INSTALL_DIR or install ZCode to the default path.");
+  const exe = findAppExecutable(t);
+  if (!exe) {
+    const manual = executableCandidates(t).slice(0, 3).join(", ");
+    throw new Error(
+      `${t.appName} executable not found; set ${t.exeEnvVars[0]} (or the install dir) and retry. Looked in: ${manual}`
+    );
+  }
 
-  if (await isZcodeProcessRunning()) {
+  if (await isAppProcessRunning(t)) {
     return { started: false, reason: "running-without-cdp" };
   }
 
-  // Beyond the CDP port: ZCode's transparent window gets misjudged as fully
-  // occluded by Chromium's occlusion tracker, which stops ALL renderer
-  // rendering — transition effects never play a frame and timers throttle
-  // past 1s (the same root cause behind the video-freeze watchdog). Disabling
-  // the tracker and renderer backgrounding keeps effects and timers alive in
-  // the background.
-  const child = spawn(exe, [
-    `--remote-debugging-port=${port}`,
-    "--disable-features=CalculateNativeWinOcclusion",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-  ], {
+  // Beyond the CDP port: occlusion / background throttling switches keep
+  // wallpaper transitions and timers alive while the window is unfocused.
+  const child = spawn(exe, [`--remote-debugging-port=${port}`, ...t.launchArgs], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
@@ -212,7 +199,7 @@ export async function launchZcode(port: number): Promise<LaunchResult> {
       /* already gone */
     }
     throw new Error(
-      "ZCode was started but no CDP endpoint appeared. Another instance may already be running without the debug port — quit ZCode completely and run `zcode-beautify launch` again."
+      `${t.appName} was started but no CDP endpoint appeared. Another instance may already be running without the debug port — quit ${t.appName} completely and run \`zcode-beautify launch\` again.`
     );
   }
 
@@ -223,8 +210,11 @@ export async function launchZcode(port: number): Promise<LaunchResult> {
     await listTargets(port);
   } catch {
     throw new Error(
-      "CDP came up but closed again immediately — a running ZCode instance took over via the single-instance lock. Quit ZCode completely and run `zcode-beautify launch` again."
+      "CDP came up but closed again immediately — a running instance took over via the single-instance lock. Quit the app completely and run `zcode-beautify launch` again."
     );
   }
   return { started: true };
 }
+
+/** @deprecated kept for callers written against the ZCode-only API. */
+export const launchZcode = launchApp;

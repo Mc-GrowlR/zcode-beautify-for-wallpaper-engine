@@ -12,14 +12,16 @@ import { z } from "zod";
 import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { loadConfig } from "../core/launch.js";
+import { target } from "../core/target.js";
 import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
 import { VERSION } from "../version.js";
 
-// ZCode launches MCP servers with ZCODE_BEAUTIFY_DATA_DIR pointed at a
+// The plugin host launches MCP servers with the beautify data dir pointed at a
 // plugin-scoped directory; keeping it would make every read/write in this
 // process (status, tools) use a different store than the serve daemon does.
 // Strip it FIRST, before anything resolves dataDir().
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
+delete process.env.WORKBUDDY_BEAUTIFY_DATA_DIR;
 
 const absoluteExisting = (p: string): string => {
   if (!path.isAbsolute(p)) throw new Error(`需要绝对路径: ${p}`);
@@ -43,14 +45,17 @@ function bootstrapServe(): void {
     if (path.basename(serverFile) !== "server.js" || !existsSync(cliJs)) return;
     // The API port is a setting; a hardcoded 9223 here spawns duplicate serves
     // whenever the configured port differs.
-    const apiPort = loadConfig().apiPort ?? 9223;
+    const apiPort = loadConfig().apiPort ?? target().apiPort;
     fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1500) })
       .then((r) => {
         if (!r.ok) throw new Error("unhealthy");
         return r.json();
       })
       .then((body) => {
-        if ((body as { service?: string })?.service !== "zcode-beautify") throw new Error("foreign service");
+        const h = body as { service?: string; target?: string };
+        if (h?.service !== "zcode-beautify" || (h.target ?? "zcode") !== target().id) {
+          throw new Error("foreign service");
+        }
       })
       .catch(() => {
         try {
@@ -72,7 +77,7 @@ function bootstrapServe(): void {
     // (stderr carries the plugin log; stdout is the MCP protocol).
     import("../core/launchers.js")
       .then((m) =>
-        m.repairLaunchers({ port: loadConfig().port ?? 9222 }).then((report) => {
+        m.repairLaunchers({ port: loadConfig().port ?? target().cdpPort }).then((report) => {
           if (report.error) {
             console.error(`launcher check failed: ${report.error}`);
             return;
@@ -95,6 +100,28 @@ const server = new McpServer({
   name: "zcode-beautify",
   version: VERSION,
 });
+
+/** Product name of the client this MCP instance beautifies. */
+const APP = target().appName;
+
+/**
+ * Tool metadata is written once against the primary client. Re-brand it for
+ * the active target so a WorkBuddy agent is never told it is editing ZCode.
+ * Registered as a thin wrapper so every future tool gets the same treatment.
+ */
+const rawRegister = server.registerTool.bind(server);
+server.registerTool = ((name: string, meta: Record<string, unknown>, handler: unknown) => {
+  const branded =
+    APP === "ZCode"
+      ? meta
+      : {
+          ...meta,
+          title: typeof meta.title === "string" ? meta.title.replace(/ZCode/g, APP) : meta.title,
+          description:
+            typeof meta.description === "string" ? meta.description.replace(/ZCode/g, APP) : meta.description,
+        };
+  return rawRegister(name, branded as never, handler as never);
+}) as typeof server.registerTool;
 
 /** Registry of the tools this server exposes (used by tests / docs). */
 export const TOOL_NAMES = [
@@ -222,9 +249,10 @@ server.registerTool(
       chat_width_cap_rem: z.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (消息流宽度上限). 0 = stock responsive width; 40-120 widens the column (78 ≈ wide, 100+ ≈ near full width on large windows). The column still tracks window resizes — only the ceiling changes"),
       chat_width_inset_rem: z.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
       chat_hide_elapsed_decimal: z.boolean().optional().describe("Hide the decimal in the running elapsed time under the conversation (耗时秒数去小数): true rewrites the live working-row seconds from \"53.4 秒\" to \"53 秒\"; false restores stock"),
+      chat_drag_resize: z.boolean().optional().describe("Drag handles on both edges of the conversation column (两侧拖拽调宽): true mounts two hidden vertical strips — hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize }) => {
     try {
       // Send only the fields the caller provided: the session layer merges
       // this partial over the stored look, so one-field tweaks don't reset
@@ -242,12 +270,13 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]),
             ) as Partial<TaskSpinnerLookConfig>);
       const chatLook: Partial<ChatLookConfig> | undefined =
-        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined
+        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined
           ? undefined
           : {
               ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
               ...(chat_width_inset_rem !== undefined ? { widthInsetRem: chat_width_inset_rem } : {}),
               ...(chat_hide_elapsed_decimal !== undefined ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {}),
+              ...(chat_drag_resize !== undefined ? { dragResize: chat_drag_resize ? 1 : 0 } : {}),
             };
       const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
       return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };

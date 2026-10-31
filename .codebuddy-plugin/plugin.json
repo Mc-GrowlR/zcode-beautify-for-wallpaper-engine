@@ -1,0 +1,26 @@
+{
+  "name": "zcode-beautify-workbuddy",
+  "version": "0.5.1",
+  "description": "壁纸美化 WorkBuddy 桌面客户端:导入图片 / 视频 / Wallpaper Engine 场景壁纸作为无缝循环背景,并用 Material Design 3(莫奈取色)动态配色适配整个 UI,附带可拖拽的实时设置面板。",
+  "description_en": "Beautify the WorkBuddy desktop client: import an image, video or Wallpaper Engine scene wallpaper as a seamless looping background, adapt the whole UI with Material Design 3 (Monet) dynamic color, and tune everything from a draggable live settings panel.",
+  "author": {
+    "name": "Mc-GrowlR",
+    "url": "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine"
+  },
+  "homepage": "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine",
+  "repository": "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine",
+  "license": "MIT",
+  "keywords": ["workbuddy", "wallpaper", "theme", "material-design-3", "monet", "cdp"],
+  "category": "themes",
+  "skills": ["./skills/beautify"],
+  "commands": ["./commands/beautify.md"],
+  "mcpServers": {
+    "zcode-beautify": {
+      "command": "node",
+      "args": ["${CODEBUDDY_PLUGIN_ROOT}/dist/mcp/server.js"],
+      "env": {
+        "BEAUTIFY_TARGET": "workbuddy"
+      }
+    }
+  }
+}

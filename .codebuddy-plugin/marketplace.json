@@ -1,0 +1,23 @@
+{
+  "name": "zcode-beautify",
+  "description": "WorkBuddy 壁纸与配美化插件市场(GitHub 仓库直连)。",
+  "owner": {
+    "name": "Mc-GrowlR",
+    "url": "https://github.com/Mc-GrowlR"
+  },
+  "metadata": {
+    "version": "0.5.1"
+  },
+  "plugins": [
+    {
+      "name": "zcode-beautify-workbuddy",
+      "description": "给 WorkBuddy 桌面客户端换壁纸:静态图片 / 视频 / Wallpaper Engine 场景无缝循环,配莫奈(MD3)动态取色与实时设置面板。",
+      "source": "./",
+      "category": "themes",
+      "version": "0.5.1",
+      "author": {
+        "name": "Mc-GrowlR"
+      }
+    }
+  ]
+}

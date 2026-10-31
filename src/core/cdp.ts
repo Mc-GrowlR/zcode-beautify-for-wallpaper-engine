@@ -1,11 +1,12 @@
 /**
- * Minimal Chrome DevTools Protocol client for the ZCode desktop renderer.
+ * Minimal Chrome DevTools Protocol client for the target desktop renderer.
  *
- * ZCode (production) starts without a debug port; the launcher must start it
- * with `--remote-debugging-port=<port>` before this module can connect.
+ * Production builds start without a debug port; the launcher must start the
+ * app with `--remote-debugging-port=<port>` before this module can connect.
  */
 
 import { bubbleRecipes, rewriteCustomBubbleCss, BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL } from "./bubbleRecipes.js";
+import { TARGETS, target, type AppTarget } from "./target.js";
 // Type-only: erased at compile time, so no runtime cycle with inject.js.
 import type { BubbleLookConfig } from "./inject.js";
 
@@ -24,28 +25,48 @@ export async function listTargets(port: number, host = "127.0.0.1"): Promise<Cdp
   try {
     res = await fetch(`http://${host}:${port}/json/list`, { signal: AbortSignal.timeout(3000) });
   } catch {
-    throw new CdpError(`Cannot reach CDP at ${host}:${port} — is ZCode running with --remote-debugging-port=${port}?`);
+    const app = target();
+    throw new CdpError(
+      `Cannot reach CDP at ${host}:${port} — is ${app.appName} running with --remote-debugging-port=${port}?`
+    );
   }
   if (!res.ok) throw new CdpError(`CDP /json/list returned HTTP ${res.status}`);
   return (await res.json()) as CdpTarget[];
 }
 
 /** The main chat window renderer; excludes helper pages and overlay panels. */
-export function pickRendererTargets(targets: CdpTarget[]): CdpTarget[] {
+export function pickRendererTargets(targets: CdpTarget[], app: AppTarget = target()): CdpTarget[] {
   const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
   const main = pages.filter(
-    (t) => t.url.includes("out/renderer/index.html") || t.title === "ZCode"
+    (t) =>
+      app.rendererUrlIncludes.some((frag) => t.url.includes(frag)) ||
+      app.rendererTitles.includes(t.title)
   );
-  return main.length > 0 ? main : pages.filter((t) => !t.url.includes("devtools://"));
+  if (main.length > 0) return main;
+  // Fallback for dev builds / renamed bundles: any page that is not another
+  // known client's renderer. Without this, a WorkBuddy target could grab the
+  // ZCode window (both URLs contain "renderer/index.html") and repaint it
+  // with the wrong token family.
+  const others = Object.values(TARGETS).filter((t) => t.id !== app.id);
+  const isForeign = (url: string) =>
+    others.some((o) => o.rendererUrlIncludes.some((frag) => url.includes(frag)));
+  return pages.filter((t) => !t.url.includes("devtools://") && !isForeign(t.url));
 }
 
 /**
- * ZCode's update-status window (download/install progress dialog): the same
+ * The app's update-status window (download/install progress dialog): the same
  * renderer page with `windowKind=update-status` in the query. Beautifying it
  * is opt-in (config.showOnUpdater) — by default the plugin leaves it stock.
  */
 export function isUpdaterTarget(t: { url?: string }): boolean {
-  return typeof t.url === "string" && t.url.includes("windowKind=update-status");
+  const markers = ((): string[] => {
+    try {
+      return target().updaterUrlIncludes;
+    } catch {
+      return ["windowKind=update-status"];
+    }
+  })();
+  return typeof t.url === "string" && markers.some((m) => m && t.url!.includes(m));
 }
 
 export class CdpConnection {
@@ -142,7 +163,7 @@ export interface InjectionPayload {
   /** Video wallpaper audio 0-100 (0/absent = muted). */
   videoVolume?: number;
   /** Zone-refined chat-area masks + column width (聊天界面); absent = stock. */
-  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number; hideElapsedDecimal: number };
+  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number; hideElapsedDecimal: number; dragResize: number };
   /** User message bubble look (聊天气泡); absent/preset default = stock. */
   bubbleLook?: BubbleLookConfig;
   /**
@@ -150,8 +171,12 @@ export interface InjectionPayload {
    * resolved paint URL. absent/mode "default" = stock spinner.
    */
   spinnerLook?: { mode: "default" | "image"; image: string; spin: boolean; size: number };
-  /** Defer mounting until the ZCode startup screen finished (default true). */
+  /** Defer mounting until the app's startup screen finished (default true). */
   startupClean?: boolean;
+  /** False when the client has no chat-area extras wired (non-ZCode targets). */
+  chatUi?: boolean;
+  /** Startup-screen probe flavour; defaults to zcode's body-class check. */
+  startupProbe?: "zcode-body-class" | "workbuddy-skeleton";
 }
 
 /**
@@ -192,12 +217,21 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
   var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
+  var CHAT_UI = ${JSON.stringify(payload.chatUi !== false)};
+  var PROBE = ${JSON.stringify(payload.startupProbe ?? "zcode-body-class")};
   // The startup screen phase (body carries zcode-startup-* but not yet
-  // -ready) shows the loading art — a wallpaper layer and the panel FAB on
-  // top of it look broken. With startupClean the whole bootstrap (and the
-  // panel) waits for the ready class; without it everything mounts at once.
+  // -ready, or WorkBuddy still shows its skeleton overlay) covers the window
+  // with loading art — a wallpaper layer and the panel FAB on top of it look
+  // broken. With startupClean the whole bootstrap (and the panel) waits for
+  // the app shell; without it everything mounts at once.
   var inStartupScreen = function() {
     if (!document.body) return true;
+    if (PROBE === 'workbuddy-skeleton') {
+      var sk = document.querySelector('#sk-overlay, #skeleton-root');
+      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
+      var root = document.querySelector('#root');
+      return !root || root.childElementCount === 0;
+    }
     var cls = document.body.className || '';
     return /zcode-startup/.test(cls) && !/ready/.test(cls);
   };
@@ -206,7 +240,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
@@ -590,6 +624,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   applySpinnerLook();
 
   function applyChatLook() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
     var C;
     try { C = JSON.parse(CHAT); } catch (e) { return; }
     var masksOn = C.chatDim > 0 || C.maskTop > 0 || C.maskBottom > 0 || C.frost > 0;
@@ -609,10 +644,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     // first pass uses the 420px estimate (same value ZCode's share view uses).
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
+    var dragOn = Number(C.dragResize) === 1;
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
-    if (!masksOn && !widthOn && !perfOn && !decOn) {
+    if (!masksOn && !widthOn && !perfOn && !decOn && !dragOn) {
       if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
@@ -624,6 +660,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
         window.__zcodeBeautify.elapsedObs = null;
       }
+      zbGripClean();
       return;
     }
     if (!st) {
@@ -642,18 +679,62 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
           + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}'
         : '')
-      + (widthOn
+      + (widthOn && !dragOn
         // Mirrors ZCode's own tiers against the "conversation" container so
         // nothing changes below 864px: wide tier gets both the raised ceiling
         // and the slimmer side inset; the mid tier only its ceiling raised
         // (stock calc(100% - 6rem) width keeps governing it). The three
         // aligned holders (messages ×2 + composer) share these class names.
+        // Skipped while dragResize is on — the drag tiers below carry the
+        // same formula as their var fallbacks.
         ? '@container conversation (min-width:1280px){'
           + '[class*="conversation:max-w-6xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
           + '}'
           + '@container conversation (min-width:864px){'
           + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
           + '}'
+        : '')
+      + (dragOn
+        // 两侧拖拽调宽 width tiers: two px vars read by BOTH classes so the
+        // three aligned holders move together — --zb-chat-w is the dragged
+        // ceiling, --zb-chat-inset is derived per layout (max(16px,
+        // container − W)) so dragging can push the column nearly full width
+        // (a fixed 24rem inset would dead-stop the drag at 100% − 384px).
+        // The fallbacks reproduce the stock tiers — or the config tier when
+        // a cap is set — exactly, so nothing changes until the first drag
+        // writes the vars. calc(100% − inset) keeps ZCode's native window-
+        // tracking shape (fixed px widths overflow on shrink), and the
+        // derived inset is never < 16px, so the width can never go negative.
+        // Mid rule FIRST: where an element carries both classes the wide
+        // tier must win (same specificity → the later rule decides).
+        ? '@container conversation (min-width:864px){'
+          + '[class*="conversation:max-w-4xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 56) + 'rem)!important;'
+          + 'width:calc(100% - var(--zb-chat-inset,6rem))!important}'
+          + '}'
+          + '@container conversation (min-width:1280px){'
+          + '[class*="conversation:max-w-6xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 72) + 'rem)!important;'
+          + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? inset : 24) + 'rem))!important}'
+          + '}'
+          // The strips: fixed 9px hit zones hugging the column edges,
+          // invisible until hover (a 3px accent line), col-resize cursor.
+          // z-index 40 stays under Tailwind's z-50 dropdown/modals.
+          + '#' + MARKER + '-grip-l,#' + MARKER + '-grip-r{position:fixed;top:-200px;left:0;width:9px;height:120px;cursor:col-resize;z-index:40;touch-action:none;user-select:none;-webkit-user-select:none}'
+          + '#' + MARKER + '-grip-l::after,#' + MARKER + '-grip-r::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:3px;border-radius:3px;background:var(--color-primary,#7aa2f7);opacity:0;transition:opacity .12s}'
+          + '#' + MARKER + '-grip-l:hover::after,#' + MARKER + '-grip-r:hover::after,'
+          + '#' + MARKER + '-grip-l.zb-grip-drag::after,#' + MARKER + '-grip-r.zb-grip-drag::after{opacity:.55}'
+          + 'html.zb-grip-active{user-select:none!important;-webkit-user-select:none!important}'
+          // Drag perf (实测: the holders carry transition-[width,max-width]
+          // duration-150 — every width-var write animated for 150ms, so the
+          // layout never settled and each drag step stacked ~9 animated
+          // relayouts on top of the virtualizer's re-measure). While a drag
+          // is active the transition is cut and the width updates in
+          // quantized 16px steps (see GRIP_STEP) instead of every pointermove.
+          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{transition:none!important}'
+          // Composer floor (实测: if a width var ever goes invalid the calc
+          // becomes unset → the composer holder, a flex-row child, collapses
+          // to min-content (~40px strip) while block-parented message holders
+          // just fill. A literal floor can never go invalid).
+          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{min-width:460px!important}'
         : '');
     if (masksOn) {
       if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
@@ -735,6 +816,70 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.elapsedObs = null;
     }
+    // 两侧拖拽调宽 engine: mount the strips and keep them glued to the live
+    // column edges. Tracking = rAF-coalesced MutationObserver (route changes
+    // recreate the column), a ResizeObserver on the scroller (sidebar/window
+    // resizes without DOM mutations) and a window resize listener.
+    window.__zcodeBeautify.dragOn = dragOn;
+    if (dragOn) {
+      // GRIP_VER guards against a renderer reload re-running EVERY bootstrap
+      // ever registered via addScriptToEvaluateOnNewDocument (they
+      // accumulate; nothing can deregister them): the OLDEST script mounts
+      // first and wires its own — possibly outdated — pointer handlers, and
+      // every later script would skip mounting because the ids already
+      // exist. Only the newest engine knows the current marker, sees the
+      // legacy strips, and force-remounts them with live wiring. The remount
+      // also disconnects whatever observers an older generation installed
+      // (they share the window.__zcodeBeautify slots and would otherwise
+      // keep feeding their outdated sync forever). Bump the marker whenever
+      // the grip engine changes behavior.
+      var GRIP_VER = '4';
+      // One-line migration: the pre-pct build stored an absolute rem width.
+      // LITERAL key on purpose — applyChatLook runs BEFORE the engine
+      // constants below get their assignments (var hoisting moves the
+      // declarations, not the values; BUB/RECIPES sit at the top of this
+      // body for exactly this reason).
+      try { localStorage.removeItem('zcode-beautify:chat-drag-w'); } catch (e5) {}
+      var gl = document.getElementById(MARKER + '-grip-l');
+      var gr = document.getElementById(MARKER + '-grip-r');
+      if (gl && gl.getAttribute('data-zb-ver') !== GRIP_VER) gl = null;
+      if (gr && gr.getAttribute('data-zb-ver') !== GRIP_VER) gr = null;
+      if (!gl || !gr) {
+        // Full clean slate: grips, observers, resize listener, drag state,
+        // position/content caches — an older generation may have left any of
+        // them behind, and the fresh wiring below must own the page alone.
+        zbGripClean();
+        gl = document.createElement('div');
+        gl.id = MARKER + '-grip-l';
+        gl.setAttribute('data-zb-ver', GRIP_VER);
+        gr = document.createElement('div');
+        gr.id = MARKER + '-grip-r';
+        gr.setAttribute('data-zb-ver', GRIP_VER);
+        document.documentElement.appendChild(gl);
+        document.documentElement.appendChild(gr);
+        zbGripWire(gl, false);
+        zbGripWire(gr, true);
+        document.addEventListener('keydown', zbGripEsc);
+      }
+      if (!window.__zcodeBeautify.gripObs) {
+        var gObs = new MutationObserver(zbGripSched);
+        gObs.observe(document.documentElement, { childList: true, subtree: true });
+        window.__zcodeBeautify.gripObs = gObs;
+      }
+      if (!window.__zcodeBeautify.gripWinResize) {
+        var grf = function() { zbGripSched(); };
+        window.addEventListener('resize', grf);
+        window.__zcodeBeautify.gripWinResize = grf;
+      }
+      // First positioning runs SYNCHRONOUSLY: Chromium throttles rAF to zero
+      // in occluded/hidden windows, so a purely rAF-coalesced mount would
+      // leave the strips at their off-screen CSS defaults until the window
+      // is visible again (measured live). Later ticks stay rAF-coalesced.
+      try { zbGripSync(); } catch (e4) {}
+      zbGripSched();
+    } else {
+      zbGripClean();
+    }
   }
   // The duration span is a direct child of the loading row (verified in
   // ZCode's bundle: aria-hidden + font-mono next to the zcode-loading-label).
@@ -802,6 +947,311 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       el = el.parentElement;
     }
   }
+  // --- 两侧拖拽调宽 engine ---------------------------------------------------
+  // Two invisible fixed strips hugging the conversation column's edges.
+  // Dragging writes --zb-chat-w (px), which the drag tiers read with stock
+  // fallbacks. The width persists in localStorage as a PERCENT of the
+  // conversation container (DeepSeek's mechanism): maximize/restore rescale
+  // the column proportionally on every sync — an absolute px/rem width would
+  // pin full-width after a restore and dwarf on maximize. Double-clicking a
+  // strip clears it back to the tier fallbacks. Outside the chat (no
+  // scroller/holder — settings, route changes) the strips hide.
+  var GRIP_KEY = 'zcode-beautify:chat-drag-pct';
+  var GRIP_KEY_OLD = 'zcode-beautify:chat-drag-w'; // pre-pct absolute rem — dropped
+  var GRIP_MIN = 460;   // px — narrower than the narrowest panel tier (48rem)
+  var GRIP_MARGIN = 16; // px — minimum side breathing room at full width
+  var GRIP_STEP = 8;    // pointer px per update — the width moves 2× this.
+                        // Quantization: one relayout per step instead of one
+                        // per pointermove (the dynamic-height virtualizer
+                        // re-measures the whole conversation on every width
+                        // change; continuous 1px updates made the drag
+                        // unusably janky).
+  // pct (0-100) → applied px for the CURRENT container, clamped to the drag
+  // range. Zero-width layouts (jsdom, hidden) yield no usable clamp — caller
+  // checks contentW first.
+  function zbGripPctToPx(pct, contentW) {
+    return Math.max(GRIP_MIN, Math.min(contentW - GRIP_MARGIN, pct / 100 * contentW));
+  }
+  function zbGripFont() {
+    return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  }
+  // Width vars: --zb-chat-w is the dragged ceiling; --zb-chat-inset shrinks
+  // with it (max(16px, container − W)) so the column can go nearly full
+  // width. Only applied on a sane layout (jsdom measures 0 everywhere).
+  function zbGripApply(px, contentW) {
+    // Hard gate: a non-finite px would write 'NaNpx' into the vars, and an
+    // invalid var turns the tiers' width calc into unset → the composer
+    // (flex-row child) collapses to min-content while the message holders
+    // just fill their block parent. Measured live — never write garbage.
+    px = Number(px);
+    if (!isFinite(px) || px <= 0) return;
+    var rs = document.documentElement.style;
+    var v = Math.round(px) + 'px';
+    if (rs.getPropertyValue('--zb-chat-w') !== v) rs.setProperty('--zb-chat-w', v);
+    if (isFinite(contentW) && contentW > 100) {
+      var iv = Math.max(GRIP_MARGIN, Math.round(contentW - px)) + 'px';
+      if (rs.getPropertyValue('--zb-chat-inset') !== iv) rs.setProperty('--zb-chat-inset', iv);
+    }
+  }
+  function zbGripClear() {
+    var rs = document.documentElement.style;
+    rs.removeProperty('--zb-chat-w');
+    rs.removeProperty('--zb-chat-inset');
+  }
+  function zbGripRestore() {
+    var pct = parseFloat(localStorage.getItem(GRIP_KEY));
+    var cw = window.__zcodeBeautify.gripContentW || 0;
+    if (isFinite(pct) && pct > 0 && pct <= 100 && cw > 100) {
+      zbGripApply(zbGripPctToPx(pct, cw), cw);
+    } else {
+      zbGripClear();
+    }
+  }
+  function zbGripClean() {
+    var gl = document.getElementById(MARKER + '-grip-l');
+    var gr = document.getElementById(MARKER + '-grip-r');
+    if (gl) gl.remove();
+    if (gr) gr.remove();
+    if (window.__zcodeBeautify.gripObs) {
+      try { window.__zcodeBeautify.gripObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.gripObs = null;
+    }
+    if (window.__zcodeBeautify.gripRO) {
+      try { window.__zcodeBeautify.gripRO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.gripRO = null;
+    }
+    if (window.__zcodeBeautify.gripWinResize) {
+      window.removeEventListener('resize', window.__zcodeBeautify.gripWinResize);
+      window.__zcodeBeautify.gripWinResize = null;
+    }
+    if (window.__zcodeBeautify.gripRaf && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(window.__zcodeBeautify.gripRaf);
+    }
+    window.__zcodeBeautify.gripRaf = 0;
+    document.documentElement.classList.remove('zb-grip-active');
+    // A drag whose pointerup was lost (capture dropped, route torn down
+    // mid-drag) must not survive the cleanup: it would keep zbGripSched
+    // silenced and block the fallback-var restore forever.
+    window.__zcodeBeautify.gripDrag = null;
+    zbGripClear();
+    window.__zcodeBeautify.gripScroller = null;
+    window.__zcodeBeautify.gripHolder = null;
+    // The position cache MUST die with the strips: a fresh mount creates new
+    // elements with empty inline styles, and a stale "already written" cache
+    // would suppress the repositioning forever (measured live: remounted
+    // grips stuck at their off-screen CSS defaults).
+    window.__zcodeBeautify.gripPos = null;
+  }
+  // Analytic strip positioning DURING a drag: the column grows symmetrically
+  // around its pointerdown-time center, so each edge is cl0/cr0 ± half the
+  // applied width delta — zero layout reads (getBoundingClientRect would
+  // force a synchronous layout of the just-invalidated conversation on every
+  // step). The full zbGripSync re-baselines everything on pointerup.
+  function zbGripFollow(d) {
+    var gl = document.getElementById(MARKER + '-grip-l');
+    var gr = document.getElementById(MARKER + '-grip-r');
+    if (!gl || !gr || !d) return;
+    var px = parseFloat(document.documentElement.style.getPropertyValue('--zb-chat-w'));
+    if (!isFinite(px) || px <= 0) return;
+    var dw = px - d.w0;
+    var glk = String(Math.round(d.cl0 - dw / 2) - 4);
+    if (gl.style.left !== glk + 'px') gl.style.left = glk + 'px';
+    var grk = String(Math.round(d.cr0 + dw / 2) - 5);
+    if (gr.style.left !== grk + 'px') gr.style.left = grk + 'px';
+  }
+  function zbGripSched() {
+    // While a drag is active the drag path owns positioning (zbGripFollow);
+    // MO/RO storms from the re-rendering conversation must not queue syncs.
+    if (window.__zcodeBeautify.gripDrag) return;
+    if (window.__zcodeBeautify.gripRaf) return;
+    window.__zcodeBeautify.gripRaf = requestAnimationFrame(function() {
+      window.__zcodeBeautify.gripRaf = 0;
+      if (window.__zcodeBeautify.dragOn) {
+        try { zbGripSync(); } catch (e) {}
+      }
+    });
+  }
+  function zbGripSync() {
+    var gl = document.getElementById(MARKER + '-grip-l');
+    var gr = document.getElementById(MARKER + '-grip-r');
+    if (!gl || !gr) return;
+    // Self-heal: garbage vars left by ANY older engine generation (they all
+    // shared window.__zcodeBeautify and their observers could outlive them)
+    // make the tiers' width calc invalid → composer min-content collapse.
+    var rs0 = document.documentElement.style;
+    for (var vi = 0; vi < 2; vi++) {
+      var vn = vi === 0 ? '--zb-chat-w' : '--zb-chat-inset';
+      var vv = rs0.getPropertyValue(vn);
+      if (vv && !isFinite(parseFloat(vv))) rs0.removeProperty(vn);
+    }
+    var scroller = window.__zcodeBeautify.gripScroller;
+    if (!scroller || !scroller.isConnected) {
+      // Same rule as markChatCol: the composer's first TALL scroll ancestor.
+      scroller = null;
+      var ed = document.querySelector('[contenteditable="true"]');
+      var p = ed && ed.parentElement;
+      while (p && p !== document.body) {
+        var oy = getComputedStyle(p).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && p.getBoundingClientRect().height > 300) { scroller = p; break; }
+        p = p.parentElement;
+      }
+      window.__zcodeBeautify.gripScroller = scroller;
+      if (window.__zcodeBeautify.gripRO) {
+        try { window.__zcodeBeautify.gripRO.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.gripRO = null;
+      }
+      if (scroller && typeof ResizeObserver !== 'undefined') {
+        try {
+          var ro = new ResizeObserver(function() { zbGripSched(); });
+          ro.observe(scroller);
+          window.__zcodeBeautify.gripRO = ro;
+        } catch (e2) {}
+      }
+    }
+    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]') : null;
+    if (!holder) holder = document.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]');
+    window.__zcodeBeautify.gripHolder = holder;
+    // Content width the holder's percentage width resolves against (parent
+    // content box) — the inset var derives from it. Cached for pointermove's
+    // upper clamp.
+    var contentW = 0;
+    if (holder && holder.parentElement) {
+      var par = holder.parentElement;
+      var pcs = getComputedStyle(par);
+      contentW = par.clientWidth - (parseFloat(pcs.paddingLeft) || 0) - (parseFloat(pcs.paddingRight) || 0);
+      if (!isFinite(contentW) || contentW < 0) contentW = 0;
+    }
+    window.__zcodeBeautify.gripContentW = contentW;
+    // The stored drag width is a percent of THIS container — re-derived on
+    // every sync so maximize/restore (and any container resize) rescale the
+    // column proportionally instead of pinning an absolute px width.
+    var storedPct = parseFloat(localStorage.getItem(GRIP_KEY));
+    if (isFinite(storedPct) && storedPct > 0 && storedPct <= 100 && contentW > 100) {
+      zbGripApply(zbGripPctToPx(storedPct, contentW), contentW);
+    } else if (!window.__zcodeBeautify.gripDrag && document.documentElement.style.getPropertyValue('--zb-chat-inset')) {
+      // No stored width and not mid-drag: back to the tier fallbacks. (During
+      // a drag pointermove owns the vars — a concurrent sync must not strip
+      // the inset it just derived.)
+      document.documentElement.style.removeProperty('--zb-chat-inset');
+    }
+    var sr = scroller ? scroller.getBoundingClientRect() : null;
+    var hr = holder ? holder.getBoundingClientRect() : null;
+    if (!scroller || !holder || !sr || !hr || hr.width < 40 || sr.height < 80) {
+      if (gl.style.display !== 'none') { gl.style.display = 'none'; gr.style.display = 'none'; }
+      return;
+    }
+    if (gl.style.display === 'none') { gl.style.display = ''; gr.style.display = ''; }
+    // Write styles only on change — this sync runs on every rAF-coalesced
+    // mutation tick while streaming.
+    var gs = window.__zcodeBeautify.gripPos || (window.__zcodeBeautify.gripPos = {});
+    var lt = Math.round(sr.top) + '|' + Math.round(sr.height) + '|' + Math.round(hr.left);
+    if (gs.l !== lt) {
+      gs.l = lt;
+      gl.style.top = sr.top + 'px';
+      gl.style.height = sr.height + 'px';
+      gl.style.left = (Math.round(hr.left) - 4) + 'px';
+    }
+    var rt = Math.round(sr.top) + '|' + Math.round(sr.height) + '|' + Math.round(hr.right);
+    if (gs.r !== rt) {
+      gs.r = rt;
+      gr.style.top = sr.top + 'px';
+      gr.style.height = sr.height + 'px';
+      gr.style.left = (Math.round(hr.right) - 5) + 'px';
+    }
+  }
+  function zbGripEsc(e) {
+    var d = window.__zcodeBeautify.gripDrag;
+    if (e.key === 'Escape' && d && d.cancel) d.cancel();
+  }
+  function zbGripWire(g, isRight) {
+    if (g.__zbGrip) return;
+    g.__zbGrip = true;
+    g.addEventListener('pointerdown', function(e) {
+      if (e.button !== 0 || !window.__zcodeBeautify.dragOn) return;
+      var holder = window.__zcodeBeautify.gripHolder;
+      if (!holder || !holder.isConnected) return;
+      e.preventDefault();
+      // Hygiene: a previous drag whose pointerup was lost must not linger —
+      // it would keep the observers silenced and the vars pinned mid-drag.
+      // cancel() itself nulls gripDrag and restores the tier fallbacks.
+      var stale = window.__zcodeBeautify.gripDrag;
+      if (stale && stale.cancel) {
+        try { stale.cancel(); } catch (e0) {}
+      }
+      // ONE layout read for the whole drag: the holder rect anchors both the
+      // start width and the analytic edge positions zbGripFollow derives.
+      var hr = holder.getBoundingClientRect();
+      var d = { x0: e.clientX, w0: hr.width, cl0: hr.left, cr0: hr.right, q: 0 };
+      d.cancel = function() {
+        if (window.__zcodeBeautify.gripDrag !== d) return;
+        window.__zcodeBeautify.gripDrag = null;
+        zbGripRestore();
+        g.classList.remove('zb-grip-drag');
+        document.documentElement.classList.remove('zb-grip-active');
+        zbGripSync();
+      };
+      window.__zcodeBeautify.gripDrag = d;
+      try { g.setPointerCapture(e.pointerId); } catch (err) {}
+      g.classList.add('zb-grip-drag');
+      document.documentElement.classList.add('zb-grip-active');
+    });
+    g.addEventListener('pointermove', function(e) {
+      var d = window.__zcodeBeautify.gripDrag;
+      if (!d) return;
+      // Symmetric growth: the column stays centered, so a 1px pointer move
+      // widens it by 2px from either edge. The var write is cheap and runs
+      // synchronously — rAF is throttled to zero in occluded windows, and a
+      // drag must never depend on it. Updates are QUANTIZED to GRIP_STEP
+      // (8 pointer px = 16 width px): each step costs the virtualizer a full
+      // re-measure of the conversation, so per-pointermove updates reflow the
+      // whole list 60×/s and the drag stutters (user-measured jank).
+      var q = Math.round((e.clientX - d.x0) / GRIP_STEP);
+      if (q === d.q) return;
+      d.q = q;
+      var w = d.w0 + q * GRIP_STEP * 2 * (isRight ? 1 : -1);
+      if (!isFinite(w)) return;
+      var cw = window.__zcodeBeautify.gripContentW;
+      if (!isFinite(cw) || cw <= 100) {
+        cw = window.__zcodeBeautify.gripScroller ? window.__zcodeBeautify.gripScroller.clientWidth : 0;
+        if (!isFinite(cw) || cw <= 100) cw = (window.innerWidth || 1920) - 2 * GRIP_MARGIN;
+      }
+      var maxW = cw - GRIP_MARGIN;
+      if (maxW < GRIP_MIN) maxW = GRIP_MIN;
+      zbGripApply(Math.max(GRIP_MIN, Math.min(maxW, Math.round(w))), cw);
+      zbGripFollow(d);
+    });
+    var up = function() {
+      var d = window.__zcodeBeautify.gripDrag;
+      if (!d) return;
+      window.__zcodeBeautify.gripDrag = null;
+      // Persist as a percent of the container (DeepSeek mechanism): the next
+      // sync re-derives px from the live container, so maximize/restore
+      // rescale proportionally. pxApplied is already drag-clamped, so the
+      // pct lands inside the valid range by construction.
+      var pxApplied = parseFloat(document.documentElement.style.getPropertyValue('--zb-chat-w'));
+      if (!isFinite(pxApplied) || pxApplied <= 0) pxApplied = d.w0;
+      var cwUp = window.__zcodeBeautify.gripContentW;
+      if (isFinite(cwUp) && cwUp > 100) {
+        var pctUp = Math.max(5, Math.min(100, Math.round(pxApplied / cwUp * 10000) / 100));
+        try { localStorage.setItem(GRIP_KEY, String(pctUp)); } catch (e2) {}
+      }
+      g.classList.remove('zb-grip-drag');
+      document.documentElement.classList.remove('zb-grip-active');
+      zbGripSync();
+    };
+    g.addEventListener('pointerup', up);
+    g.addEventListener('pointercancel', function() {
+      var d = window.__zcodeBeautify.gripDrag;
+      if (d && d.cancel) d.cancel();
+    });
+    // Double-click resets: the dragged width is gone, the tier fallbacks
+    // (原生 or 消息流宽度档位) rule again on the next sync.
+    g.addEventListener('dblclick', function() {
+      try { localStorage.removeItem(GRIP_KEY); } catch (e3) {}
+      zbGripClear();
+      zbGripSync();
+    });
+  }
 
   // --- user message bubble look (聊天气泡) -----------------------------------
   // Targets the stable v4 data attribute (not Tailwind class hashes) and
@@ -810,6 +1260,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // (stock bubble); unknown presets degrade the same way. BUB/BUB_ROW/RECIPES
   // are declared at the TOP of this body (fast-path ordering — see there).
   function applyBubbleLook() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
     var B;
     try { B = JSON.parse(BUBBLE); } catch (e) { return; }
     var st = document.getElementById(MARKER + '-bubble-style');
@@ -852,6 +1303,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // mode "default" or a missing image removes the loading rules; the terminal
   // slots live independently of mode.
   function applySpinnerLook() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
     var S;
     try { S = JSON.parse(SPIN); } catch (e) { return; }
     var loadingOn = S && S.mode === 'image' && S.image;

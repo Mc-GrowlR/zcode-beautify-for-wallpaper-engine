@@ -4,6 +4,8 @@
 
 Beautify the **ZCode desktop client**: use any image — or any **video / Wallpaper Engine scene wallpaper** — as a background wallpaper and adapt the whole UI with Material Design 3 (Monet) dynamic color; restyle the chat area (message bubbles, conversation-column width, a large-session smooth mode) — plus a live settings panel for real-time tuning.
 
+> 🧩 **Since 0.5.0 the same plugin also targets the WorkBuddy desktop client.** Pass `--target workbuddy` (or install it through the bundled `.codebuddy-plugin` manifest, which sets `BEAUTIFY_TARGET=workbuddy`): the wallpaper layer and Monet palette are re-mapped onto WorkBuddy's `--wb-*` design tokens. Ports (9222/9333 CDP, 9223/9334 API), data dirs and launcher entries are isolated per client, so both can run at once. Chat-area extras stay ZCode-only — they bind to ZCode's DOM, and the panel hides those tabs automatically under WorkBuddy.
+
 > 📷 Screenshot welcome — PRs adding one to `docs/screenshot.png` are appreciated.
 
 ## Features
@@ -20,6 +22,7 @@ Beautify the **ZCode desktop client**: use any image — or any **video / Wallpa
 
 - **Chat bubbles** — five presets for your own message bubbles (`accent` tint, `glass` blur, `outline`, `flat`, or stock `default`), plus tint strength, corner radius, width and alignment controls, a bubble style editor with a saved personal style library, and custom CSS support. Colors reference live theme tokens, so a Monet re-theme restyles the bubbles too.
 - **Conversation width** — widen or narrow the message column: stock / wide tiers / three narrow tiers / fully custom (cap + inset in rem). Injected as a **formula** (rem cap + `calc()` inset) rather than a fixed width, so it keeps following window resizes exactly like the native layout and never overflows into the input bar.
+- **Drag-to-resize handles** (off by default) — two hidden vertical strips hugging the conversation column edges: hover reveals a 3px accent line, dragging resizes the column symmetrically (DeepSeek-style), double-click resets to the width tier, Esc cancels a drag. The dragged width persists locally and outranks the tiers; before the first drag the layout is pixel-identical to stock.
 - **Large-session smooth mode** (off by default) — message rows far outside the viewport are measured first, then skipped for layout and painting (`content-visibility:auto` with accurate `contain-intrinsic-size`). On a 51 MB session clone this cut first-open time by **~41%** with zero scrollbar distortion; long chats scroll smoother.
 - **Elapsed-time decimal trim** (off by default) — the working-row elapsed time under the conversation drops its fractional seconds ("53.4 秒" → "53 秒"), rewritten live; toggling off restores stock.
 
@@ -47,7 +50,7 @@ It never modifies ZCode's installation files, so ZCode upgrades are unaffected.
 ## Requirements
 
 - Node.js ≥ 20 available on your PATH.
-- ZCode desktop client (Windows / macOS / Linux).
+- **ZCode** or **WorkBuddy** desktop client (Windows / macOS / Linux). Pass `--target workbuddy` to switch; ZCode is the default.
 - For dynamic wallpapers (optional): **Wallpaper Engine** (Steam) and **ffmpeg ≥ 5.0** on PATH — both are auto-detected, and the panel shows install guidance when missing. Capture uses the Desktop Duplication API, so dynamic import is **Windows-only**; static image wallpapers work everywhere.
 
 ## Two packages, both installable by handing an AI the link
@@ -114,7 +117,8 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 
 | Command | Purpose |
 |---|---|
-| `launch [--port N]` | Start ZCode with `--remote-debugging-port` (quit ZCode first) |
+| `--target zcode\|workbuddy\|auto` | Global flag: pick the client to beautify (default `zcode`, `auto` detects the installed one); same as the `BEAUTIFY_TARGET` env var |
+| `launch [--port N]` | Start the client with `--remote-debugging-port` (quit it first); 9222 for ZCode, 9333 for WorkBuddy |
 | `apply <image> [--blur] [--dim] [--fit] [--no-monet]` | Set wallpaper + adapt colors (`--fit cover\|contain\|smart`) |
 | `apply-scene <pkg-or-dir>` | Import a Wallpaper Engine scene / video wallpaper end-to-end |
 | `colors` | Re-apply the stored theme without changing the image |

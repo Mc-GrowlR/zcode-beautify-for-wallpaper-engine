@@ -22,9 +22,25 @@ If the user's goal is "just make my ZCode pretty" → continue below.
 If they want to beautify a non-ZCode app or develop their own → read
 `skill-pack/SKILL.md` instead and stop following this file.
 
+## Which client are we beautifying?
+
+Since 0.5.0 the same plugin supports **ZCode** and **WorkBuddy**. Pick the
+target before running any command:
+
+| User's client | How to target it | CDP / API port |
+|---|---|---|
+| ZCode | default (nothing to add) | 9222 / 9223 |
+| WorkBuddy | `--target workbuddy`, or env `BEAUTIFY_TARGET=workbuddy` | 9333 / 9334 |
+
+WorkBuddy is installed through `.codebuddy-plugin/` (its marketplace manifest
+already sets `BEAUTIFY_TARGET=workbuddy`), ZCode through `.zcode-plugin/`. The
+two clients can run side by side: ports, data dirs and launcher entries are
+isolated. Chat-area extras (bubbles, column width, spinner icons) are
+ZCode-only and are skipped automatically under WorkBuddy.
+
 ## What you are installing
 
-`zcode-beautify` v0.4.6 — a ZCode plugin that adds a wallpaper layer +
+`zcode-beautify` v0.5.1 — a plugin that adds a wallpaper layer +
 Material Design 3 (Monet) dynamic color to the ZCode desktop client over CDP,
 with a `/beautify` slash command, MCP tools (`set_background`, `apply_options`,
 `refresh_theme`, `reset_appearance`, `beautify_status`), and a live settings

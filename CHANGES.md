@@ -12,6 +12,35 @@
 > 0.4.7：大会话流畅模式——消息行屏外跳过渲染（content-visibility），大上下文会话打开与滚动更省。
 > 0.4.8：运行中图标——会话列表左侧"正在对话"转圈标志可换为图片 / GIF 动图；侧边栏压暗——左侧会话栏可单独加深；关于页检查更新——对照 GitHub Releases 一键查询新版本。
 > 0.4.9：耗时秒数去小数——对话下方"工作中"耗时的秒数不再显示小数位（53.4 秒 → 53 秒）；作者信息改为 fork 维护者 Mc-GrowlR（关于页/插件元数据，上游溯源保留）。
+> 0.5.1：两侧拖拽调宽——对话列左右边缘的隐形竖条，悬停现形、拖动调宽（参考 DeepSeek 聊天页的拖拽边条交互）。
+
+## 0.5.1 — 两侧拖拽调宽
+
+> 参考 DeepSeek 聊天页的拖拽边条：对话列左右边缘各有一条隐形竖条，平时完全不可见，鼠标靠近时浮现一条 3px 主题色竖线（`col-resize` 光标），拖动即对称加宽/收窄中间对话列。
+
+- **新配置 `chatLook.dragResize`（两侧拖拽调宽，默认 0=关）**：开启后 bootstrap 挂载两条 9px 定宽命中条（`position:fixed`，`z-index:40`，位于 Tailwind z-50 弹层之下），贴住对话列实时矩形左右边缘——列的位置由「输入框第一个高滚动祖先」+ 对话列类名定位（与 markChatCol 同规则），rAF 合流的 MutationObserver + 滚动容器 ResizeObserver + window resize 三路跟踪，路由切换/侧边栏开合/流式输出期间都保持贴合；非聊天路由（设置页等）自动隐藏。
+- **拖拽即公式，不定值**：拖动写两个 px 变量——`--zb-chat-w`（拖拽上限）与 `--zb-chat-inset`（引擎按 `max(16px, 容器内容宽 − W)` 实时派生的两侧留白），注入的两档规则读它们：`max-width:var(--zb-chat-w,档位上限)` + `width:calc(100% - var(--zb-chat-inset,档位留白))`。留白必须随拖拽收窄：固定 24rem 留白会把 1920 窗口的列宽死顶在 `100% − 384px`，拖过去就是死区（实测发现后改为派生）。`calc(100% − inset)` 保留 ZCode 原生的窗口跟随机制（定值宽度缩小窗口必溢出，见 0.4.5 结论），派生留白 ≥16px 保证宽度永不为负；竖条位置每帧从真实 `getBoundingClientRect` 重取，与公式解耦。
+- **未拖拽 = 零视觉变化**：两档 fallback 复刻原生（56rem/6rem、72rem/24rem）或当前档位（cap>0 时），开启开关后不拖拽就与原生/档位完全一致；中档规则在前、宽档在后（同特异性后者胜），元素同时携带两个类名时宽档正确接管。
+- **持久化与复位（占比机制，参考 DeepSeek 的宽度记忆）**：拖拽宽度按**容器占比**（percent，0-100）存 `localStorage['zcode-beautify:chat-drag-pct']`，每次 sync 从实时容器内容宽重新派生 px——**窗口最大化/还原（以及侧边栏开合、任何容器尺寸变化）时列宽等比缩放跟随**，而不是钉死一个绝对宽度（旧 rem 方案的问题：还原后被顶满、最大化后又显得窄）。**双击竖条**清除占比回档位设置；拖动中 **Esc** 取消本次拖动；拖动对称增宽（1px 指针位移 = 2px 列宽，8px 量化步进），下限 460px，上限 = 容器内容宽 − 16px（两侧各留 16px 呼吸位）；旧 rem key（chat-drag-w）挂载时自动清除。
+- **面板**：「聊天」页「聊天区」新增"两侧拖拽调宽"开关（zb-chat-drag），与流畅模式同款 pushChatLook 链路；MCP `apply_options` 新增 `chat_drag_resize` 布尔参数（部分补丁语义）。
+- **拖拽性能（用户实测卡顿后修复）**：① 对话列自带 `transition-[width,max-width] duration-150`——每个宽度步都触发 150ms 动画重排、布局永不收敛，拖拽期间（html.zb-grip-active）强制 `transition:none`；② 宽度更新按 8px 指针量化（列宽 16px/步）——动态高度虚拟列表对每次宽度变化全量重测，连续 1px 更新等于每秒 60 次全量重排；③ 拖拽中竖条改**解析式贴边**（拖拽起点列矩形 + 已应用宽度直接推算边缘，零 getBoundingClientRect 强制布局），文档级 MO/RO 在拖拽期间静默（拖拽路径自持定位，回灌风暴全部跳过）；④ 移除拖拽期 `*{cursor:col-resize!important}` 全元素选择器。
+- **注入引擎健壮性（实机调试发现）**：① `Page.addScriptToEvaluateOnNewDocument` 每次注入**累积注册且无法反注册**，页面一重载所有历史版本 bootstrap 依次重跑——最老版本先挂载竖条并绑定旧事件代码，后续版本见 id 已存在就跳过。竖条带 `data-zb-ver` 版本标记（GRIP_VER），最新引擎发现旧版竖条即强制重挂重绑；② Chromium 对被遮挡窗口把 rAF 节流到 0——挂载后的首次定位必须同步执行，不能只靠 rAF 合流；③ 竖条位置缓存（gripPos）必须随竖条销毁一起清空，否则重挂载后"已写过"的缓存会永久压制样式写入。
+- **输入框塌缩修复（用户实测：拖动时输入框缩成 ~40px 竖条）**：根因是宽度变量被写入 `NaNpx`（多代引擎共享 `window.__zcodeBeautify` 状态、旧代观察器存活所致）——`width:calc(100% - var(--zb-chat-inset))` 遇非法 var 整条声明在计算值阶段失效退回 auto：消息列父容器是块级（auto=撑满，无症状），而**输入框 holder 的父容器是 `flex justify-center` 行（auto=按 min-content 收缩）**，于是只有输入框塌缩。四层防御：`zbGripApply` 硬门禁（非有限 px/NaN contentW 一律拒写）；每次 sync 自愈（存量非有限 var 直接移除）；GRIP_VER 重挂时**全量清场**（zbGripClean 断开旧代观察器/resize 监听/卡死的 drag 状态——卡死的 drag 会永久静默观察器并卡住变量）；pointerdown 先取消残留 drag；外加拖拽期 `min-width:460px` 字面量地板（任何垃圾值都无法再塌缩输入框）。
+- 测试：t24（normalize 钳制、payload 透传、jsdom 跑真实 bootstrap：挂载/卸载与变量清理、拖拽档位 fallback 复刻档位公式、双击复位、全部关掉时整体退场）；t25 实机 E2E（走真实 /api/config：挂载贴合、合成指针拖拽、近全宽死区验证、Esc 取消、双击复位、面板开关回显、开关卸载）。
+
+## 0.5.0 — 双客户端：WorkBuddy 支持
+
+> 同一套注入引擎现在可以美化 **ZCode** 与 **WorkBuddy** 两个桌面客户端。目标由 `--target` 或 `BEAUTIFY_TARGET` 选择，默认仍是 ZCode（老安装零改动）。
+
+- **目标抽象层 `src/core/target.ts`**：把"哪个客户端"收敛成一份 profile——可执行文件探测（环境变量 → 常规安装路径 → 注册表 App Paths / Uninstall `DisplayIcon` → `reg.exe` 被策略拦截时改用 PowerShell 兜底）、进程名、数据目录、渲染器 URL/标题匹配、更新窗口标记、启动附加参数、侧边栏锚点、启动屏探针、启动项修复范围。`launch.ts` / `inject.ts` / `tokens.ts` / `cdp.ts` / `launchers.ts` / `server.ts` / `mcp` / `cli` 全部改为读 profile。
+- **端口隔离**：ZCode 沿用 `9222`（CDP）/ `9223`（控制 API），WorkBuddy 使用 `9333` / `9334`。`/api/health` 新增 `target` 字段，serve 自检与 MCP 自动拉起都校验目标——两个客户端同时开着时，不会把 WorkBuddy 的壁纸注进 ZCode 窗口，也不会共用同一个 serve。
+- **WorkBuddy 配色映射（`--wb-*` 设计变量）**：不再套 ZCode 的 `--color-*`，改为覆盖 `--wb-bg-*`（`bg-primary` 透明、`bg-content/secondary/card/elevated/popover/modal` 按壁纸透显分级）、`--wb-color-text-*` / `--wb-text-*`、`--wb-border-*`、`--wb-color-bg-*` 控件底色，并用 MD3 primary 色阶整条重建 `--wb-palette-brand-1..10`——按钮、链接、选中态、焦点环一次性跟随壁纸。选择器用 `html[data-theme=light|dark]` / `html.cb-*`（0,1,1），稳压应用自身 `[data-theme=dark]`（0,1,0），水合重渲染也不会被盖回。
+- **WorkBuddy 启动屏**：以 `#sk-overlay` / `#skeleton-root` 可见 + `#root` 空为判据，启动骨架期间不挂壁纸与面板（`startupClean` 语义不变）。
+- **聊天区增强仅 ZCode**：气泡、消息流宽度、运行中图标、耗时去小数、队列遮罩绑定 ZCode 的 DOM；WorkBuddy 目标下这些配置被强制归零（避免旧配置注入无效规则），面板隐藏「聊天」页签与"更新界面显示壁纸"开关，文案统一替换为 WorkBuddy。
+- **WorkBuddy 插件包**：新增 `.codebuddy-plugin/plugin.json`（`mcpServers` + `skills` + `commands`，`BEAUTIFY_TARGET=workbuddy`）与 `.codebuddy-plugin/marketplace.json`，仓库可直接作为 WorkBuddy 插件市场添加；ZCode 的 `.zcode-plugin/plugin.json` 原样保留，两个清单共存。
+- **启动项修复**：`psScript` 的 exe 通配与注册表键改为按目标注入。WorkBuddy 只修快捷方式 + `workbuddy://` 深链，**不碰**其文件类型处理器（`WorkBuddy.image` / `.pdfX` 等），避免破坏"打开方式"。
+- **CLI**：新增全局 `--target zcode|workbuddy|auto`，端口默认值、错误提示、`launch`/`status` 文案随目标变化。
+- 测试：t23（WorkBuddy payload 变量族、无 ZCode token / 队列规则泄漏、聊天增强归零、bootstrap/面板探针与文案改写、ZCode 侧不回归）。
 
 ## 0.4.9
 

@@ -14,12 +14,33 @@ import { bubbleRecipes, BUBBLE_SELECTOR_PREVIEW } from "../core/bubbleRecipes.js
 
 export const PANEL_ROOT_ID = "zcode-beautify-panel-root";
 
-export function buildPanelScript(apiPort: number, apiToken = "", startupClean = true): string {
+export interface PanelScriptOptions {
+  /** Product name shown in copy ("ZCode" / "WorkBuddy"). */
+  appName?: string;
+  /** Chat-area extras (bubbles / column width / spinner icons) available? */
+  chatUi?: boolean;
+  /** Does the client have an update-progress window worth theming? */
+  hasUpdater?: boolean;
+}
+
+export function buildPanelScript(
+  apiPort: number,
+  apiToken = "",
+  startupClean = true,
+  opts: PanelScriptOptions = {}
+): string {
   const api = `http://127.0.0.1:${apiPort}`;
-  return `(function(){
+  const appName = opts.appName ?? "ZCode";
+  const chatUi = opts.chatUi !== false;
+  const hasUpdater = opts.hasUpdater !== false;
+  const script = `(function(){
   var API = ${JSON.stringify(api)};
   var TOKEN = ${JSON.stringify(apiToken)};
   var STARTUP_CLEAN = ${JSON.stringify(startupClean !== false)};
+  var APP_NAME = ${JSON.stringify(appName)};
+  var CHAT_UI = ${JSON.stringify(chatUi)};
+  var HAS_UPDATER = ${JSON.stringify(hasUpdater)};
+  var PROBE = ${JSON.stringify(opts.appName === "WorkBuddy" ? "workbuddy-skeleton" : "zcode-body-class")};
   var VERSION = ${JSON.stringify(VERSION)};
   var REPO_URL = ${JSON.stringify(REPO_URL)};
   var FORK_URL = ${JSON.stringify(FORK_URL)};
@@ -598,6 +619,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       '        <input type="number" id="zb-chat-width-inset" min="0" max="24" step="1" title="两侧留白,单位 rem(原生 24;0=贴边)"><span class="zb-val">rem留白</span>' +
       '        <button class="zb-btn" id="zb-chat-width-ok" title="应用这两个数值并关闭编辑">✓ 应用</button>' +
       '        <button class="zb-btn" id="zb-chat-width-cancel" title="放弃修改并关闭编辑">✕</button></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">两侧拖拽调宽</span><span class="zb-set-sub">对话列左右边缘出现隐形竖条:悬停现形、拖动改列宽;宽度按窗口占比记忆,最大化/还原等比跟随;双击竖条恢复档位,优先于上方档位</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-drag" title="在对话列两侧挂载隐形拖拽条:悬停显示主题色竖线,拖动对称加宽/收窄对话列;拖拽宽度按容器占比持久化,窗口最大化/还原时等比缩放;双击清除拖拽宽度回到档位设置,Esc 取消本次拖动"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">大会话流畅模式</span><span class="zb-set-sub">消息行屏外跳过渲染(官方仅分享视图有此优化);大上下文会话的打开与滚动更省,首次渲染可能轻微高度跳动</span></div>' +
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="给消息行注入 content-visibility:auto:视口外的行跳过绘制与布局,滚入时再渲染;行高记忆上次实测值,不影响虚拟滚动"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">耗时秒数去小数</span><span class="zb-set-sub">对话下方"工作中"耗时的秒数不带小数位(53.4 秒 → 53 秒)</span></div>' +
@@ -829,6 +852,21 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>';
   document.body.appendChild(root);
 
+  // The chat tab drives ZCode's DOM (bubbles, column width, spinner icons).
+  // Other clients keep the pane hidden and lose the tab, so no control can
+  // promise a feature the injected CSS cannot deliver.
+  if (!CHAT_UI) {
+    var zbChatTab = root.querySelector('.zb-tab[data-tab="chat"]');
+    if (zbChatTab) zbChatTab.remove();
+  }
+  // No update-status window on the client → drop the toggle instead of
+  // offering a switch that can never do anything.
+  if (!HAS_UPDATER) {
+    var zbUw = root.querySelector('#zb-updater-wp');
+    var zbUwRow = zbUw && zbUw.closest('.zb-set');
+    if (zbUwRow) zbUwRow.remove();
+  }
+
   function $(id) { return document.getElementById(id); }
   function wallpaperEl() { return document.getElementById('zcode-beautify-wallpaper'); }
   function status(msg) {
@@ -994,7 +1032,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
       $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
-      setChatSliders(0, 0, 0, 0, 0, 0, 0);
+      setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -1042,7 +1080,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
@@ -1215,7 +1253,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
@@ -1224,6 +1262,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
     if (perfEl) perfEl.checked = perf === 1;
     var decEl = $('zb-chat-elapsed');
     if (decEl) decEl.checked = dec === 1;
+    var dragEl = $('zb-chat-drag');
+    if (dragEl) dragEl.checked = drag === 1;
     reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again — inline
@@ -1257,7 +1297,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
           widthCapRem: widthServerCap,
           widthInsetRem: widthServerInset,
           perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
-          hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0
+          hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0,
+          dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -1309,6 +1350,7 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   });
   $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
   $('zb-chat-elapsed') && $('zb-chat-elapsed').addEventListener('change', pushChatLook);
+  $('zb-chat-drag') && $('zb-chat-drag').addEventListener('change', pushChatLook);
   ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
     $(id).addEventListener('change', function () {
       var max = id === 'zb-chat-width-cap' ? 120 : 24;
@@ -3501,6 +3543,12 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   // come back after a reload. Wait for the parser (a few ms at most).
   var zbStartupOn = function() {
     if (!document.body) return false;
+    if (PROBE === 'workbuddy-skeleton') {
+      var sk = document.querySelector('#sk-overlay, #skeleton-root');
+      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
+      var root = document.querySelector('#root');
+      return !root || root.childElementCount === 0;
+    }
     var cls = document.body.className || '';
     return /zcode-startup/.test(cls) && !/ready/.test(cls);
   };
@@ -3520,4 +3568,8 @@ export function buildPanelScript(apiPort: number, apiToken = "", startupClean = 
   };
   zbPanelWait();
 })();`;
+  // Copy is written once, against the primary client; rename it for the
+  // active target. Only capitalized "ZCode" appears in prose/titles — all
+  // identifiers are lowercase (zcode-beautify-*), so this cannot corrupt them.
+  return appName === "ZCode" ? script : script.replace(/ZCode/g, appName);
 }

@@ -4,6 +4,8 @@
 
 美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI；还能美化聊天区（消息气泡、对话列宽度、大会话流畅模式）——并附带实时悬浮设置面板。
 
+> 🧩 **0.5.0 起同时支持 WorkBuddy 桌面客户端**：加 `--target workbuddy`（或使用仓库内 `.codebuddy-plugin` 清单，已内置 `BEAUTIFY_TARGET=workbuddy`）即可把壁纸与莫奈配色注入 WorkBuddy。两个客户端的 CDP 端口（9222 / 9333）、控制 API 端口（9223 / 9334）、数据目录、启动项全部隔离，可同时开着互不干扰。WorkBuddy 使用其 `--wb-*` 设计变量族取色；气泡 / 消息流宽度 / 运行中图标这些聊天区增强仍为 ZCode 专属（绑定 ZCode 的 DOM），WorkBuddy 上面板会自动隐藏对应页签。
+
 > 📷 欢迎贡献截图——向 `docs/screenshot.png` 提 PR 即可。
 
 ## 功能
@@ -20,6 +22,7 @@
 
 - **聊天气泡**——你发出的消息气泡五种预设（`accent` 主题色染色、`glass` 毛玻璃、`outline` 描边、`flat` 扁平、`default` 原生），加上染色强度、圆角、宽度、左右对齐滑杆，气泡样式编辑器与个人样式库，以及自定义 CSS 支持。颜色全部引用实时主题 token，莫奈换主题时气泡自动跟随。
 - **消息流宽度**——加宽或收窄对话列：原生 / 宽档位 / 三档窄宽度 / 完全自定义（rem 上限 + 留白）。注入的是**公式**（rem 上限 + `calc()` 留白）而非定值宽度，随窗口缩放与原生同机制跟随，永不溢出、不破坏输入栏。
+- **两侧拖拽调宽**（默认关）——对话列左右边缘的隐形竖条：悬停浮现 3px 主题色竖线，拖动对称加宽/收窄对话列（DeepSeek 式交互），双击竖条恢复档位设置，Esc 取消本次拖动。拖拽宽度存本地、优先于档位；未拖拽时布局与原生逐像素一致。
 - **大会话流畅模式**（默认关）——对远屏外的消息行先量真实高度再跳过布局与绘制（`content-visibility:auto` + 精确 `contain-intrinsic-size`）。51MB 会话实测打开耗时 **-41%**、滚动条零失真；长会话滚动更顺。
 - **耗时秒数去小数**（默认关）——对话下方"工作中"耗时的秒数隐藏小数位（53.4 秒 → 53 秒），实时改写、关闭即恢复原生。
 
@@ -42,12 +45,23 @@ ZCode 是 Electron 应用，UI 主题由 Tailwind v4 的 `--color-*` CSS 自定�
    - 可选的聊天区样式层：气泡样式、消息流宽度公式、屏外消息行跳过渲染；
 3. `serve` 模式保持注入会话不关闭，主题、设置面板与定时轮播在渲染器刷新后自动存活。
 
-不修改任何安装文件，ZCode 升级不受影响。
+不修改任何安装文件，升级不受影响。
+
+### WorkBuddy 适配说明
+
+WorkBuddy 与 ZCode 同为 Electron 客户端，但配色体系不同：它由一套 `--wb-*` 设计变量驱动（`--wb-bg-primary`、`--wb-bg-content`、`--wb-color-text-*`、`--wb-palette-brand-1..10` 等，渲染层引用约 2.8 万次）。插件对 WorkBuddy 的注入内容相应替换为：
+
+1. 壁纸层挂到 `documentElement`，`html / body / #root` 背景置透明；
+2. 表面类变量按壁纸透显分级（`bg-primary` 完全透明，`bg-content/secondary` 半透，`card/elevated/popover` 更实），文字与边框取 MD3 的 on-surface / outline；
+3. 用壁纸的 MD3 primary 色阶整条重建 `--wb-palette-brand-1..10`，按钮、链接、选中态、焦点环一次跟随；
+4. 选择器写成 `html[data-theme=light|dark]`（特异性 0,1,1），稳压应用自身 `[data-theme=dark]`（0,1,0），React 水合重渲染也不会被盖回。
+
+气泡、消息流宽度、运行中图标、耗时去小数、队列遮罩这些依赖 ZCode 具体 DOM 的增强不会注入 WorkBuddy（面板自动隐藏对应页签）。
 
 ## 环境要求
 
 - Node.js ≥ 20，已加入 PATH。
-- ZCode 桌面客户端（Windows / macOS / Linux）。
+- **ZCode 或 WorkBuddy** 桌面客户端（Windows / macOS / Linux）。用 `--target workbuddy` 切换到 WorkBuddy；不传时默认 ZCode。
 - 动态壁纸（可选）：**Wallpaper Engine**（Steam）与 **ffmpeg ≥ 5.0**（PATH）——两者均自动检测，缺失时面板会给出安装引导。捕获依赖 Desktop Duplication API，动态导入仅限 **Windows**；静态图片壁纸全平台可用。
 
 ## 两种包，都可以直接把链接扔给 AI 安装
@@ -80,6 +94,14 @@ https://github.com/Logocceai/zcode-beautify
 
 仓库内已附带 `dist/` 预构建单文件产物，无需本地构建。
 
+### 方式 C —— WorkBuddy 插件市场
+
+1. 打开 WorkBuddy → **设置 → 插件管理 → 发现**。
+2. 点 **+**，把本仓库目录（或 GitHub URL）添加为插件市场——WorkBuddy 读取的是仓库内的 `.codebuddy-plugin/marketplace.json`。
+3. 安装 *zcode-beautify-workbuddy*。清单会把 MCP 服务指向 `dist/mcp/server.js` 并带上 `BEAUTIFY_TARGET=workbuddy`，`/beautify` 命令与 MCP 工具随之可用。
+
+WorkBuddy 首次使用仍需带调试端口重启一次（见下），`launch --target workbuddy` 会自动补全其快捷方式与 `workbuddy://` 深链。
+
 ### 方式 B —— clone 直接运行
 
 ```bash
@@ -106,11 +128,29 @@ node dist/cli.js serve --detach
 
 也可以直接在 ZCode 里输入 `/beautify <图片路径>` 让智能体操作，之后说"模糊调高一点"即可；或输入 `/bubble 玻璃质感 圆角大一点`，用一句话改气泡样式。
 
+### 给 WorkBuddy 用
+
+```bash
+# 1) 完全退出 WorkBuddy 后执行一次：带 CDP 端口(9333)重启，并修复快捷方式
+node dist/cli.js launch --target workbuddy
+
+# 2) 设壁纸 + 莫奈配色 + 面板（控制 API 端口 9334）
+node dist/cli.js serve --detach --target workbuddy
+node dist/cli.js apply "D:\pictures\wallpaper.jpg" --target workbuddy --dim 25
+```
+
+也可以直接用环境变量固定目标，省掉每条命令的 `--target`：
+
+```bash
+set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbuddy"
+```
+
 ## CLI 命令
 
 | 命令 | 用途 |
 |---|---|
-| `launch [--port N]` | 以调试端口启动 ZCode（需先完全退出） |
+| `--target zcode\|workbuddy\|auto` | 全局参数：选择要美化的客户端（默认 zcode；`auto` 按已安装的客户端推断），等价于环境变量 `BEAUTIFY_TARGET` |
+| `launch [--port N]` | 以调试端口启动客户端（需先完全退出）；ZCode 默认 9222，WorkBuddy 默认 9333 |
 | `apply <image> [--blur] [--dim] [--fit] [--no-monet]` | 设壁纸并适配配色（`--fit cover\|contain\|smart`） |
 | `apply-scene <pkg-or-dir>` | 端到端导入 Wallpaper Engine 场景 / 视频壁纸 |
 | `colors` | 不换图，重新应用已存主题 |

@@ -29,6 +29,7 @@ import { themeFromSourceColor, argbFromRgb } from "@material/material-color-util
 import { buildPanelScript } from "../panel/panelScript.js";
 import { VERSION, FORK_URL, cmpVersion } from "../version.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
+import { target as appTarget } from "./target.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
 import { listWeWallpapers, resolveWePreview, weDirForPath, weTitleForPath } from "./weLibrary.js";
@@ -263,10 +264,10 @@ function publicConfig(config: BeautifyConfig) {
     taskSpinnerLook: normalizeTaskSpinnerLook(config.taskSpinnerLook),
     spinnerImageUrl:
       normalizeTaskSpinnerLook(config.taskSpinnerLook).mode === "image"
-        ? resolveSpinnerImageRef(config.taskSpinnerLook?.image ?? "", config.apiPort ?? 9223, mediaToken)
+        ? resolveSpinnerImageRef(config.taskSpinnerLook?.image ?? "", config.apiPort ?? appTarget().apiPort, mediaToken)
         : "",
-    spinnerUnreadUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.unreadImage ?? "", config.apiPort ?? 9223, mediaToken),
-    spinnerErrorUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.errorImage ?? "", config.apiPort ?? 9223, mediaToken),
+    spinnerUnreadUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.unreadImage ?? "", config.apiPort ?? appTarget().apiPort, mediaToken),
+    spinnerErrorUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.errorImage ?? "", config.apiPort ?? appTarget().apiPort, mediaToken),
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -328,6 +329,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
         : 0,
       perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
       hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0,
+      dragResize: cl.dragResize === 1 || cl.dragResize === true ? 1 : 0,
     };
   }
   // User message bubble look (聊天气泡): normalizeBubbleLook fills any field
@@ -470,6 +472,8 @@ async function holdSession(
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
     startupClean: payload.startupClean,
+    chatUi: payload.chatUi,
+    startupProbe: payload.startupProbe,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -489,7 +493,12 @@ async function holdSession(
     return;
   }
 
-  const panelScript = buildPanelScript(apiPort, mediaToken, config.startupClean !== false);
+  const app = appTarget();
+  const panelScript = buildPanelScript(apiPort, mediaToken, config.startupClean !== false, {
+    appName: app.appName,
+    chatUi: app.supportsChatUi,
+    hasUpdater: app.updaterUrlIncludes.length > 0,
+  });
   await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
   // Runtime.evaluate does NOT reject when the script itself throws — surface
   // exceptionDetails or a broken panel fails silently ("injected" in the log).
@@ -517,6 +526,8 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
     startupClean: payload.startupClean,
+    chatUi: payload.chatUi,
+    startupProbe: payload.startupProbe,
   });
   let ok = 0;
   for (const [id, session] of held) {
@@ -1056,6 +1067,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         sendJson(res, 200, {
           ok: true,
           service: "zcode-beautify",
+          // Which client this daemon serves — the MCP bootstrap and the CLI
+          // must never attach to a daemon that beautifies the other app.
+          target: appTarget().id,
           pid: process.pid,
           version: VERSION,
           uptimeMs: Date.now() - startedAt,
@@ -1870,7 +1884,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   });
 
   console.log(`serve: control API on http://127.0.0.1:${apiPort} — Ctrl+C to stop`);
-  console.log(`serve: injecting into ZCode renderers on CDP port ${cdpPort}`);
+  console.log(`serve: injecting into ${appTarget().appName} renderers on CDP port ${cdpPort}`);
 
   // --- wallpaper rotation (定时播放) ------------------------------------------
   // Three modes: "sequence" plays every entry for its duration in order and

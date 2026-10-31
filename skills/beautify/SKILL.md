@@ -1,13 +1,27 @@
 ---
 name: beautify
-description: Beautify the ZCode desktop client — import a background wallpaper image and adapt all UI colors with Material Design 3 (Monet) dynamic color. Use when the user asks to set a background, wallpaper, theme, or re-color the ZCode UI.
+description: Beautify the ZCode or WorkBuddy desktop client — import a background wallpaper image and adapt all UI colors with Material Design 3 (Monet) dynamic color. Use when the user asks to set a background, wallpaper, theme, or re-color the client UI (--target picks the client; the WorkBuddy plugin manifest presets it).
 ---
 
-# ZCode Beautify
+# Desktop Beautify (ZCode / WorkBuddy)
 
-This plugin themes the ZCode **desktop client** (Electron app) by injecting a
+This plugin themes a **desktop client** (Electron app) by injecting a
 wallpaper layer and Monet-derived CSS variable overrides over CDP. It never
-modifies ZCode's installation files.
+modifies the client's installation files.
+
+## Targets
+
+Two clients are supported since 0.5.0:
+
+| Client | Selection | CDP / API port | Token family |
+|---|---|---|---|
+| ZCode (default) | nothing to add | 9222 / 9223 | `--color-*` |
+| WorkBuddy | `--target workbuddy` or `BEAUTIFY_TARGET=workbuddy` | 9333 / 9334 | `--wb-*` |
+
+When this plugin is installed through `.codebuddy-plugin/` (WorkBuddy), the
+target is already set for the MCP server — do not pass `--target` to MCP tools.
+Chat-area extras (bubbles, column width, spinner icons, elapsed-time tweak) are
+ZCode-only; under WorkBuddy the MCP/panel accept the parameters but skip them.
 
 ## When to use
 
@@ -21,6 +35,12 @@ modifies ZCode's installation files.
   on large windows) and optionally `chat_width_inset_rem` (side inset, stock 24,
   default 12). Formula-based, so the column still tracks window resizes. The
   same gears also live in the in-app panel's 聊天区 tab (消息流宽度).
+- "我想手动拖拽调宽度" / drag to resize the column → the 聊天区 tab's
+  两侧拖拽调宽 toggle, or `apply_options` with `chat_drag_resize: true`.
+  Two hidden strips hug the conversation column edges: hover shows a 3px
+  accent line, dragging resizes symmetrically, double-click resets to the
+  tier, Esc cancels. The dragged width persists locally and outranks
+  `chat_width_cap_rem` until double-clicked away.
 - "大会话打开/滚动卡" / large sessions feel slow → the 聊天区 tab's
   大会话流畅模式 toggle (chatLook.perfSmooth). Off-screen rows skip
   paint+layout via per-row content-visibility with their REAL height baked in
@@ -72,7 +92,7 @@ modifies ZCode's installation files.
 | Tool | Purpose |
 |---|---|
 | `set_background` | Set wallpaper + Monet colors |
-| `apply_options` | Tune blur/dim/monet/wallpaper visibility/framing, the chat bubble look, the conversation column width (`chat_width_cap_rem`/`chat_width_inset_rem`), and the sidebar running-indicator icon (`spinner`) without changing the image |
+| `apply_options` | Tune blur/dim/monet/wallpaper visibility/framing, the chat bubble look, the conversation column width (`chat_width_cap_rem`/`chat_width_inset_rem`), the drag-to-resize handles (`chat_drag_resize`), and the sidebar running-indicator icon (`spinner`) without changing the image |
 | `refresh_theme` | Re-inject stored theme after a restart |
 | `reset_appearance` | Remove wallpaper and overrides |
 | `beautify_status` | Show stored config |

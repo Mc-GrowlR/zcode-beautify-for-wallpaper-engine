@@ -1,11 +1,13 @@
 ---
-description: Set a ZCode desktop wallpaper (image or Wallpaper Engine scene) and adapt the UI with Monet colors
+description: Set a desktop wallpaper (ZCode or WorkBuddy; image or Wallpaper Engine scene) and adapt the UI with Monet colors
 argument-hint: "[image path, scene .pkg/directory, or description]"
 ---
 
-# ZCode Beautify
+# Desktop Beautify
 
-The user wants to beautify the ZCode desktop client. $ARGUMENTS
+The user wants to beautify their desktop client — **ZCode** by default, or
+**WorkBuddy** when the plugin was installed from `.codebuddy-plugin/`
+(`BEAUTIFY_TARGET=workbuddy`, CDP port 9333). $ARGUMENTS
 
 ## Steps
 

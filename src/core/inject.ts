@@ -7,6 +7,7 @@ import { CdpConnection, injectIntoTarget, isUpdaterTarget, listTargets, pickRend
 import { sanitizeCustomBubbleCss } from "./bubbleRecipes.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
+import { target } from "./target.js";
 import { dataDir } from "./launch.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -108,6 +109,19 @@ export interface ChatLookConfig {
    * carry decimals.
    */
   hideElapsedDecimal: number;
+  /**
+   * Drag handles on both edges of the conversation column (两侧拖拽调宽):
+   * 0 = off, 1 = mount two hidden 9px vertical strips hugging the column's
+   * left/right edges. Hover reveals a 3px accent line; dragging resizes the
+   * column symmetrically by writing the --zb-chat-w (px) var, which the
+   * drag-mode width formula min(calc(100% - inset), var(--zb-chat-w))
+   * consumes — the native window-tracking shape, so shrinking never
+   * overflows. The dragged width persists in localStorage (rem) and outranks
+   * the 消息流宽度 tier; double-clicking a strip clears it back. Before the
+   * first drag the rules' var fallbacks reproduce the stock/config tiers
+   * exactly, so enabling the toggle changes nothing visually.
+   */
+  dragResize: number;
 }
 
 /** Stock wide-tier constants, for reference/tests: 72rem cap, 24rem inset. */
@@ -130,6 +144,7 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
         : CHAT_WIDTH_INSET_DEFAULT)
     : 0;
   const dec = raw?.hideElapsedDecimal as unknown;
+  const drag = raw?.dragResize as unknown;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -139,6 +154,7 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
     widthInsetRem: inset,
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
     hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
+    dragResize: drag === 1 || drag === true ? 1 : 0,
   };
 }
 
@@ -345,7 +361,7 @@ export interface BeautifyConfig {
   mediaType?: "image" | "video";
   /** Cache hash of the imported scene (loop at scenes/<hash>/loop.mp4). */
   sceneHash?: string;
-  /** Serve API port used to derive sceneVideoUrl (default 9223). */
+  /** Serve API port used to derive sceneVideoUrl (target default: 9223/9334). */
   apiPort?: number;
   /** Wallpaper rotation playlist (定时播放). */
   rotation?: RotationConfig;
@@ -416,6 +432,10 @@ export interface BuiltPayload {
   taskSpinnerLook?: TaskSpinnerLookConfig;
   /** Defer mounting until the ZCode startup screen is gone (default true). */
   startupClean?: boolean;
+  /** False when the target client has no chat-area extras wired yet. */
+  chatUi?: boolean;
+  /** How the bootstrap recognises the client's startup screen. */
+  startupProbe?: "zcode-body-class" | "workbuddy-skeleton";
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -429,6 +449,10 @@ function activePlanTransition(rotation: RotationConfig | undefined): WallpaperTr
 export function buildPayload(config: BeautifyConfig, assets?: WallpaperAssets, mediaToken = ""): BuiltPayload {
   const parts: string[] = [];
   const tok = mediaToken ? (u: string) => `${u}?t=${mediaToken}` : (u: string) => u;
+  // Which client we are painting into decides the sidebar selector, whether the
+  // ZCode-only prompt-queue mask applies, and which chat extras exist at all.
+  const app = target();
+  const chatUi = app.supportsChatUi;
 
   // "smart" resolves to the analyzed suggestion at build time, so the injected
   // CSS only ever deals with cover or contain.
@@ -438,8 +462,11 @@ export function buildPayload(config: BeautifyConfig, assets?: WallpaperAssets, m
   const focusY = config.fit === "smart" ? (assets?.focus.y ?? 0.5) : 0.5;
   const position = `${Math.round(focusX * 100)}% ${Math.round(focusY * 100)}%`;
 
+  // WorkBuddy paints its window on #root; clearing html/body alone leaves an
+  // opaque sheet in front of the wallpaper layer.
+  const rootSelector = app.tokens === "wb" ? "html, body, #root" : "html, body";
   parts.push(`
-html, body { background: transparent !important; }
+${rootSelector} { background: transparent !important; }
 #zcode-beautify-wallpaper {
   position: fixed;
   inset: 0;
@@ -476,8 +503,9 @@ html, body { background: transparent !important; }
   // 侧边栏压暗: additive on top of the global dim (the two scrims compose);
   // the var indirection lets the panel live-preview like the global dim does.
   const sidebarDim = config.sidebarDim ?? 0;
-  if (sidebarDim > 0) {
-    parts.push(`#sidebar {
+  const sidebarSelector = app.sidebarSelector;
+  if (sidebarDim > 0 && sidebarSelector) {
+    parts.push(`${sidebarSelector} {
   background: rgb(0 0 0 / var(--zb-sidebar-dim, ${sidebarDim / 100})) !important;
 }`);
   }
@@ -501,7 +529,9 @@ html, body { background: transparent !important; }
   // 12px lands the patch exactly on the input's top edge. Both numbers are
   // structural — rounded-2xl input (16px) and pb-7/-mb-7 queue (28px) — and
   // are exposed as variables for future ZCode versions.
-  parts.push(`[data-testid="v4-queue"] {
+  // Structural to ZCode's composer; other clients do not have this card, and
+  // the mask would clip an unrelated element that happens to reuse the attr.
+  if (app.id === "zcode") parts.push(`[data-testid="v4-queue"] {
   --zb-queue-overlap: 28px;
   --zb-queue-radius: 16px;
   --zb-queue-wrap-y: calc(100% - (var(--zb-queue-overlap) - var(--zb-queue-radius)));
@@ -544,7 +574,7 @@ html, body { background: transparent !important; }
     const p = path.resolve(config.wallpaperPath ?? "").toLowerCase();
     const dir = path.resolve(dataDir()).toLowerCase();
     if (p.startsWith(dir + path.sep) && /\.(jpe?g|png|webp|bmp)$/i.test(p)) {
-      wallpaperDataUri = tok(`http://127.0.0.1:${config.apiPort ?? 9223}/media/lib/${encodeURIComponent(path.basename(config.wallpaperPath!))}`);
+      wallpaperDataUri = tok(`http://127.0.0.1:${config.apiPort ?? target().apiPort}/media/lib/${encodeURIComponent(path.basename(config.wallpaperPath!))}`);
     } else {
       wallpaperDataUri = assets?.dataUri;
     }
@@ -561,13 +591,13 @@ html, body { background: transparent !important; }
   // loading slot's mode.
   const spinnerLook = normalizeTaskSpinnerLook(config.taskSpinnerLook);
   if (spinnerLook.image) {
-    spinnerLook.image = resolveSpinnerImageRef(spinnerLook.image, config.apiPort ?? 9223, mediaToken);
+    spinnerLook.image = resolveSpinnerImageRef(spinnerLook.image, config.apiPort ?? target().apiPort, mediaToken);
   }
   if (spinnerLook.unreadImage) {
-    spinnerLook.unreadImage = resolveSpinnerImageRef(spinnerLook.unreadImage, config.apiPort ?? 9223, mediaToken);
+    spinnerLook.unreadImage = resolveSpinnerImageRef(spinnerLook.unreadImage, config.apiPort ?? target().apiPort, mediaToken);
   }
   if (spinnerLook.errorImage) {
-    spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config.apiPort ?? 9223, mediaToken);
+    spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config.apiPort ?? target().apiPort, mediaToken);
   }
 
   return {
@@ -580,10 +610,15 @@ html, body { background: transparent !important; }
     focusY,
     kenBurns,
     videoVolume: Math.max(0, Math.min(100, Math.round(config.videoVolume ?? 0))),
-    chatLook: normalizeChatLook(config.chatLook),
-    bubbleLook: normalizeBubbleLook(config.bubbleLook),
-    taskSpinnerLook: spinnerLook,
+    // Chat extras (bubbles, column width, spinner icons) are bound to ZCode's
+    // DOM. On other clients they are forced back to stock so a stored config
+    // copied from ZCode can never inject rules for elements that do not exist.
+    chatLook: chatUi ? normalizeChatLook(config.chatLook) : normalizeChatLook(undefined),
+    bubbleLook: chatUi ? normalizeBubbleLook(config.bubbleLook) : normalizeBubbleLook(undefined),
+    taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(undefined),
     startupClean: config.startupClean !== false,
+    chatUi,
+    startupProbe: app.startupProbe,
   };
 }
 
@@ -637,11 +672,11 @@ html, body { background: transparent !important; }
   return buildBootstrapScript({ css, wallpaperDataUri: src, fit: input.fit ?? "cover", transition: "fade" });
 }
 
-/** Apply config to a running ZCode instance. Returns how many windows got it. */
+/** Apply config to a running client instance. Returns how many windows got it. */
 export async function applyToZCode(config: BeautifyConfig, payload: BuiltPayload): Promise<number> {
   const targets = pickRendererTargets(await listTargets(config.port));
   if (targets.length === 0) {
-    throw new Error("No ZCode renderer target found on the CDP endpoint.");
+    throw new Error(`No ${target().appName} renderer target found on the CDP endpoint.`);
   }
   let count = 0;
   for (const target of targets) {
