@@ -12,7 +12,23 @@
 > 0.4.7：大会话流畅模式——消息行屏外跳过渲染（content-visibility），大上下文会话打开与滚动更省。
 > 0.4.8：运行中图标——会话列表左侧"正在对话"转圈标志可换为图片 / GIF 动图；侧边栏压暗——左侧会话栏可单独加深；关于页检查更新——对照 GitHub Releases 一键查询新版本。
 > 0.4.9：耗时秒数去小数——对话下方"工作中"耗时的秒数不再显示小数位（53.4 秒 → 53 秒）；作者信息改为 fork 维护者 Mc-GrowlR（关于页/插件元数据，上游溯源保留）。
-> 0.5.1：两侧拖拽调宽——对话列左右边缘的隐形竖条，悬停现形、拖动调宽（参考 DeepSeek 聊天页的拖拽边条交互）。
+> 0.5.0：双客户端——同一套引擎现在也支持 WorkBuddy（`--target` 选择目标、端口隔离 9333/9334、`--wb-*` 配色映射、启动屏探针；聊天增强仅 ZCode）。
+> 0.5.1：两侧拖拽调宽——对话列左右边缘的隐形竖条，悬停现形、拖动调宽（参考 DeepSeek 聊天页的拖拽边条交互）；关于页更新日志——「插件信息」新增 📄 按钮，弹窗内直接阅读本文件并自动定位到当前版本。
+> 0.6.0：实验性 CDP 注入改为显式 opt-in（默认关闭）——新装不拉服务、不写启动项，注入工具只返回指引；新增可回滚启动项剥离（repair-launchers --remove / disable）与完整的恢复文档。
+
+## 0.6.0 — 实验性 CDP 注入改为显式 opt-in
+
+> 背景：有用户指出插件把 `--remote-debugging-port=9222` 持久化进启动快捷方式并经 CDP 注入渲染器，绕过插件 UI API，且调试端口让本机任意进程都能控制渲染器。0.6.0 据此把整条 CDP 注入链路收敛到显式 opt-in 之后，并补齐回滚与恢复文档。
+
+- **主开关 `experimental.enabled`（默认 false）**：关闭时插件完全静默——MCP bootstrap 不再拉起 serve、不再自愈启动项；`set_background` / `import_scene_wallpaper` / `apply_options` / `refresh_theme` 返回指引文本而不执行（`beautify_status` / `reset_appearance` / `repair_launchers` 不受限——前者只读，后两者是清理方向）。开启状态记录同意元数据（`consentedAt` + `consentVersion`）。
+- **存量迁移（沿用开启）**：首次加载时，配置里已有真实使用痕迹（wallpaperPath / sceneHash / 外观配置等）的老安装自动置为 enabled 并打 `migrated: true` 标记——静默关掉已生效的壁纸是更差的体验；面板「通用」页会如实显示"沿用开启状态（自动迁移，未显式确认）"并提供一键停用。全新安装默认关闭、不写配置。
+- **MCP 新工具**：`enable_experimental`（记录同意 → 修复启动项 → 立即拉起服务 → 提示完全重启一次；工具调用本身即用户批准的同意时刻，description 明示 127.0.0.1 无鉴权暴露面）；`disable_experimental { clean_launchers = true }`（服务路由实时清场 → 关开关 → 从启动项剥离 flag；壁纸设置保留，重新开启即恢复）。
+- **启动项可回滚**：`repairLaunchers` 新增 `action: "add" | "remove"`——remove 用同一批扫描位置（用户级 .lnk + HKCU 处理器）剥离 `--remote-debugging-port=<任意端口>`（`\s*--remote-debugging-port=\d+` 正则 + Trim，引号与 `%1` 占位符原样保留）；MCP `repair_launchers` 与 CLI `repair-launchers --remove` 透出。flag 只写在能拿回来的地方。
+- **完整清场**：`buildResetScript` 现在同时清除渲染器 localStorage 里的 `zcode-beautify:css` / `:wallpaper` 自愈缓存——否则停用后重启客户端，缓存会把外观原样带回来。serve 新增 `POST /api/experimental/disable`（token 门禁）：清全部持有会话（含缓存）→ 停轮播定时器 → 回包后进程退出（关状态下 bootstrap 不会重新拉起）；服务不在时 disable 走直连 CDP 的 resetZCode 兜底。
+- **CLI**：新增 `enable` / `disable [--keep-launchers]`；`repair-launchers` 新增 `--remove`。gate 关闭时 apply/apply-scene/colors/serve 仍可用（CLI 是显式动作）但会打印一行提示。
+- **面板**：「通用」页新增「实验性 CDP 注入」卡片——状态行（启用/停用 + migrated 提示）、暴露面说明、「停用并清理启动项」按钮（confirm 后走 /api/experimental/disable；服务随后退出、面板离线属预期）。
+- **文档**：README（中英）新增「实验性 opt-in（CDP 注入）」一节——开启做什么、127.0.0.1 绑定但无鉴权、恢复/卸载/升级注意（ZCode 更新器重建快捷方式后自愈仅在开启时补回，关闭状态任何东西都不会再写回）；INSTALL-FOR-AI 安装流程改为"先取得显式同意（enable_experimental / cli enable）再持久化 flag"，卸载一节加入必做的启动项回滚并修正"从未修改客户端文件"的表述；skill/命令文档与插件市场描述同步标注实验性与默认关闭。
+- 测试：t27（新装默认关、老配置自动迁移、launchers add→remove 沙箱 .lnk/注册表往返、remove 不新增、静态契约：TOOL_NAMES/bootstrap gate/面板卡片）。
 
 ## 0.5.1 — 两侧拖拽调宽
 
@@ -26,6 +42,7 @@
 - **拖拽性能（用户实测卡顿后修复）**：① 对话列自带 `transition-[width,max-width] duration-150`——每个宽度步都触发 150ms 动画重排、布局永不收敛，拖拽期间（html.zb-grip-active）强制 `transition:none`；② 宽度更新按 8px 指针量化（列宽 16px/步）——动态高度虚拟列表对每次宽度变化全量重测，连续 1px 更新等于每秒 60 次全量重排；③ 拖拽中竖条改**解析式贴边**（拖拽起点列矩形 + 已应用宽度直接推算边缘，零 getBoundingClientRect 强制布局），文档级 MO/RO 在拖拽期间静默（拖拽路径自持定位，回灌风暴全部跳过）；④ 移除拖拽期 `*{cursor:col-resize!important}` 全元素选择器。
 - **注入引擎健壮性（实机调试发现）**：① `Page.addScriptToEvaluateOnNewDocument` 每次注入**累积注册且无法反注册**，页面一重载所有历史版本 bootstrap 依次重跑——最老版本先挂载竖条并绑定旧事件代码，后续版本见 id 已存在就跳过。竖条带 `data-zb-ver` 版本标记（GRIP_VER），最新引擎发现旧版竖条即强制重挂重绑；② Chromium 对被遮挡窗口把 rAF 节流到 0——挂载后的首次定位必须同步执行，不能只靠 rAF 合流；③ 竖条位置缓存（gripPos）必须随竖条销毁一起清空，否则重挂载后"已写过"的缓存会永久压制样式写入。
 - **输入框塌缩修复（用户实测：拖动时输入框缩成 ~40px 竖条）**：根因是宽度变量被写入 `NaNpx`（多代引擎共享 `window.__zcodeBeautify` 状态、旧代观察器存活所致）——`width:calc(100% - var(--zb-chat-inset))` 遇非法 var 整条声明在计算值阶段失效退回 auto：消息列父容器是块级（auto=撑满，无症状），而**输入框 holder 的父容器是 `flex justify-center` 行（auto=按 min-content 收缩）**，于是只有输入框塌缩。四层防御：`zbGripApply` 硬门禁（非有限 px/NaN contentW 一律拒写）；每次 sync 自愈（存量非有限 var 直接移除）；GRIP_VER 重挂时**全量清场**（zbGripClean 断开旧代观察器/resize 监听/卡死的 drag 状态——卡死的 drag 会永久静默观察器并卡住变量）；pointerdown 先取消残留 drag；外加拖拽期 `min-width:460px` 字面量地板（任何垃圾值都无法再塌缩输入框）。
+- **关于页「更新日志」**：插件信息卡新增「更新日志」行与 📄 按钮——弹窗（气泡编辑器同款遮罩卡片）内直接阅读随插件附带的 CHANGES.md，serve 新增 `GET /api/changelog`（token 门禁、按进程缓存一次、从插件根解析 dist/开发两种布局）；面板内置极简渲染器（先整体 HTML 转义再合成标签，h2 版本节/引导 blockquote/列表/粗体/行内码），运行版本所在小节自动打「当前版本」徽标并滚动定位；打包清单（package.mjs）补入 CHANGES.md（此前 zip 安装不含此文件）。
 - 测试：t24（normalize 钳制、payload 透传、jsdom 跑真实 bootstrap：挂载/卸载与变量清理、拖拽档位 fallback 复刻档位公式、双击复位、全部关掉时整体退场）；t25 实机 E2E（走真实 /api/config：挂载贴合、合成指针拖拽、近全宽死区验证、Esc 取消、双击复位、面板开关回显、开关卸载）。
 
 ## 0.5.0 — 双客户端：WorkBuddy 支持

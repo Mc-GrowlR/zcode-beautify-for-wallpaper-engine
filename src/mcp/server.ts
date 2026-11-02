@@ -3,7 +3,6 @@
  * the model can set a wallpaper / re-theme / reset on the user's behalf.
  */
 
-import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -11,9 +10,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
-import { loadConfig } from "../core/launch.js";
+import { ensureExperimentalGate, experimentalEnabled, loadConfig } from "../core/launch.js";
 import { target } from "../core/target.js";
 import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
+import { spawnServeDetached } from "../core/experimental.js";
 import { VERSION } from "../version.js";
 
 // The plugin host launches MCP servers with the beautify data dir pointed at a
@@ -29,47 +29,41 @@ const absoluteExisting = (p: string): string => {
   return p;
 };
 
+/** Path of the bundled dist/cli.js next to this server, or null under tsx. */
+function cliJsPath(): string | null {
+  const serverFile = path.resolve(process.argv[1] ?? "");
+  // Only from the bundled layout (dist/mcp/server.js → dist/cli.js); under
+  // tsx from src/ there is nothing to point at, so skip quietly.
+  const cliJs = path.join(path.dirname(serverFile), "..", "cli.js");
+  return path.basename(serverFile) === "server.js" && existsSync(cliJs) ? cliJs : null;
+}
+
 /**
  * ZCode launches this MCP server on every app start — the ideal hook to make
  * the settings panel "just exist": piggyback a detached `serve` process so it
  * injects the panel as soon as the renderer is up. Idempotent (a healthy
  * serve on the API port is left alone) and strictly fire-and-forget: a slow
  * or failed bootstrap must never delay or break MCP startup.
+ *
+ * Everything here is behind the experimental opt-in gate: until the user
+ * enables it, this process stays inert — no daemon, no launch-entry writes.
  */
 function bootstrapServe(): void {
   try {
-    const serverFile = path.resolve(process.argv[1] ?? "");
-    // Only from the bundled layout (dist/mcp/server.js → dist/cli.js); under
-    // tsx from src/ there is nothing to point at, so skip quietly.
-    const cliJs = path.join(path.dirname(serverFile), "..", "cli.js");
-    if (path.basename(serverFile) !== "server.js" || !existsSync(cliJs)) return;
+    const cliJs = cliJsPath();
+    if (!cliJs) return;
+    const cfg = ensureExperimentalGate();
+    if (!cfg.experimental?.enabled) {
+      console.error(
+        "beautify: experimental CDP injection is disabled — nothing started " +
+          "(enable_experimental, or `cli.js enable`, opts in)"
+      );
+      return;
+    }
     // The API port is a setting; a hardcoded 9223 here spawns duplicate serves
     // whenever the configured port differs.
-    const apiPort = loadConfig().apiPort ?? target().apiPort;
-    fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1500) })
-      .then((r) => {
-        if (!r.ok) throw new Error("unhealthy");
-        return r.json();
-      })
-      .then((body) => {
-        const h = body as { service?: string; target?: string };
-        if (h?.service !== "zcode-beautify" || (h.target ?? "zcode") !== target().id) {
-          throw new Error("foreign service");
-        }
-      })
-      .catch(() => {
-        try {
-          const childEnv = { ...process.env };
-          spawn(process.execPath, [cliJs, "serve", "--detach", "--api-port", String(apiPort)], {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: true,
-            env: childEnv,
-          }).unref();
-        } catch {
-          /* best effort */
-        }
-      });
+    const apiPort = cfg.apiPort ?? target().apiPort;
+    spawnServeDetached(apiPort, cliJs);
     // Self-heal launch entries: without the CDP flag a start-menu launch gets
     // no injection for the whole session — and ZCode's updater rebuilds the
     // Start Menu shortcut WITHOUT the flag, so this must run at every
@@ -95,6 +89,20 @@ function bootstrapServe(): void {
   }
 }
 bootstrapServe();
+
+/** Shared refusal for the injection tools while the opt-in gate is closed. */
+function disabledNotice(): { content: Array<{ type: "text"; text: string }> } {
+  return {
+    content: [{
+      type: "text",
+      text:
+        "Experimental CDP injection is disabled (default since 0.6.0) — nothing was changed.\n" +
+        "To opt in, call `enable_experimental` once: it records consent, adds --remote-debugging-port to the client's " +
+        "launch entries and starts the local service (see the README security notes for what that exposes).\n" +
+        "`disable_experimental` undoes all of it, including stripping the flag from the launch entries again.",
+    }],
+  };
+}
 
 const server = new McpServer({
   name: "zcode-beautify",
@@ -131,6 +139,8 @@ export const TOOL_NAMES = [
   "refresh_theme",
   "reset_appearance",
   "beautify_status",
+  "enable_experimental",
+  "disable_experimental",
   "repair_launchers",
 ] as const;
 
@@ -148,6 +158,7 @@ server.registerTool(
   },
   async ({ image_path, blur, dim }) => {
     try {
+      if (!experimentalEnabled(loadConfig())) return disabledNotice();
       const abs = absoluteExisting(image_path);
       const kind = detectWallpaperType(abs);
       const { windows } =
@@ -185,6 +196,7 @@ server.registerTool(
   },
   async ({ path: scenePath, blur, dim }) => {
     try {
+      if (!experimentalEnabled(loadConfig())) return disabledNotice();
       const abs = absoluteExisting(scenePath);
       const stages: string[] = [];
       const { windows, served, scene } = await applySceneWallpaper(abs, {
@@ -254,6 +266,7 @@ server.registerTool(
   },
   async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize }) => {
     try {
+      if (!experimentalEnabled(loadConfig())) return disabledNotice();
       // Send only the fields the caller provided: the session layer merges
       // this partial over the stored look, so one-field tweaks don't reset
       // the rest.
@@ -295,6 +308,7 @@ server.registerTool(
   },
   async () => {
     try {
+      if (!experimentalEnabled(loadConfig())) return disabledNotice();
       const windows = await reapplyStored();
       return { content: [{ type: "text", text: `Theme re-injected into ${windows} window(s).` }] };
     } catch (err) {
@@ -334,6 +348,96 @@ server.registerTool(
 );
 
 server.registerTool(
+  "enable_experimental",
+  {
+    title: "Enable experimental CDP injection",
+    description:
+      "OPT-IN gate for the experimental injection mode (off by default since 0.6.0). Enabling: records consent (timestamp + " +
+      "plugin version) in the plugin config; adds --remote-debugging-port to the client's launch entries (desktop/Start " +
+      "Menu/taskbar shortcuts, deep-link handler, Explorer verbs) so the client opens a local CDP port; starts the local " +
+      "beautify service; and re-enables the self-heal that keeps launch entries carrying the flag across client updates. " +
+      "SECURITY: the CDP port binds 127.0.0.1 but is unauthenticated — any local process can attach to the renderer while " +
+      "it is open, and the flag stays in the launch entries until disable_experimental strips it. After enabling, fully " +
+      "quit and restart the client once (unless it already runs with the flag).",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { enableExperimental, spawnServeDetached } = await import("../core/experimental.js");
+      const r = await enableExperimental();
+      // Bring the daemon up right away; only the client process itself needs
+      // the one full restart — unless it already runs with the flag.
+      const cliJs = cliJsPath();
+      if (cliJs) spawnServeDetached(r.apiPort, cliJs);
+      const lines = ["Experimental CDP injection ENABLED (consent recorded in the plugin config)."];
+      const report = r.launchers;
+      if (!report || report.error) {
+        lines.push(`Launch entries could not be updated: ${report?.error ?? "unknown error"}`);
+      } else {
+        const updated = report.fixes.filter((f) => f.status === "updated");
+        lines.push(`Launch entries: ${updated.length} of ${report.fixes.length} now carry --remote-debugging-port=${r.port}.`);
+        for (const f of updated) lines.push(`  ${f.path}`);
+      }
+      lines.push(
+        "If the client is running without the debug port, fully quit it (including any tray icon) and start it again from a shortcut — the service starts on its own. Then `refresh_theme` applies the stored look.",
+        "Security: the CDP port binds 127.0.0.1 but is unauthenticated — any local process can attach to the renderer. `disable_experimental` rolls everything back."
+      );
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "disable_experimental",
+  {
+    title: "Disable experimental CDP injection",
+    description:
+      "Roll the experimental injection mode back to off and undo what enabling changed: stops the local service's injection " +
+      "and clears the injected theme (including the renderer's cached copy used for self-heal), marks the config disabled, " +
+      "and by default strips --remote-debugging-port from the launch entries again (the rollback for uninstall). The stored " +
+      "wallpaper settings are kept, so re-enabling later restores the look. Fully quit and restart the client afterwards.",
+    inputSchema: {
+      clean_launchers: z
+        .boolean()
+        .optional()
+        .describe("Strip the CDP flag from launch entries too (default true; false keeps the flag where it is)"),
+    },
+  },
+  async ({ clean_launchers }) => {
+    try {
+      const cleanLaunchers = clean_launchers ?? true;
+      const { disableExperimental } = await import("../core/experimental.js");
+      const r = await disableExperimental({ cleanLaunchers });
+      const lines: string[] = [];
+      if (r.teardown.via === "service") {
+        lines.push("Service stopped; injected theme cleared (including the renderer's cached copy).");
+      } else if (r.teardown.via === "cdp" && r.teardown.windows > 0) {
+        lines.push(`Injected theme cleared directly over CDP in ${r.teardown.windows} window(s).`);
+      } else {
+        lines.push("No running client found — nothing injected to clear.");
+      }
+      lines.push("Experimental mode disabled — no service start, no launch-entry self-heal.");
+      const report = r.launchers;
+      if (report) {
+        if (report.error) {
+          lines.push(`Launch entries could not be cleaned: ${report.error}`);
+        } else {
+          const stripped = report.fixes.filter((f) => f.status === "updated");
+          lines.push(`Launch entries: flag removed from ${stripped.length} of ${report.fixes.length}.`);
+          for (const f of stripped) lines.push(`  ${f.path}`);
+        }
+      }
+      lines.push("Fully quit and restart the client to finish on the stock look.");
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
   "repair_launchers",
   {
     title: "Fix ZCode launch entries",
@@ -341,18 +445,25 @@ server.registerTool(
       "ZCode only opens its CDP port when it is started with --remote-debugging-port, and that flag has to come from the " +
       "shortcut or handler that launches it. A machine usually has several launch entries and only some carry the flag. " +
       "This scans the desktop, Start Menu and pinned-taskbar shortcuts plus the zcode:// protocol and Explorer context-menu " +
-      "verbs, and adds the flag where it is missing. Machine-wide entries that need administrator rights are reported, not " +
+      "verbs. action=\"add\" (default) adds the flag where it is missing — opt-in only, see enable_experimental; " +
+      "action=\"remove\" strips it again from the same entries (the rollback for disable/uninstall, and the way to undo " +
+      "what pre-0.6.0 versions wrote automatically). Machine-wide entries that need administrator rights are reported, not " +
       "modified. Shortcuts are the durable entries: ZCode's updater rebuilds the Start Menu shortcut without the flag, and " +
       "the app re-registers its protocol and context-menu handlers on every start, so registry entries may need repairing again.",
     inputSchema: {
+      action: z
+        .enum(["add", "remove"])
+        .optional()
+        .describe('"add" (default) adds the missing flag; "remove" strips it from every entry that carries it'),
       dry_run: z.boolean().optional().describe("Only report what would change; write nothing"),
     },
   },
-  async ({ dry_run }) => {
+  async ({ action, dry_run }) => {
     try {
+      const mode = action ?? "add";
       const port = loadConfig().port ?? DEFAULT_CONFIG.port;
       const { repairLaunchers } = await import("../core/launchers.js");
-      const report = await repairLaunchers({ port, dryRun: dry_run });
+      const report = await repairLaunchers({ port, action: mode, dryRun: dry_run });
 
       if (report.error) {
         return { content: [{ type: "text", text: `Could not scan launch entries: ${report.error}` }], isError: true };
@@ -360,10 +471,13 @@ server.registerTool(
 
       const updated = report.fixes.filter((f) => f.status === "updated");
       const failed = report.fixes.filter((f) => f.status === "failed");
+      const verb = mode === "remove" ? "cleaned" : "updated";
       const lines = [
         report.dryRun
-          ? `Dry run on port ${port}: ${updated.length} of ${report.fixes.length} entry(ies) would be updated.`
-          : `Updated ${updated.length} of ${report.fixes.length} launch entry(ies) to include --remote-debugging-port=${port}.`,
+          ? `Dry run on port ${port}: ${updated.length} of ${report.fixes.length} entry(ies) would be ${verb}.`
+          : mode === "remove"
+            ? `Removed --remote-debugging-port from ${updated.length} of ${report.fixes.length} launch entry(ies).`
+            : `Updated ${updated.length} of ${report.fixes.length} launch entry(ies) to include --remote-debugging-port=${port}.`,
         ...report.fixes.map((f) => `  [${f.status}] ${f.path}${f.reason ? ` — ${f.reason}` : ""}`),
       ];
       if (failed.length > 0) {

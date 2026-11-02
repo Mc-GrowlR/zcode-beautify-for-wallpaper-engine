@@ -176,20 +176,30 @@ everything else.
 
 1. The plugin contributes the `/beautify` command and MCP tools
    (`set_background`, `apply_options`, `refresh_theme`, `reset_appearance`,
-   `beautify_status`).
-2. The wallpaper needs CDP: the ZCode desktop client must be started with
-   `--remote-debugging-port=9222`. Instruct the user to fully quit ZCode, then
-   run `node <plugin-dir>/dist/cli.js launch` (the plugin dir is the cache
-   folder above; requires Node.js ≥ 20). Alternatively suggest editing the
-   ZCode shortcut to append the flag.
-3. **Make CDP survive restarts — do not skip this.** The injected theme lives
-   in CDP sessions: the moment the user restarts ZCode without the debug port,
-   beautification is gone and they will report "the plugin stopped working".
-   Fix it at the source by persisting the flag into the app's shortcuts:
-   - Locate the app's shortcuts (Desktop, `Start Menu\Programs` for the user
-     and, if present, the all-users one under `C:\ProgramData\...`) and append
-     ` --remote-debugging-port=9222` to the target's arguments
-     (WScript.Shell on Windows: read the `.lnk`, set `Arguments`, `Save()`).
+   `beautify_status`, plus the `enable_experimental` / `disable_experimental`
+   gate).
+2. **Obtain explicit consent before anything is modified.** Since 0.6.0 the
+   experimental CDP injection is OFF by default: a fresh install starts no
+   service, writes no flags, and the injection tools answer with guidance
+   until enabled. Before opting in, tell the user what it means (see the
+   README section "Experimental opt-in (CDP injection)"): the client's launch
+   entries get `--remote-debugging-port=9222` so a local CDP port opens;
+   that port binds `127.0.0.1` but is unauthenticated — any local process can
+   attach to the renderer while it is open. With consent, call the
+   `enable_experimental` MCP tool (records consent, repairs the launch
+   entries, starts the service) or run `node <plugin-dir>/dist/cli.js enable`.
+   If the user declines, stop here — the plugin stays inert and that is the
+   supported state.
+3. **Make CDP survive restarts — do not skip this, and only after step 2.**
+   The injected theme lives in CDP sessions: the moment the user restarts
+   ZCode without the debug port, beautification is gone and they will report
+   "the plugin stopped working". With the gate enabled, the plugin self-heals
+   the launch entries at every ZCode start; to cover the first launch:
+   - Instruct the user to fully quit ZCode, then run
+     `node <plugin-dir>/dist/cli.js launch` (repairs launch entries and starts
+     the app with the flag), or run `repair_launchers` (MCP,
+     `action: "add"`) / `node <plugin-dir>/dist/cli.js repair-launchers` and
+     have the user start ZCode from an updated shortcut.
      The all-users Start Menu needs elevation — a user-level shortcut on the
      Desktop covers the common case without admin rights.
    - Warn the user: one full restart of ZCode with the flag is still required
@@ -207,8 +217,16 @@ everything else.
 
 ## Uninstall (if the user asks)
 
-- Remove the `zcode-beautify` entry from `installed_plugins.json`, delete
+- **Roll the launch entries back first** (the plugin — and versions before
+  0.6.0 automatically — persisted `--remote-debugging-port=9222` into the
+  user's shortcuts and HKCU handlers):
+  `node <plugin-dir>/dist/cli.js disable` stops the service, clears the
+  injected theme and strips the flag; or
+  `node <plugin-dir>/dist/cli.js repair-launchers --remove` to strip only the
+  flag. Have the user fully quit and restart ZCode afterwards.
+- Then remove the `zcode-beautify` entry from `installed_plugins.json`, delete
   `cache/zcode-beautify/`, and (only if the user wants the marketplace gone)
   the `known_marketplaces.json` entry plus `marketplaces/zcode-beautify/`.
-- Theme remnants in a running ZCode disappear on restart; the plugin never
-  modified ZCode's own files.
+- The plugin never modified ZCode's own installation files — but it DOES write
+  to launch entries while enabled, which is why the rollback step above is not
+  optional.

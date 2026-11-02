@@ -113,13 +113,16 @@ node dist/cli.js --help        # 预构建产物，零安装
 ## 快速开始
 
 ```bash
-# 1) 完全退出 ZCode 后执行一次，以 CDP 调试端口重启 ZCode
+# 1) 显式开启实验性 CDP 注入（默认关闭 — 暴露面与回滚方式见下节）
+node dist/cli.js enable
+
+# 2) 完全退出 ZCode 后执行一次，以 CDP 调试端口重启 ZCode
 node dist/cli.js launch
 
-# 2) 设置壁纸并自动适配配色
+# 3) 设置壁纸并自动适配配色
 node dist/cli.js apply "D:\pictures\wallpaper.jpg" --blur 6 --dim 30
 
-# 3) （推荐）守护模式 + 实时设置面板
+# 4) （推荐）守护模式 + 实时设置面板
 #    --detach 让服务转入后台，启动它的终端（或智能体会话）结束后面板依然可用
 node dist/cli.js serve --detach
 ```
@@ -150,13 +153,15 @@ set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbud
 | 命令 | 用途 |
 |---|---|
 | `--target zcode\|workbuddy\|auto` | 全局参数：选择要美化的客户端（默认 zcode；`auto` 按已安装的客户端推断），等价于环境变量 `BEAUTIFY_TARGET` |
+| `enable` | 显式开启实验性 CDP 注入：记录同意、为启动项补上 CDP flag、启动本地服务 |
+| `disable [--keep-launchers]` | 关闭并回滚：清除注入外观（含渲染器本地缓存）、停止服务、从启动项剥离 flag（`--keep-launchers` 保留 flag） |
 | `launch [--port N]` | 以调试端口启动客户端（需先完全退出）；ZCode 默认 9222，WorkBuddy 默认 9333 |
 | `apply <image> [--blur] [--dim] [--fit] [--no-monet]` | 设壁纸并适配配色（`--fit cover\|contain\|smart`） |
 | `apply-scene <pkg-or-dir>` | 端到端导入 Wallpaper Engine 场景 / 视频壁纸 |
 | `colors` | 不换图，重新应用已存主题 |
 | `serve [--detach] [--api-port M]` | 守护模式 + 设置面板 + 本地控制 API（默认 API 端口 9223）；`--detach` 使其脱离启动它的终端存活 |
 | `watch` | 无面板守护模式：ZCode 重启后自动重注入 |
-| `repair-launchers [--dry-run]` | 扫描/修复所有启动项，确保 ZCode 总是带 CDP 端口启动 |
+| `repair-launchers [--dry-run] [--remove]` | 扫描/修复所有启动项，确保 ZCode 总是带 CDP 端口启动；`--remove` 改为从所有启动项剥离该 flag（回滚用） |
 | `reset` | 移除壁纸与配色覆盖 |
 | `status` | 查看 CDP 可达性与渲染器目标 |
 
@@ -170,7 +175,9 @@ set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbud
 | `refresh_theme` | 重启后重注入已存主题 |
 | `reset_appearance` | 移除壁纸与覆盖，还原默认 |
 | `beautify_status` | 查看已存配置 |
-| `repair_launchers` | 扫描/修复启动项（结构化报告） |
+| `enable_experimental` | 显式开启实验性 CDP 注入（记录同意、修复启动项、启动服务） |
+| `disable_experimental` | 关闭并回滚：实时清理注入 + 从启动项剥离 flag（`clean_launchers=false` 保留） |
+| `repair_launchers` | 扫描/修复启动项（`action: "add"` 默认补 flag，`"remove"` 剥离；结构化报告） |
 
 ## 项目结构
 
@@ -223,12 +230,31 @@ npm run bundle   # 预构建单文件产物（仓库随附）
 
 `skill-pack/` 是一份自包含、平台无关的 AI 编码智能体技能包（Claude、DeepSeek、Codex、豆包……均可）：把文件夹交给任意智能体，它就能为**任意** Electron 应用重建这套美化能力——CDP 通道、MD3 取色、注入模板、实时调参 API，以及来自实战的踩坑清单。与本仓库同步版本。可从 [Releases 页面](https://github.com/Logocceai/zcode-beautify/releases)下载 zip，或直接阅读 [`skill-pack/SKILL.md`](skill-pack/SKILL.md)。
 
+## 实验性 opt-in（CDP 注入）
+
+注入机制属**实验性**能力，**默认关闭**（0.6.0 起）：未显式开启前，插件不启动后台服务、不改任何启动项、智能体侧工具只返回指引而不执行。它本质上是绕过插件 UI API 直接操作渲染器 —— 桌面端目前没有受支持的扩展点，这正是它必须藏在显式开关之后的原因。
+
+**开启会做什么**（`enable_experimental`，或 `zcode-beautify enable`）：
+
+- 为客户端的启动项（桌面 / 开始菜单 / 任务栏快捷方式、`zcode://` 协议、资源管理器右键菜单）加上 `--remote-debugging-port=9222`，使 ZCode 打开本地 CDP 端口。需要管理员权限的机器级条目只报告、绝不修改。
+- 启动本地服务，并恢复"自愈"——在客户端更新重建快捷方式后自动补回 flag。
+- 在插件配置中记录同意（时间戳 + 插件版本）。0.6.0 之前的老安装自动沿用开启状态（标记为 migrated）；面板会显示该状态并提供一键停用。
+
+**会暴露什么：** CDP 端口只绑定 `127.0.0.1`（仅本机回环），但**无鉴权** —— 端口开着期间，本机以当前用户运行的任意进程都可以附加到渲染器。插件自己的控制 API 额外有随机 token 保护，但 CDP 端口本身是 Chromium 的行为，插件无法控制。本机存在不可信用户/软件时请不要开启。
+
+**恢复 / 卸载：**
+
+- `disable_experimental`（MCP）或 `zcode-beautify disable`：停止服务、清除注入外观（含渲染器本地缓存）、从启动项剥离 flag（`--keep-launchers` 保留）。之后请完全重启 ZCode。壁纸设置会保留，重新开启即可恢复。
+- `zcode-beautify repair-launchers --remove`：只剥离 flag，不动其它任何东西 —— 用于回滚 0.6.0 之前版本自动写入的启动项。
+- 卸载插件：先执行 `node <插件目录>/dist/cli.js disable`（或 `repair-launchers --remove`），再移除插件。
+- 升级注意：ZCode 更新器重建的开始菜单快捷方式不带 flag；开启状态下自愈会在下次启动 ZCode 时补回 —— 关闭状态下任何东西都不会再被写回。
+
 ## 风险与限制
 
-- 注入通过 CDP（Chrome DevTools 协议）实现，属**非官方**手段，ZCode 更新可能使其失效；`reset` 可随时还原默认外观。
-- `launch` 需要重启一次 ZCode。若 `serve`/`watch` 未运行，每次 ZCode 重启主题都会丢失（CDP 会话随连接关闭）。无需手动修改：插件会自动为所有 ZCode 启动项（快捷方式、协议处理器、右键菜单）补上 ` --remote-debugging-port=9222`，只要 `serve` 在运行，重启也会自动恢复。请用 `serve --detach` 启动：前台 `serve` 会随启动它的终端（或智能体会话）一起退出，面板随即显示离线。
+- 注入通过 CDP（Chrome DevTools 协议）实现，属**非官方**手段，且为**实验性、需显式 opt-in**（见上节）。ZCode 更新可能使其失效；`reset` 可随时还原默认外观。
+- `launch` 需要重启一次 ZCode。若 `serve`/`watch` 未运行，每次 ZCode 重启主题都会丢失（CDP 会话随连接关闭）。无需手动修改：实验模式开启时，插件会自动为所有 ZCode 启动项（快捷方式、协议处理器、右键菜单）补上 ` --remote-debugging-port=9222`，只要 `serve` 在运行，重启也会自动恢复。请用 `serve --detach` 启动：前台 `serve` 会随启动它的终端（或智能体会话）一起退出，面板随即显示离线。
 - 聊天区样式的选择器（`[data-v4-user-input-bubble]`、`conversation:max-w-*` 容器查询）绑定 ZCode 当前 DOM 结构；ZCode 改版后可能需要更新选择器。
-- 控制 API 仅绑定 `127.0.0.1`，并使用每次启动随机生成的 token 鉴权；媒体 URL 以查询参数携带 token。
+- 控制 API 仅绑定 `127.0.0.1`，并使用每次启动随机生成的 token 鉴权；媒体 URL 以查询参数携带 token。CDP 端口本身无鉴权 —— 见上节 opt-in 说明。
 - 动态导入（场景捕获）仅限 Windows（Desktop Duplication API）；其余功能跨平台。
 
 ## 许可证

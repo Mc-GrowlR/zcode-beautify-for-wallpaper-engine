@@ -14,7 +14,9 @@
  * shortcuts in the user's own Desktop / Start Menu / pinned taskbar, plus
  * ZCode's HKCU protocol and shell handlers. The machine-wide Public Desktop and
  * Start Menu are reported as failures rather than attempted, because they need
- * elevation.
+ * elevation. The same scan runs in "remove" mode, stripping the flag again —
+ * that is the rollback path behind disable/uninstall, since the flag is only
+ * ever written where it can also be taken back.
  *
  * Two caveats the user is told about in the docs: ZCode's updater rebuilds the
  * Start Menu shortcut without the flag, and the app re-registers its HKCU
@@ -45,8 +47,16 @@ export interface LauncherFix {
   reason?: string;
 }
 
+export type LauncherAction = "add" | "remove";
+
 export interface RepairOptions {
   port: number;
+  /**
+   * "add" (default) appends --remote-debugging-port where missing; "remove"
+   * strips it (any port) from the same entries — the rollback path for
+   * disable/uninstall. Remove never re-adds anything.
+   */
+  action?: LauncherAction;
   /** Report what would change without writing anything. */
   dryRun?: boolean;
   /**
@@ -77,7 +87,8 @@ export function psScript(
   dryRun: boolean,
   registryKeys: string[] = DEFAULT_REGISTRY_KEYS,
   shortcutMatch = "*ZCode.exe",
-  exeName = "ZCode.exe"
+  exeName = "ZCode.exe",
+  action: LauncherAction = "add"
 ): string {
   return `
 $ErrorActionPreference = 'Continue'
@@ -86,6 +97,7 @@ $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $port = ${port}
 $dryRun = $${dryRun ? "true" : "false"}
+$mode = '${action}'
 $flag = ' --remote-debugging-port=' + $port
 $exeMatch = '${shortcutMatch.replace(/'/g, "''")}'
 $exeName = '${exeName.replace(/'/g, "''")}'
@@ -96,6 +108,13 @@ function Add-Result($kind, $p, $before, $after, $status, $reason) {
     kind = $kind; path = $p; before = $before; after = $after
     status = $status; reason = $reason
   })
+}
+
+# Strip any --remote-debugging-port=<digits> (any port, not just $port) and
+# the whitespace before it, so "app.exe --remote-debugging-port=9222" becomes
+# "app.exe" and quoted command strings stay intact.
+function Remove-Flag([string]$s) {
+  return ($s -replace '\\s*--remote-debugging-port=\\d+', '').Trim()
 }
 
 # --- shortcuts -------------------------------------------------------------
@@ -125,12 +144,19 @@ foreach ($item in $lnks) {
   if ($target -notlike $exeMatch) { continue }
 
   $before = [string]$sc.Arguments
-  if ($before -match 'remote-debugging-port') {
-    Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
-    continue
+  if ($mode -eq 'add') {
+    if ($before -match 'remote-debugging-port') {
+      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+      continue
+    }
+    $after = ($before.Trim() + $flag).Trim()
+  } else {
+    if ($before -notmatch 'remote-debugging-port') {
+      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+      continue
+    }
+    $after = Remove-Flag $before
   }
-
-  $after = ($before.Trim() + $flag).Trim()
   if ($dryRun) {
     Add-Result 'shortcut' $item.FullName $before $after 'updated' 'dry-run'
     continue
@@ -153,13 +179,21 @@ foreach ($k in $keys) {
     $key = Get-Item -LiteralPath $k
     $before = [string]$key.GetValue('')
     if ($before -notmatch [regex]::Escape($exeName)) { continue }
-    if ($before -match 'remote-debugging-port') {
-      Add-Result 'registry' $k $before $before 'already-ok' $null
-      continue
+    if ($mode -eq 'add') {
+      if ($before -match 'remote-debugging-port') {
+        Add-Result 'registry' $k $before $before 'already-ok' $null
+        continue
+      }
+      # Insert the flag directly after the executable token, keeping any
+      # placeholders ("%1") and quoting untouched.
+      $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
+    } else {
+      if ($before -notmatch 'remote-debugging-port') {
+        Add-Result 'registry' $k $before $before 'already-ok' $null
+        continue
+      }
+      $after = Remove-Flag $before
     }
-    # Insert the flag directly after the executable token, keeping any
-    # placeholders ("%1") and quoting untouched.
-    $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
     if ($dryRun) {
       Add-Result 'registry' $k $before $after 'updated' 'dry-run'
       continue
@@ -195,12 +229,13 @@ interface RawResult {
 }
 
 /**
- * Scans every launcher of the active target app and adds the CDP flag where it
- * is missing. Never throws: a platform without these mechanisms, or a missing
- * PowerShell, comes back as a report with `error` set.
+ * Scans every launcher of the active target app and adds ("add") or strips
+ * ("remove") the CDP flag. Never throws: a platform without these mechanisms,
+ * or a missing PowerShell, comes back as a report with `error` set.
  */
 export async function repairLaunchers(opts: RepairOptions): Promise<RepairReport> {
   const dryRun = opts.dryRun ?? false;
+  const action: LauncherAction = opts.action ?? "add";
   if (process.platform !== "win32") {
     return {
       supported: false,
@@ -213,7 +248,7 @@ export async function repairLaunchers(opts: RepairOptions): Promise<RepairReport
   const app = target();
   const keys = opts.registryKeys ?? app.launcher.registryKeys;
   const encoded = Buffer.from(
-    psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName),
+    psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName, action),
     "utf16le"
   ).toString("base64");
   try {

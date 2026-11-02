@@ -1443,6 +1443,10 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
+  // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
+  // a reset that left them would let the look walk right back after restart.
+  try { localStorage.removeItem(${JSON.stringify(marker)} + ':css'); } catch (e) {}
+  try { localStorage.removeItem(${JSON.stringify(marker)} + ':wallpaper'); } catch (e) {}
   if (window.__zcodeBeautify) {
     window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;

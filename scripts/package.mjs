@@ -29,6 +29,7 @@ const pluginFiles = [
   "dist/mcp/server.js",
   "README.md",
   "README.zh-CN.md",
+  "CHANGES.md",
   "LICENSE",
   "package.json",
 ];

@@ -264,6 +264,63 @@ export function buildPanelScript(
     '.zb-style-chip .zb-chip-del { flex: none; width: 14px; height: 14px; line-height: 13px; text-align: center;',
       ' border-radius: 50%; font-size: 10px; opacity: .5; }',
     '.zb-style-chip .zb-chip-del:hover { opacity: 1; background: rgba(255,255,255,.2); }',
+    // Changelog window (关于页「更新日志」): same modal shape as the bubble
+    // editor, wider and taller — it shows whole release sections at once.
+    // Body is the only scroller (head stays pinned); markdown typography is
+    // namespaced under .zb-chlog-md so ZCode's own styles never collide.
+    // IMPORTANT: ZCode runs Tailwind preflight (ol/ul lose list-style,
+    // margin and padding) — every list property must be re-set here or the
+    // changelog renders as a flat marker-less wall of text.
+    '#zb-chlog-win { position: fixed; inset: 0; z-index: 2147483647; display: flex;',
+      ' align-items: center; justify-content: center; }',
+    '#zb-chlog-win[hidden] { display: none; }',
+    '#zb-chlog-win-mask { position: absolute; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }',
+    '#zb-chlog-win-card { position: relative; width: min(680px, calc(100vw - 48px)); height: min(72vh, 640px);',
+      ' display: flex; flex-direction: column; background: rgba(22,22,28,.97);',
+      ' border: 1px solid rgba(255,255,255,.14); border-radius: 14px;',
+      ' box-shadow: 0 16px 56px rgba(0,0,0,.55); }',
+    '#zb-chlog-win-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px 11px;',
+      ' font-size: 13px; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.08); flex: none; }',
+    '#zb-chlog-win-sub { font-weight: 400; font-size: 11px; opacity: .5; margin-left: auto; }',
+    '#zb-chlog-win-close { flex: none; width: 28px; height: 28px; border-radius: 7px; background: none; border: none;',
+      ' color: inherit; opacity: .55; font-size: 14px; line-height: 1; cursor: pointer; }',
+    '#zb-chlog-win-close:hover { opacity: 1; background: rgba(255,255,255,.1); }',
+    '#zb-chlog-body { flex: 1; overflow-y: auto; padding: 12px 22px 18px; font-size: 13px; line-height: 1.9;',
+      ' color: #dce4f5; user-select: text; }',
+    '.zb-chlog-empty { text-align: center; opacity: .55; padding: 40px 12px; font-size: 12px; }',
+    '.zb-chlog-md h1 { font-size: 15px; margin: 4px 0 6px; }',
+    // Version section head: monospace accent version + pill + title, baseline
+    // aligned so the pill doesn't drag the row up; generous top margin makes
+    // each release read as a distinct block.
+    '.zb-chlog-md h2 { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; font-size: 14px;',
+      ' margin: 28px 0 8px; padding-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,.12); }',
+    '.zb-chlog-md h2:first-of-type { margin-top: 6px; }',
+    // Plain (non-version) h2: block sub-heading, no version chrome.
+    '.zb-chlog-md h2.zb-chlog-h2p { display: block; font-size: 13px; font-weight: 600; opacity: .85;',
+      ' margin: 22px 0 6px; padding-bottom: 0; border-bottom: none; }',
+    // NOTE: the panel-wide font rule below (#zcode-beautify-panel-root *)
+    // carries an ID (1,0,0) and beats any class-only selector — font rules
+    // that deviate from it MUST be prefixed with the root id to win.
+    '#zcode-beautify-panel-root .zb-chlog-md h2 > span:first-child { font-family: ui-monospace, Consolas, "Courier New", monospace;',
+      ' font-weight: 600; letter-spacing: .4px; color: #8fb7ff; }',
+    '.zb-chlog-md .zb-chlog-vt { font-weight: 400; font-size: 12.5px; opacity: .62; }',
+    '.zb-chlog-md .zb-chlog-cur { flex: none; align-self: center; font-size: 10.5px; font-weight: 500; padding: 1.5px 9px;',
+      ' border-radius: 999px; background: rgba(122,162,247,.24); border: 1px solid rgba(122,162,247,.55); color: #dbe6ff; }',
+    '.zb-chlog-md blockquote { margin: 10px 0 12px; padding: 8px 14px; font-size: 12.5px; line-height: 1.95; opacity: .9;',
+      ' border-left: 3px solid rgba(122,162,247,.45); background: rgba(122,162,247,.07);',
+      ' border-radius: 0 8px 8px 0; }',
+    '.zb-chlog-md ul { margin: 6px 0 12px; padding-left: 21px; list-style: disc outside; }',
+    '.zb-chlog-md li { display: list-item; margin: 8px 0; padding-left: 2px; }',
+    '.zb-chlog-md li::marker { color: rgba(143,183,255,.8); }',
+    '.zb-chlog-md li.zb-chlog-li2 { margin: 5px 0 5px 8px; list-style: circle; opacity: .94; }',
+    '.zb-chlog-md p { margin: 6px 0; }',
+    '.zb-chlog-md b { font-weight: 600; color: #f2f5fc; }',
+    '#zcode-beautify-panel-root .zb-chlog-md code { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px;',
+      ' background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.08); border-radius: 4px; padding: 1px 5px; }',
+    // Tail line: the file's h1 (filename + tagline), muted, after the last
+    // version section.
+    '.zb-chlog-md .zb-chlog-tail { margin: 28px 0 2px; padding-top: 12px; font-size: 11.5px; opacity: .5;',
+      ' text-align: center; border-top: 1px solid rgba(255,255,255,.1); }',
     '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08);',
       ' border-radius: 12px; padding: 2px 14px; }',
     '.zb-card .zb-set:last-child, .zb-card .zb-actions:last-child, .zb-card .zb-import-row:last-child { padding-bottom: 10px; }',
@@ -710,11 +767,21 @@ export function buildPanelScript(
     '      <div class="zb-sched-mode"><span title="场景壁纸录制输出的分辨率;默认=壁纸项目自带尺寸">录制分辨率</span>' +
     '        <select id="zb-import-res"><option value="auto">默认(跟随壁纸)</option><option value="1920x1080">1920×1080</option><option value="1280x720">1280×720(省电)</option><option value="custom">自定义…</option></select>' +
     '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" hidden>' +
-    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
-    '      </div>' +
-    '    </div>' +
-    '    </div>' +
-    '    <div id="zb-tab-about" hidden>' +
+'        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
+'      </div>' +
+'    </div>' +
+'    <div class="zb-block" id="zb-card-experimental">' +
+'      <div class="zb-block-title">实验性 CDP 注入</div>' +
+'      <div class="zb-card">' +
+'      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">状态</span><span class="zb-set-sub" id="zb-exp-sub">CDP 调试端口(127.0.0.1,无鉴权)驱动壁纸注入与面板;开启期间本机任意进程都可连接该端口</span></div>' +
+'        <span class="zb-set-val" id="zb-exp-state">—</span></div>' +
+'      <div class="zb-actions" style="padding-top:8px">' +
+'        <button class="zb-btn" id="zb-exp-disable" title="停用注入、停止服务,并从启动项移除 CDP flag;完全重启客户端后恢复默认外观">停用并清理启动项</button>' +
+'      </div>' +
+'      </div>' +
+'    </div>' +
+'    </div>' +
+'    <div id="zb-tab-about" hidden>' +
     '    <div class="zb-ab-hero">' +
     '      <div class="zb-ab-logo">🎨</div>' +
     '      <div class="zb-ab-name">ZCode Beautify</div>' +
@@ -734,6 +801,8 @@ export function buildPanelScript(
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">插件信息</div>' +
     '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">更新日志</span><span class="zb-set-sub">每个版本改了什么,窗口内直接阅读</span></div>' +
+    '        <div class="zb-ctrl"><button class="zb-btn" id="zb-ab-chlog" title="打开随插件附带的 CHANGES.md">📄 更新日志</button></div></div>' +
     '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">版本更新</span><span class="zb-set-sub" id="zb-ab-upd-sub">对照 GitHub 最新发布检查当前安装</span></div>' +
     '        <div class="zb-ctrl"><button class="zb-btn" id="zb-ab-check" title="向 GitHub 查询最新发布并与当前版本对比">⟳ 检查更新</button>' +
     '        <button class="zb-btn" id="zb-ab-copy-rel" hidden title="复制最新发布的下载页地址">⧉ 链接</button></div></div>' +
@@ -847,6 +916,15 @@ export function buildPanelScript(
     '    </div>' +
     '    <div class="zb-win-foot">所有更改实时生效并保存;✓ 完成 / Esc 仅关闭窗口</div>' +
     '    <div class="zb-actions" style="justify-content:flex-end;padding-top:4px"><button class="zb-btn" id="zb-bubble-done" title="关闭窗口(更改已实时应用)">✓ 完成</button></div>' +
+    '  </div>' +
+    '</div>' +
+    '<div id="zb-chlog-win" hidden>' +
+    '  <div id="zb-chlog-win-mask"></div>' +
+    '  <div id="zb-chlog-win-card">' +
+    '    <div id="zb-chlog-win-head"><span>📄 更新日志</span>' +
+    '      <span id="zb-chlog-win-sub">随插件附带的 CHANGES.md · Esc 关闭</span>' +
+    '      <button id="zb-chlog-win-close" title="关闭 (Esc)">✕</button></div>' +
+    '    <div id="zb-chlog-body" class="zb-chlog-md"><div class="zb-chlog-empty">加载中…</div></div>' +
     '  </div>' +
     '</div>' +
     '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>';
@@ -1101,6 +1179,17 @@ export function buildPanelScript(
           resetBtn.textContent = '还原外观';
           resetBtn.setAttribute('data-mode', 'reset');
           resetBtn.title = '当前已是默认外观';
+        }
+        var expState = $('zb-exp-state');
+        if (expState) {
+          var exp = c.experimental || {};
+          var expOn = exp.enabled === true;
+          expState.textContent = expOn ? '已启用' : '已停用';
+          if (expOn && exp.migrated) {
+            $('zb-exp-sub').textContent = '沿用开启状态(自动迁移,未显式确认)。CDP 调试端口(127.0.0.1,无鉴权)驱动壁纸注入与面板;开启期间本机任意进程都可连接该端口';
+          }
+          var expBtn = $('zb-exp-disable');
+          if (expBtn) expBtn.hidden = !expOn;
         }
       })
       .catch(function () { setOffline(true); });
@@ -1761,6 +1850,7 @@ export function buildPanelScript(
   $('zb-bubble-win-mask').addEventListener('click', zbBubbleWinClose);
   var zbWinEsc = function (e) {
     if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('keydown', zbWinEsc); return; }
+    if (e.key === 'Escape' && !$('zb-chlog-win').hidden) zbChlogClose();
     if (e.key === 'Escape' && !$('zb-bubble-win').hidden) zbBubbleWinClose();
   };
   document.addEventListener('keydown', zbWinEsc);
@@ -3315,6 +3405,18 @@ export function buildPanelScript(
     refresh();
   });
 
+  // 停用实验性注入: 清注入 + 停服务 + 从启动项剥离 CDP flag。服务响应后会
+  // 自行退出,面板随之离线是预期行为 — 用户刚要求整体停用。
+  $('zb-exp-disable').addEventListener('click', function () {
+    if (!window.confirm('停用实验性 CDP 注入?\\n将清除注入外观、停止服务,并从启动项移除 CDP flag;完全重启 ZCode 后恢复默认外观。')) return;
+    post('/api/experimental/disable', {}, function (d) {
+      if (d && d.error) { status(d.error); return; }
+      var s = $('zb-exp-state'); if (s) s.textContent = '已停用';
+      var b = $('zb-exp-disable'); if (b) b.hidden = true;
+      status('已停用并清理启动项;请完全重启 ZCode');
+    });
+  });
+
   // --- tabs (壁纸 / 定时播放) ------------------------------------------------
   // Library/history rebuilds are DIRTY-driven: re-rendering the lists on
   // every tab switch recreated every <img> and the panel flashed black
@@ -3469,6 +3571,112 @@ export function buildPanelScript(
   $('zb-ab-copy-rel').addEventListener('click', function () {
     if (zbLastReleaseUrl) zbCopyRepo(zbLastReleaseUrl, '发布页');
   });
+
+  // --- 关于 page: changelog window (更新日志) --------------------------------
+  // Renders the plugin's own CHANGES.md (lazy-loaded once from /api/changelog
+  // and cached for the panel's lifetime) in a bubble-editor-style modal. The
+  // markdown is a known shape — h1 title, per-version h2 sections (newest
+  // first), one lead blockquote summary, flat lists, bold + code spans — so a
+  // tiny renderer beats shipping a parser; text is HTML-escaped BEFORE any tag
+  // is synthesized, and the version equal to the running build gets a
+  // 「当前版本」badge the window opens on.
+  var zbChlogMd = null;
+  function zbChlogInline(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+      .replace(/\\*\\*([^*]+)\\*\\*/g, '<b>$1</b>');
+  }
+  // Display order (preference): version sections NEWEST FIRST; the LEAD
+  // blockquote summary (the version-history list before the first section)
+  // and the h1 (filename + tagline) are stashed and appended at the very end
+  // — the window must open straight onto the newest version's content.
+  // Blockquotes INSIDE a section (the 参考…/定位… intros) render in
+  // place: they belong to their section.
+  function zbChlogRender(md) {
+    var lines = md.split(/\\r?\\n/);
+    var out = [], inQuote = false, inList = false, quoteBuf = [], h1Tail = '', seenSection = false;
+    var closeQuote = function () { if (inQuote) { out.push('</blockquote>'); inQuote = false; } };
+    var closeList = function () { if (inList) { out.push('</ul>'); inList = false; } };
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i], m = /^##\\s+(v?\\d[\\w.]*)\\s*[—–-]*\\s*(.*)$/.exec(ln);
+      if (m) {
+        closeQuote(); closeList();
+        seenSection = true;
+        var cur = m[1].replace(/^v/, '') === VERSION;
+        out.push('<h2><span>' + m[1] + '</span>' +
+          (cur ? '<span class="zb-chlog-cur">当前版本</span>' : '') +
+          (m[2] ? '<span class="zb-chlog-vt">' + zbChlogInline(m[2]) + '</span>' : '') + '</h2>');
+      } else if (/^##\\s+/.test(ln)) {
+        // Non-version section head (关键技术事实/回滚方式/验证…): plain sub-
+        // heading, no badge, no monospace accent.
+        closeQuote(); closeList();
+        seenSection = true;
+        out.push('<h2 class="zb-chlog-h2p">' + zbChlogInline(ln.replace(/^##\\s+/, '')) + '</h2>');
+      } else if (/^#\\s+/.test(ln)) {
+        closeQuote(); closeList();
+        h1Tail = '<div class="zb-chlog-tail">' + zbChlogInline(ln.replace(/^#\\s+/, '')) + '</div>';
+      } else if (/^>\\s?/.test(ln)) {
+        closeList();
+        if (seenSection) {
+          if (!inQuote) { out.push('<blockquote>'); inQuote = true; }
+          else out.push('<br>');
+          out.push(zbChlogInline(ln.replace(/^>\\s?/, '')));
+        } else {
+          quoteBuf.push(zbChlogInline(ln.replace(/^>\\s?/, '')));
+        }
+      } else if (/^\\s*-\\s+/.test(ln)) {
+        closeQuote();
+        if (!inList) { out.push('<ul>'); inList = true; }
+        var deep = /^ {2,}/.test(ln) ? ' class="zb-chlog-li2"' : '';
+        out.push('<li' + deep + '>' + zbChlogInline(ln.replace(/^\\s*-\\s+/, '')) + '</li>');
+      } else if (/^\\s*$/.test(ln)) {
+        closeQuote(); closeList();
+      } else {
+        closeQuote(); closeList();
+        out.push('<p>' + zbChlogInline(ln) + '</p>');
+      }
+    }
+    closeQuote(); closeList();
+    if (quoteBuf.length) out.push('<blockquote>' + quoteBuf.join('<br>') + '</blockquote>');
+    if (h1Tail) out.push(h1Tail);
+    return out.join('');
+  }
+  function zbChlogOpen() {
+    var body = $('zb-chlog-body');
+    $('zb-chlog-win').hidden = false;
+    if (zbChlogMd !== null) { body.innerHTML = zbChlogRender(zbChlogMd); zbChlogScrollCur(body); return; }
+    body.innerHTML = '<div class="zb-chlog-empty">加载中…</div>';
+    apiFetch('/api/changelog')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        // The window may have been closed while the fetch was in flight;
+        // render only if it is still open so a stray result cannot reopen it.
+        if ($('zb-chlog-win').hidden) return;
+        if (d && d.ok && typeof d.markdown === 'string' && d.markdown) {
+          zbChlogMd = d.markdown;
+          body.innerHTML = zbChlogRender(zbChlogMd);
+          zbChlogScrollCur(body);
+        } else {
+          body.innerHTML = '<div class="zb-chlog-empty">更新日志文件缺失(安装包未包含 CHANGES.md)</div>';
+        }
+      })
+      .catch(function () {
+        if ($('zb-chlog-win').hidden) return;
+        body.innerHTML = '<div class="zb-chlog-empty">无法读取更新日志(美化服务未响应)</div>';
+      });
+  }
+  // Open on the running build's section: scroll so its h2 sits just below
+  // the pinned head (offsetTop is relative to the positioned card).
+  function zbChlogScrollCur(body) {
+    var cur = body.querySelector('.zb-chlog-cur');
+    if (!cur) return;
+    var h2 = cur.closest('h2');
+    if (h2) body.scrollTop = Math.max(0, h2.offsetTop - 46);
+  }
+  function zbChlogClose() { $('zb-chlog-win').hidden = true; }
+  $('zb-ab-chlog').addEventListener('click', zbChlogOpen);
+  $('zb-chlog-win-close').addEventListener('click', zbChlogClose);
+  $('zb-chlog-win-mask').addEventListener('click', zbChlogClose);
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');

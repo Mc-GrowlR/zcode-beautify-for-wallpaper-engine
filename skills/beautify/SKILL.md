@@ -65,10 +65,15 @@ ZCode-only; under WorkBuddy the MCP/panel accept the parameters but skip them.
    `dim`). The tool copies the image into the plugin data dir, extracts the MD3
    source color, generates light/dark schemes, and injects everything into the
    running ZCode renderer.
-3. **On CDP/port errors**: the ZCode instance is running without the debug
-   port. Instruct the user to quit ZCode completely and start it via
-   `node <plugin-root>/dist/cli.js launch`, or via watch mode:
-   `node <plugin-root>/dist/cli.js watch` (keeps re-injecting across restarts).
+3. **On CDP/port errors**, first check the opt-in gate (`beautify_status` →
+   `experimental.enabled`). When it is `false` (default since 0.6.0), the
+   injection tools refuse to act: ask the user to consent, then call
+   `enable_experimental` (records consent, repairs the launch entries, starts
+   the service). When it is `true` and the port is still unreachable, the
+   ZCode instance is running without the debug port: instruct the user to quit
+   ZCode completely and start it via `node <plugin-root>/dist/cli.js launch`,
+   or via watch mode: `node <plugin-root>/dist/cli.js watch` (keeps
+   re-injecting across restarts).
 4. **Fine-tune with `apply_options`** (blur / dim / monet / wallpaper_visible /
    fit) when the user wants adjustments — it does not need the image path
    again. `fit` picks the framing: `cover` fills and crops, `contain`
@@ -96,9 +101,14 @@ ZCode-only; under WorkBuddy the MCP/panel accept the parameters but skip them.
 | `refresh_theme` | Re-inject stored theme after a restart |
 | `reset_appearance` | Remove wallpaper and overrides |
 | `beautify_status` | Show stored config |
+| `enable_experimental` | One-time opt-in to the experimental CDP injection (off by default): records consent, adds the CDP flag to launch entries, starts the service |
+| `disable_experimental` | Opt out and roll back: clears the injected theme (incl. the renderer cache), stops the service, strips the flag (`clean_launchers: false` keeps it) |
 
 ## Constraints
 
+- The experimental CDP injection is **off by default** (0.6.0+): `set_background`
+  / `apply_options` / `refresh_theme` return guidance until `enable_experimental`
+  is called once (with the user's consent — see the README security notes).
 - ZCode must be running (or startable) with `--remote-debugging-port=9222`.
 - Themes live in CDP sessions: they are wiped when ZCode restarts. Watch mode
   makes re-injection automatic.

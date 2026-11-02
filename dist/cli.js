@@ -1603,6 +1603,10 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
+  // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
+  // a reset that left them would let the look walk right back after restart.
+  try { localStorage.removeItem(${JSON.stringify(marker)} + ':css'); } catch (e) {}
+  try { localStorage.removeItem(${JSON.stringify(marker)} + ':wallpaper'); } catch (e) {}
   if (window.__zcodeBeautify) {
     window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
@@ -7616,14 +7620,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports.write = function(path14, frames, spec, encoder) {
+    exports.write = function(path15, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path14.match(/\.[a-zA-Z]+$/);
+      const matches = path15.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path14}' has an unexpected suffix`);
+        throw new Error(`GIF '${path15}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path14, gif2.buffer).then(() => {
+        return _writeBinary(path15, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -7695,9 +7699,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path14) {
+    function _readBinary(path15) {
       return new Promise((resolve, reject) => {
-        fs15.readFile(path14, (err, buffer) => {
+        fs15.readFile(path15, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -7705,9 +7709,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path14, buffer) {
+    function _writeBinary(path15, buffer) {
       return new Promise((resolve, reject) => {
-        fs15.writeFile(path14, buffer, (err) => {
+        fs15.writeFile(path15, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -9718,9 +9722,9 @@ var require_decoder = __commonJS({
         return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
       }
       constructor.prototype = {
-        load: function load(path14) {
+        load: function load(path15) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path14, true);
+          xhr.open("GET", path15, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -20623,8 +20627,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -20932,11 +20936,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -24749,8 +24753,8 @@ var init_parseUtil2 = __esm({
     init_errors2();
     init_en2();
     makeIssue2 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -25058,11 +25062,11 @@ var init_types3 = __esm({
     init_parseUtil2();
     init_util2();
     ParseInputLazyPath2 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -29660,8 +29664,8 @@ var init_parseUtil3 = __esm({
     init_errors3();
     init_en3();
     makeIssue3 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -29969,11 +29973,11 @@ var init_types4 = __esm({
     init_parseUtil3();
     init_util3();
     ParseInputLazyPath3 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -33814,8 +33818,8 @@ var init_parseUtil4 = __esm({
     init_errors4();
     init_en4();
     makeIssue4 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -34123,11 +34127,11 @@ var init_types5 = __esm({
     init_parseUtil4();
     init_util4();
     ParseInputLazyPath4 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -38250,11 +38254,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path14) {
-      path14 = String(path14);
-      let last = path14.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path15) {
+      path15 = String(path15);
+      let last = path15.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path14.length;
+      let hasPath = last.length < path15.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -44792,8 +44796,8 @@ function isTokenizerStreamBoundsError(error) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error.stack);
 }
-async function fileTypeFromFile(path14, options) {
-  return new FileTypeParser2(options).fromFile(path14, options);
+async function fileTypeFromFile(path15, options) {
+  return new FileTypeParser2(options).fromFile(path15, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -44824,9 +44828,9 @@ var init_file_type = __esm({
           }
         }
       }
-      async fromFile(path14) {
+      async fromFile(path15) {
         this.options.signal?.throwIfAborted();
-        const fileHandle = await fs3.open(path14, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+        const fileHandle = await fs3.open(path15, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
         const fileStat = await fileHandle.stat();
         if (!fileStat.isFile()) {
           await fileHandle.close();
@@ -44835,7 +44839,7 @@ var init_file_type = __esm({
         const tokenizer = new FileTokenizer(fileHandle, {
           ...this.getTokenizerOptions(),
           fileInfo: {
-            path: path14,
+            path: path15,
             size: fileStat.size
           }
         });
@@ -45170,9 +45174,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path14, options) {
-      const mimeType = import_lite.default.getType(path14);
-      await writeFile(path14, await this.getBuffer(mimeType, options));
+    async write(path15, options) {
+      const mimeType = import_lite.default.getType(path15);
+      await writeFile(path15, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -45821,8 +45825,8 @@ var init_parseUtil5 = __esm({
     init_errors5();
     init_en5();
     makeIssue5 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -46130,11 +46134,11 @@ var init_types6 = __esm({
     init_parseUtil5();
     init_util6();
     ParseInputLazyPath5 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -50579,8 +50583,8 @@ var init_parseUtil6 = __esm({
     init_errors6();
     init_en6();
     makeIssue6 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -50888,11 +50892,11 @@ var init_types7 = __esm({
     init_parseUtil6();
     init_util7();
     ParseInputLazyPath6 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -54746,8 +54750,8 @@ var init_parseUtil7 = __esm({
     init_errors7();
     init_en7();
     makeIssue7 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -55055,11 +55059,11 @@ var init_types8 = __esm({
     init_parseUtil7();
     init_util8();
     ParseInputLazyPath7 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -59040,8 +59044,8 @@ var init_parseUtil8 = __esm({
     init_errors8();
     init_en8();
     makeIssue8 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -59349,11 +59353,11 @@ var init_types9 = __esm({
     init_parseUtil8();
     init_util9();
     ParseInputLazyPath8 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -63202,8 +63206,8 @@ var init_parseUtil9 = __esm({
     init_errors9();
     init_en9();
     makeIssue9 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -63511,11 +63515,11 @@ var init_types10 = __esm({
     init_parseUtil9();
     init_util10();
     ParseInputLazyPath9 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -67401,8 +67405,8 @@ var init_parseUtil10 = __esm({
     init_errors10();
     init_en10();
     makeIssue10 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -67710,11 +67714,11 @@ var init_types11 = __esm({
     init_parseUtil10();
     init_util11();
     ParseInputLazyPath10 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -71552,8 +71556,8 @@ var init_parseUtil11 = __esm({
     init_errors11();
     init_en11();
     makeIssue11 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -71861,11 +71865,11 @@ var init_types12 = __esm({
     init_parseUtil11();
     init_util12();
     ParseInputLazyPath11 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -75938,8 +75942,8 @@ var init_parseUtil12 = __esm({
     init_errors12();
     init_en12();
     makeIssue12 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -76247,11 +76251,11 @@ var init_types13 = __esm({
     init_parseUtil12();
     init_util13();
     ParseInputLazyPath12 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -80108,8 +80112,8 @@ var init_parseUtil13 = __esm({
     init_errors13();
     init_en13();
     makeIssue13 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -80417,11 +80421,11 @@ var init_types14 = __esm({
     init_parseUtil13();
     init_util14();
     ParseInputLazyPath13 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -84435,8 +84439,8 @@ var init_parseUtil14 = __esm({
     init_errors14();
     init_en14();
     makeIssue14 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -84744,11 +84748,11 @@ var init_types16 = __esm({
     init_parseUtil14();
     init_util15();
     ParseInputLazyPath14 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -88712,8 +88716,8 @@ var init_parseUtil15 = __esm({
     init_errors15();
     init_en15();
     makeIssue15 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -89021,11 +89025,11 @@ var init_types17 = __esm({
     init_parseUtil15();
     init_util16();
     ParseInputLazyPath15 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -95762,8 +95766,8 @@ var init_parseUtil16 = __esm({
     init_errors16();
     init_en16();
     makeIssue16 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -96071,11 +96075,11 @@ var init_types18 = __esm({
     init_parseUtil16();
     init_util17();
     ParseInputLazyPath16 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -111411,11 +111415,37 @@ var init_tokens = __esm({
   }
 });
 
+// dist/version.js
+function cmpVersion(a2, b) {
+  const seg = (v) => String(v ?? "").replace(/^v/, "").split(".").map((n2) => Number(n2) || 0);
+  const pa = seg(a2);
+  const pb = seg(b);
+  for (let i2 = 0; i2 < Math.max(pa.length, pb.length); i2++) {
+    const d = (pa[i2] ?? 0) - (pb[i2] ?? 0);
+    if (d)
+      return d;
+  }
+  return 0;
+}
+var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
+var init_version = __esm({
+  "dist/version.js"() {
+    "use strict";
+    VERSION = "0.6.0";
+    REPO_URL = "https://github.com/Logocceai/zcode-beautify";
+    FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
+    AUTHOR = "Mc-GrowlR";
+    LICENSE = "MIT";
+  }
+});
+
 // dist/core/launch.js
 var launch_exports = {};
 __export(launch_exports, {
   configFile: () => configFile,
   dataDir: () => dataDir,
+  ensureExperimentalGate: () => ensureExperimentalGate,
+  experimentalEnabled: () => experimentalEnabled,
   findAppExecutable: () => findAppExecutable,
   findZcodeExecutable: () => findZcodeExecutable,
   isAppProcessRunning: () => isAppProcessRunning,
@@ -111501,6 +111531,27 @@ function saveConfig(config) {
     fs4.renameSync(tmp, file);
   });
 }
+function experimentalEnabled(cfg = loadConfig()) {
+  return cfg.experimental?.enabled === true;
+}
+function ensureExperimentalGate() {
+  const cfg = loadConfig();
+  if (cfg.experimental)
+    return cfg;
+  const used = PRIOR_USE_KEYS.some((k) => cfg[k] !== void 0);
+  if (!used)
+    return cfg;
+  const migrated = {
+    ...cfg,
+    experimental: { enabled: true, migrated: true, consentVersion: VERSION }
+  };
+  try {
+    saveConfig(migrated);
+  } catch {
+    return cfg;
+  }
+  return migrated;
+}
 function findAppExecutable(t2 = target()) {
   return findExecutable(t2);
 }
@@ -111562,12 +111613,24 @@ async function launchApp(port, t2 = target()) {
   }
   return { started: true };
 }
-var findZcodeExecutable, execFileAsync, isZcodeProcessRunning, launchZcode;
+var PRIOR_USE_KEYS, findZcodeExecutable, execFileAsync, isZcodeProcessRunning, launchZcode;
 var init_launch = __esm({
   "dist/core/launch.js"() {
     "use strict";
     init_cdp();
     init_target();
+    init_version();
+    PRIOR_USE_KEYS = [
+      "wallpaperPath",
+      "sceneHash",
+      "sceneVideoUrl",
+      "rotation",
+      "themeColor",
+      "chatLook",
+      "bubbleLook",
+      "taskSpinnerLook",
+      "dayNight"
+    ];
     findZcodeExecutable = findAppExecutable;
     execFileAsync = promisify(execFile);
     isZcodeProcessRunning = isAppProcessRunning;
@@ -111867,6 +111930,7 @@ var init_inject = __esm({
     BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
     DEFAULT_CONFIG = {
       port: 9222,
+      experimental: { enabled: false },
       blur: 0,
       dim: 25,
       sidebarDim: 0,
@@ -113214,7 +113278,7 @@ __export(launchers_exports, {
 });
 import { execFile as execFile3 } from "node:child_process";
 import { promisify as promisify3 } from "node:util";
-function psScript(port, dryRun, registryKeys = DEFAULT_REGISTRY_KEYS, shortcutMatch = "*ZCode.exe", exeName = "ZCode.exe") {
+function psScript(port, dryRun, registryKeys = DEFAULT_REGISTRY_KEYS, shortcutMatch = "*ZCode.exe", exeName = "ZCode.exe", action = "add") {
   return `
 $ErrorActionPreference = 'Continue'
 # Without this, Chinese Windows error strings come back as mojibake through
@@ -113222,6 +113286,7 @@ $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $port = ${port}
 $dryRun = $${dryRun ? "true" : "false"}
+$mode = '${action}'
 $flag = ' --remote-debugging-port=' + $port
 $exeMatch = '${shortcutMatch.replace(/'/g, "''")}'
 $exeName = '${exeName.replace(/'/g, "''")}'
@@ -113232,6 +113297,13 @@ function Add-Result($kind, $p, $before, $after, $status, $reason) {
     kind = $kind; path = $p; before = $before; after = $after
     status = $status; reason = $reason
   })
+}
+
+# Strip any --remote-debugging-port=<digits> (any port, not just $port) and
+# the whitespace before it, so "app.exe --remote-debugging-port=9222" becomes
+# "app.exe" and quoted command strings stay intact.
+function Remove-Flag([string]$s) {
+  return ($s -replace '\\s*--remote-debugging-port=\\d+', '').Trim()
 }
 
 # --- shortcuts -------------------------------------------------------------
@@ -113261,12 +113333,19 @@ foreach ($item in $lnks) {
   if ($target -notlike $exeMatch) { continue }
 
   $before = [string]$sc.Arguments
-  if ($before -match 'remote-debugging-port') {
-    Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
-    continue
+  if ($mode -eq 'add') {
+    if ($before -match 'remote-debugging-port') {
+      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+      continue
+    }
+    $after = ($before.Trim() + $flag).Trim()
+  } else {
+    if ($before -notmatch 'remote-debugging-port') {
+      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+      continue
+    }
+    $after = Remove-Flag $before
   }
-
-  $after = ($before.Trim() + $flag).Trim()
   if ($dryRun) {
     Add-Result 'shortcut' $item.FullName $before $after 'updated' 'dry-run'
     continue
@@ -113289,13 +113368,21 @@ foreach ($k in $keys) {
     $key = Get-Item -LiteralPath $k
     $before = [string]$key.GetValue('')
     if ($before -notmatch [regex]::Escape($exeName)) { continue }
-    if ($before -match 'remote-debugging-port') {
-      Add-Result 'registry' $k $before $before 'already-ok' $null
-      continue
+    if ($mode -eq 'add') {
+      if ($before -match 'remote-debugging-port') {
+        Add-Result 'registry' $k $before $before 'already-ok' $null
+        continue
+      }
+      # Insert the flag directly after the executable token, keeping any
+      # placeholders ("%1") and quoting untouched.
+      $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
+    } else {
+      if ($before -notmatch 'remote-debugging-port') {
+        Add-Result 'registry' $k $before $before 'already-ok' $null
+        continue
+      }
+      $after = Remove-Flag $before
     }
-    # Insert the flag directly after the executable token, keeping any
-    # placeholders ("%1") and quoting untouched.
-    $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
     if ($dryRun) {
       Add-Result 'registry' $k $before $after 'updated' 'dry-run'
       continue
@@ -113322,6 +113409,7 @@ foreach ($k in $keys) {
 }
 async function repairLaunchers(opts) {
   const dryRun = opts.dryRun ?? false;
+  const action = opts.action ?? "add";
   if (process.platform !== "win32") {
     return {
       supported: false,
@@ -113332,7 +113420,7 @@ async function repairLaunchers(opts) {
   }
   const app = target();
   const keys = opts.registryKeys ?? app.launcher.registryKeys;
-  const encoded = Buffer.from(psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName), "utf16le").toString("base64");
+  const encoded = Buffer.from(psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName, action), "utf16le").toString("base64");
   try {
     const { stdout } = await execFileAsync2("powershell", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { maxBuffer: 8 * 1024 * 1024, timeout: 12e4, windowsHide: true });
     const trimmed = stdout.trim();
@@ -113370,27 +113458,98 @@ var init_launchers = __esm({
   }
 });
 
-// dist/version.js
-function cmpVersion(a2, b) {
-  const seg = (v) => String(v ?? "").replace(/^v/, "").split(".").map((n2) => Number(n2) || 0);
-  const pa = seg(a2);
-  const pb = seg(b);
-  for (let i2 = 0; i2 < Math.max(pa.length, pb.length); i2++) {
-    const d = (pa[i2] ?? 0) - (pb[i2] ?? 0);
-    if (d)
-      return d;
-  }
-  return 0;
+// dist/core/experimental.js
+var experimental_exports = {};
+__export(experimental_exports, {
+  disableExperimental: () => disableExperimental,
+  enableExperimental: () => enableExperimental,
+  spawnServeDetached: () => spawnServeDetached
+});
+import { spawn as spawn3 } from "node:child_process";
+import { existsSync as existsSync2, readFileSync } from "node:fs";
+import path11 from "node:path";
+function spawnServeDetached(apiPort, cliJs) {
+  fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r2) => {
+    if (!r2.ok)
+      throw new Error("unhealthy");
+    return r2.json();
+  }).then((body) => {
+    const h = body;
+    if (h?.service !== "zcode-beautify" || (h.target ?? "zcode") !== target().id) {
+      throw new Error("foreign service");
+    }
+  }).catch(() => {
+    try {
+      const childEnv = { ...process.env };
+      spawn3(process.execPath, [cliJs, "serve", "--detach", "--api-port", String(apiPort)], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        env: childEnv
+      }).unref();
+    } catch {
+    }
+  });
 }
-var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
-var init_version = __esm({
-  "dist/version.js"() {
+async function enableExperimental() {
+  const cfg = ensureExperimentalGate();
+  cfg.experimental = {
+    enabled: true,
+    consentedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    consentVersion: VERSION
+  };
+  saveConfig(cfg);
+  const port = cfg.port ?? target().cdpPort;
+  const apiPort = cfg.apiPort ?? target().apiPort;
+  const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
+  const launchers = await repairLaunchers2({ port });
+  return { enabled: true, port, apiPort, launchers };
+}
+async function teardownLive() {
+  const cfg = loadConfig();
+  const port = cfg.port ?? target().cdpPort;
+  try {
+    const tokenFile = path11.join(dataDir(), "serve.token");
+    if (existsSync2(tokenFile)) {
+      const token = readFileSync(tokenFile, "utf8").trim();
+      const apiPort = cfg.apiPort ?? target().apiPort;
+      const res = await fetch(`http://127.0.0.1:${apiPort}/api/experimental/disable`, {
+        method: "POST",
+        headers: { "X-Beautify-Token": token },
+        signal: AbortSignal.timeout(6e3)
+      });
+      if (res.ok)
+        return { via: "service", windows: 0 };
+    }
+  } catch {
+  }
+  try {
+    const windows = await resetZCode(port);
+    return { via: "cdp", windows };
+  } catch {
+    return { via: "none", windows: 0 };
+  }
+}
+async function disableExperimental(opts = {}) {
+  const cfg = loadConfig();
+  const port = cfg.port ?? target().cdpPort;
+  const teardown = await teardownLive();
+  cfg.experimental = { enabled: false };
+  saveConfig(cfg);
+  let launchers;
+  if (opts.cleanLaunchers ?? true) {
+    const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
+    launchers = await repairLaunchers2({ port, action: "remove" });
+  }
+  return { enabled: false, port, apiPort: cfg.apiPort ?? target().apiPort, launchers, teardown };
+}
+var init_experimental = __esm({
+  "dist/core/experimental.js"() {
     "use strict";
-    VERSION = "0.5.1";
-    REPO_URL = "https://github.com/Logocceai/zcode-beautify";
-    FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
-    AUTHOR = "Mc-GrowlR";
-    LICENSE = "MIT";
+    init_launch();
+    init_inject();
+    init_target();
+    init_version();
   }
 });
 
@@ -113631,6 +113790,63 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '.zb-style-chip .zb-chip-del { flex: none; width: 14px; height: 14px; line-height: 13px; text-align: center;',
       ' border-radius: 50%; font-size: 10px; opacity: .5; }',
     '.zb-style-chip .zb-chip-del:hover { opacity: 1; background: rgba(255,255,255,.2); }',
+    // Changelog window (\u5173\u4E8E\u9875\u300C\u66F4\u65B0\u65E5\u5FD7\u300D): same modal shape as the bubble
+    // editor, wider and taller \u2014 it shows whole release sections at once.
+    // Body is the only scroller (head stays pinned); markdown typography is
+    // namespaced under .zb-chlog-md so ZCode's own styles never collide.
+    // IMPORTANT: ZCode runs Tailwind preflight (ol/ul lose list-style,
+    // margin and padding) \u2014 every list property must be re-set here or the
+    // changelog renders as a flat marker-less wall of text.
+    '#zb-chlog-win { position: fixed; inset: 0; z-index: 2147483647; display: flex;',
+      ' align-items: center; justify-content: center; }',
+    '#zb-chlog-win[hidden] { display: none; }',
+    '#zb-chlog-win-mask { position: absolute; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }',
+    '#zb-chlog-win-card { position: relative; width: min(680px, calc(100vw - 48px)); height: min(72vh, 640px);',
+      ' display: flex; flex-direction: column; background: rgba(22,22,28,.97);',
+      ' border: 1px solid rgba(255,255,255,.14); border-radius: 14px;',
+      ' box-shadow: 0 16px 56px rgba(0,0,0,.55); }',
+    '#zb-chlog-win-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px 11px;',
+      ' font-size: 13px; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.08); flex: none; }',
+    '#zb-chlog-win-sub { font-weight: 400; font-size: 11px; opacity: .5; margin-left: auto; }',
+    '#zb-chlog-win-close { flex: none; width: 28px; height: 28px; border-radius: 7px; background: none; border: none;',
+      ' color: inherit; opacity: .55; font-size: 14px; line-height: 1; cursor: pointer; }',
+    '#zb-chlog-win-close:hover { opacity: 1; background: rgba(255,255,255,.1); }',
+    '#zb-chlog-body { flex: 1; overflow-y: auto; padding: 12px 22px 18px; font-size: 13px; line-height: 1.9;',
+      ' color: #dce4f5; user-select: text; }',
+    '.zb-chlog-empty { text-align: center; opacity: .55; padding: 40px 12px; font-size: 12px; }',
+    '.zb-chlog-md h1 { font-size: 15px; margin: 4px 0 6px; }',
+    // Version section head: monospace accent version + pill + title, baseline
+    // aligned so the pill doesn't drag the row up; generous top margin makes
+    // each release read as a distinct block.
+    '.zb-chlog-md h2 { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; font-size: 14px;',
+      ' margin: 28px 0 8px; padding-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,.12); }',
+    '.zb-chlog-md h2:first-of-type { margin-top: 6px; }',
+    // Plain (non-version) h2: block sub-heading, no version chrome.
+    '.zb-chlog-md h2.zb-chlog-h2p { display: block; font-size: 13px; font-weight: 600; opacity: .85;',
+      ' margin: 22px 0 6px; padding-bottom: 0; border-bottom: none; }',
+    // NOTE: the panel-wide font rule below (#zcode-beautify-panel-root *)
+    // carries an ID (1,0,0) and beats any class-only selector \u2014 font rules
+    // that deviate from it MUST be prefixed with the root id to win.
+    '#zcode-beautify-panel-root .zb-chlog-md h2 > span:first-child { font-family: ui-monospace, Consolas, "Courier New", monospace;',
+      ' font-weight: 600; letter-spacing: .4px; color: #8fb7ff; }',
+    '.zb-chlog-md .zb-chlog-vt { font-weight: 400; font-size: 12.5px; opacity: .62; }',
+    '.zb-chlog-md .zb-chlog-cur { flex: none; align-self: center; font-size: 10.5px; font-weight: 500; padding: 1.5px 9px;',
+      ' border-radius: 999px; background: rgba(122,162,247,.24); border: 1px solid rgba(122,162,247,.55); color: #dbe6ff; }',
+    '.zb-chlog-md blockquote { margin: 10px 0 12px; padding: 8px 14px; font-size: 12.5px; line-height: 1.95; opacity: .9;',
+      ' border-left: 3px solid rgba(122,162,247,.45); background: rgba(122,162,247,.07);',
+      ' border-radius: 0 8px 8px 0; }',
+    '.zb-chlog-md ul { margin: 6px 0 12px; padding-left: 21px; list-style: disc outside; }',
+    '.zb-chlog-md li { display: list-item; margin: 8px 0; padding-left: 2px; }',
+    '.zb-chlog-md li::marker { color: rgba(143,183,255,.8); }',
+    '.zb-chlog-md li.zb-chlog-li2 { margin: 5px 0 5px 8px; list-style: circle; opacity: .94; }',
+    '.zb-chlog-md p { margin: 6px 0; }',
+    '.zb-chlog-md b { font-weight: 600; color: #f2f5fc; }',
+    '#zcode-beautify-panel-root .zb-chlog-md code { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 11.5px;',
+      ' background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.08); border-radius: 4px; padding: 1px 5px; }',
+    // Tail line: the file's h1 (filename + tagline), muted, after the last
+    // version section.
+    '.zb-chlog-md .zb-chlog-tail { margin: 28px 0 2px; padding-top: 12px; font-size: 11.5px; opacity: .5;',
+      ' text-align: center; border-top: 1px solid rgba(255,255,255,.1); }',
     '.zb-card { background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08);',
       ' border-radius: 12px; padding: 2px 14px; }',
     '.zb-card .zb-set:last-child, .zb-card .zb-actions:last-child, .zb-card .zb-import-row:last-child { padding-bottom: 10px; }',
@@ -114077,11 +114293,21 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '      <div class="zb-sched-mode"><span title="\u573A\u666F\u58C1\u7EB8\u5F55\u5236\u8F93\u51FA\u7684\u5206\u8FA8\u7387;\u9ED8\u8BA4=\u58C1\u7EB8\u9879\u76EE\u81EA\u5E26\u5C3A\u5BF8">\u5F55\u5236\u5206\u8FA8\u7387</span>' +
     '        <select id="zb-import-res"><option value="auto">\u9ED8\u8BA4(\u8DDF\u968F\u58C1\u7EB8)</option><option value="1920x1080">1920\xD71080</option><option value="1280x720">1280\xD7720(\u7701\u7535)</option><option value="custom">\u81EA\u5B9A\u4E49\u2026</option></select>' +
     '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" hidden>' +
-    '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
-    '      </div>' +
-    '    </div>' +
-    '    </div>' +
-    '    <div id="zb-tab-about" hidden>' +
+'        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
+'      </div>' +
+'    </div>' +
+'    <div class="zb-block" id="zb-card-experimental">' +
+'      <div class="zb-block-title">\u5B9E\u9A8C\u6027 CDP \u6CE8\u5165</div>' +
+'      <div class="zb-card">' +
+'      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u72B6\u6001</span><span class="zb-set-sub" id="zb-exp-sub">CDP \u8C03\u8BD5\u7AEF\u53E3(127.0.0.1,\u65E0\u9274\u6743)\u9A71\u52A8\u58C1\u7EB8\u6CE8\u5165\u4E0E\u9762\u677F;\u5F00\u542F\u671F\u95F4\u672C\u673A\u4EFB\u610F\u8FDB\u7A0B\u90FD\u53EF\u8FDE\u63A5\u8BE5\u7AEF\u53E3</span></div>' +
+'        <span class="zb-set-val" id="zb-exp-state">\u2014</span></div>' +
+'      <div class="zb-actions" style="padding-top:8px">' +
+'        <button class="zb-btn" id="zb-exp-disable" title="\u505C\u7528\u6CE8\u5165\u3001\u505C\u6B62\u670D\u52A1,\u5E76\u4ECE\u542F\u52A8\u9879\u79FB\u9664 CDP flag;\u5B8C\u5168\u91CD\u542F\u5BA2\u6237\u7AEF\u540E\u6062\u590D\u9ED8\u8BA4\u5916\u89C2">\u505C\u7528\u5E76\u6E05\u7406\u542F\u52A8\u9879</button>' +
+'      </div>' +
+'      </div>' +
+'    </div>' +
+'    </div>' +
+'    <div id="zb-tab-about" hidden>' +
     '    <div class="zb-ab-hero">' +
     '      <div class="zb-ab-logo">\u{1F3A8}</div>' +
     '      <div class="zb-ab-name">ZCode Beautify</div>' +
@@ -114101,6 +114327,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">\u63D2\u4EF6\u4FE1\u606F</div>' +
     '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u66F4\u65B0\u65E5\u5FD7</span><span class="zb-set-sub">\u6BCF\u4E2A\u7248\u672C\u6539\u4E86\u4EC0\u4E48,\u7A97\u53E3\u5185\u76F4\u63A5\u9605\u8BFB</span></div>' +
+    '        <div class="zb-ctrl"><button class="zb-btn" id="zb-ab-chlog" title="\u6253\u5F00\u968F\u63D2\u4EF6\u9644\u5E26\u7684 CHANGES.md">\u{1F4C4} \u66F4\u65B0\u65E5\u5FD7</button></div></div>' +
     '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u7248\u672C\u66F4\u65B0</span><span class="zb-set-sub" id="zb-ab-upd-sub">\u5BF9\u7167 GitHub \u6700\u65B0\u53D1\u5E03\u68C0\u67E5\u5F53\u524D\u5B89\u88C5</span></div>' +
     '        <div class="zb-ctrl"><button class="zb-btn" id="zb-ab-check" title="\u5411 GitHub \u67E5\u8BE2\u6700\u65B0\u53D1\u5E03\u5E76\u4E0E\u5F53\u524D\u7248\u672C\u5BF9\u6BD4">\u27F3 \u68C0\u67E5\u66F4\u65B0</button>' +
     '        <button class="zb-btn" id="zb-ab-copy-rel" hidden title="\u590D\u5236\u6700\u65B0\u53D1\u5E03\u7684\u4E0B\u8F7D\u9875\u5730\u5740">\u29C9 \u94FE\u63A5</button></div></div>' +
@@ -114214,6 +114442,15 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '    </div>' +
     '    <div class="zb-win-foot">\u6240\u6709\u66F4\u6539\u5B9E\u65F6\u751F\u6548\u5E76\u4FDD\u5B58;\u2713 \u5B8C\u6210 / Esc \u4EC5\u5173\u95ED\u7A97\u53E3</div>' +
     '    <div class="zb-actions" style="justify-content:flex-end;padding-top:4px"><button class="zb-btn" id="zb-bubble-done" title="\u5173\u95ED\u7A97\u53E3(\u66F4\u6539\u5DF2\u5B9E\u65F6\u5E94\u7528)">\u2713 \u5B8C\u6210</button></div>' +
+    '  </div>' +
+    '</div>' +
+    '<div id="zb-chlog-win" hidden>' +
+    '  <div id="zb-chlog-win-mask"></div>' +
+    '  <div id="zb-chlog-win-card">' +
+    '    <div id="zb-chlog-win-head"><span>\u{1F4C4} \u66F4\u65B0\u65E5\u5FD7</span>' +
+    '      <span id="zb-chlog-win-sub">\u968F\u63D2\u4EF6\u9644\u5E26\u7684 CHANGES.md \xB7 Esc \u5173\u95ED</span>' +
+    '      <button id="zb-chlog-win-close" title="\u5173\u95ED (Esc)">\u2715</button></div>' +
+    '    <div id="zb-chlog-body" class="zb-chlog-md"><div class="zb-chlog-empty">\u52A0\u8F7D\u4E2D\u2026</div></div>' +
     '  </div>' +
     '</div>' +
     '<div id="zb-hover-preview" hidden><video muted autoplay loop playsinline></video><img alt=""></div>';
@@ -114468,6 +114705,17 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           resetBtn.textContent = '\u8FD8\u539F\u5916\u89C2';
           resetBtn.setAttribute('data-mode', 'reset');
           resetBtn.title = '\u5F53\u524D\u5DF2\u662F\u9ED8\u8BA4\u5916\u89C2';
+        }
+        var expState = $('zb-exp-state');
+        if (expState) {
+          var exp = c.experimental || {};
+          var expOn = exp.enabled === true;
+          expState.textContent = expOn ? '\u5DF2\u542F\u7528' : '\u5DF2\u505C\u7528';
+          if (expOn && exp.migrated) {
+            $('zb-exp-sub').textContent = '\u6CBF\u7528\u5F00\u542F\u72B6\u6001(\u81EA\u52A8\u8FC1\u79FB,\u672A\u663E\u5F0F\u786E\u8BA4)\u3002CDP \u8C03\u8BD5\u7AEF\u53E3(127.0.0.1,\u65E0\u9274\u6743)\u9A71\u52A8\u58C1\u7EB8\u6CE8\u5165\u4E0E\u9762\u677F;\u5F00\u542F\u671F\u95F4\u672C\u673A\u4EFB\u610F\u8FDB\u7A0B\u90FD\u53EF\u8FDE\u63A5\u8BE5\u7AEF\u53E3';
+          }
+          var expBtn = $('zb-exp-disable');
+          if (expBtn) expBtn.hidden = !expOn;
         }
       })
       .catch(function () { setOffline(true); });
@@ -115128,6 +115376,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   $('zb-bubble-win-mask').addEventListener('click', zbBubbleWinClose);
   var zbWinEsc = function (e) {
     if (zbHvGen !== window.__zbHvGen) { document.removeEventListener('keydown', zbWinEsc); return; }
+    if (e.key === 'Escape' && !$('zb-chlog-win').hidden) zbChlogClose();
     if (e.key === 'Escape' && !$('zb-bubble-win').hidden) zbBubbleWinClose();
   };
   document.addEventListener('keydown', zbWinEsc);
@@ -116682,6 +116931,18 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     refresh();
   });
 
+  // \u505C\u7528\u5B9E\u9A8C\u6027\u6CE8\u5165: \u6E05\u6CE8\u5165 + \u505C\u670D\u52A1 + \u4ECE\u542F\u52A8\u9879\u5265\u79BB CDP flag\u3002\u670D\u52A1\u54CD\u5E94\u540E\u4F1A
+  // \u81EA\u884C\u9000\u51FA,\u9762\u677F\u968F\u4E4B\u79BB\u7EBF\u662F\u9884\u671F\u884C\u4E3A \u2014 \u7528\u6237\u521A\u8981\u6C42\u6574\u4F53\u505C\u7528\u3002
+  $('zb-exp-disable').addEventListener('click', function () {
+    if (!window.confirm('\u505C\u7528\u5B9E\u9A8C\u6027 CDP \u6CE8\u5165?\\n\u5C06\u6E05\u9664\u6CE8\u5165\u5916\u89C2\u3001\u505C\u6B62\u670D\u52A1,\u5E76\u4ECE\u542F\u52A8\u9879\u79FB\u9664 CDP flag;\u5B8C\u5168\u91CD\u542F ZCode \u540E\u6062\u590D\u9ED8\u8BA4\u5916\u89C2\u3002')) return;
+    post('/api/experimental/disable', {}, function (d) {
+      if (d && d.error) { status(d.error); return; }
+      var s = $('zb-exp-state'); if (s) s.textContent = '\u5DF2\u505C\u7528';
+      var b = $('zb-exp-disable'); if (b) b.hidden = true;
+      status('\u5DF2\u505C\u7528\u5E76\u6E05\u7406\u542F\u52A8\u9879;\u8BF7\u5B8C\u5168\u91CD\u542F ZCode');
+    });
+  });
+
   // --- tabs (\u58C1\u7EB8 / \u5B9A\u65F6\u64AD\u653E) ------------------------------------------------
   // Library/history rebuilds are DIRTY-driven: re-rendering the lists on
   // every tab switch recreated every <img> and the panel flashed black
@@ -116836,6 +117097,112 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   $('zb-ab-copy-rel').addEventListener('click', function () {
     if (zbLastReleaseUrl) zbCopyRepo(zbLastReleaseUrl, '\u53D1\u5E03\u9875');
   });
+
+  // --- \u5173\u4E8E page: changelog window (\u66F4\u65B0\u65E5\u5FD7) --------------------------------
+  // Renders the plugin's own CHANGES.md (lazy-loaded once from /api/changelog
+  // and cached for the panel's lifetime) in a bubble-editor-style modal. The
+  // markdown is a known shape \u2014 h1 title, per-version h2 sections (newest
+  // first), one lead blockquote summary, flat lists, bold + code spans \u2014 so a
+  // tiny renderer beats shipping a parser; text is HTML-escaped BEFORE any tag
+  // is synthesized, and the version equal to the running build gets a
+  // \u300C\u5F53\u524D\u7248\u672C\u300Dbadge the window opens on.
+  var zbChlogMd = null;
+  function zbChlogInline(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+      .replace(/\\*\\*([^*]+)\\*\\*/g, '<b>$1</b>');
+  }
+  // Display order (preference): version sections NEWEST FIRST; the LEAD
+  // blockquote summary (the version-history list before the first section)
+  // and the h1 (filename + tagline) are stashed and appended at the very end
+  // \u2014 the window must open straight onto the newest version's content.
+  // Blockquotes INSIDE a section (the \u53C2\u8003\u2026/\u5B9A\u4F4D\u2026 intros) render in
+  // place: they belong to their section.
+  function zbChlogRender(md) {
+    var lines = md.split(/\\r?\\n/);
+    var out = [], inQuote = false, inList = false, quoteBuf = [], h1Tail = '', seenSection = false;
+    var closeQuote = function () { if (inQuote) { out.push('</blockquote>'); inQuote = false; } };
+    var closeList = function () { if (inList) { out.push('</ul>'); inList = false; } };
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i], m = /^##\\s+(v?\\d[\\w.]*)\\s*[\u2014\u2013-]*\\s*(.*)$/.exec(ln);
+      if (m) {
+        closeQuote(); closeList();
+        seenSection = true;
+        var cur = m[1].replace(/^v/, '') === VERSION;
+        out.push('<h2><span>' + m[1] + '</span>' +
+          (cur ? '<span class="zb-chlog-cur">\u5F53\u524D\u7248\u672C</span>' : '') +
+          (m[2] ? '<span class="zb-chlog-vt">' + zbChlogInline(m[2]) + '</span>' : '') + '</h2>');
+      } else if (/^##\\s+/.test(ln)) {
+        // Non-version section head (\u5173\u952E\u6280\u672F\u4E8B\u5B9E/\u56DE\u6EDA\u65B9\u5F0F/\u9A8C\u8BC1\u2026): plain sub-
+        // heading, no badge, no monospace accent.
+        closeQuote(); closeList();
+        seenSection = true;
+        out.push('<h2 class="zb-chlog-h2p">' + zbChlogInline(ln.replace(/^##\\s+/, '')) + '</h2>');
+      } else if (/^#\\s+/.test(ln)) {
+        closeQuote(); closeList();
+        h1Tail = '<div class="zb-chlog-tail">' + zbChlogInline(ln.replace(/^#\\s+/, '')) + '</div>';
+      } else if (/^>\\s?/.test(ln)) {
+        closeList();
+        if (seenSection) {
+          if (!inQuote) { out.push('<blockquote>'); inQuote = true; }
+          else out.push('<br>');
+          out.push(zbChlogInline(ln.replace(/^>\\s?/, '')));
+        } else {
+          quoteBuf.push(zbChlogInline(ln.replace(/^>\\s?/, '')));
+        }
+      } else if (/^\\s*-\\s+/.test(ln)) {
+        closeQuote();
+        if (!inList) { out.push('<ul>'); inList = true; }
+        var deep = /^ {2,}/.test(ln) ? ' class="zb-chlog-li2"' : '';
+        out.push('<li' + deep + '>' + zbChlogInline(ln.replace(/^\\s*-\\s+/, '')) + '</li>');
+      } else if (/^\\s*$/.test(ln)) {
+        closeQuote(); closeList();
+      } else {
+        closeQuote(); closeList();
+        out.push('<p>' + zbChlogInline(ln) + '</p>');
+      }
+    }
+    closeQuote(); closeList();
+    if (quoteBuf.length) out.push('<blockquote>' + quoteBuf.join('<br>') + '</blockquote>');
+    if (h1Tail) out.push(h1Tail);
+    return out.join('');
+  }
+  function zbChlogOpen() {
+    var body = $('zb-chlog-body');
+    $('zb-chlog-win').hidden = false;
+    if (zbChlogMd !== null) { body.innerHTML = zbChlogRender(zbChlogMd); zbChlogScrollCur(body); return; }
+    body.innerHTML = '<div class="zb-chlog-empty">\u52A0\u8F7D\u4E2D\u2026</div>';
+    apiFetch('/api/changelog')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        // The window may have been closed while the fetch was in flight;
+        // render only if it is still open so a stray result cannot reopen it.
+        if ($('zb-chlog-win').hidden) return;
+        if (d && d.ok && typeof d.markdown === 'string' && d.markdown) {
+          zbChlogMd = d.markdown;
+          body.innerHTML = zbChlogRender(zbChlogMd);
+          zbChlogScrollCur(body);
+        } else {
+          body.innerHTML = '<div class="zb-chlog-empty">\u66F4\u65B0\u65E5\u5FD7\u6587\u4EF6\u7F3A\u5931(\u5B89\u88C5\u5305\u672A\u5305\u542B CHANGES.md)</div>';
+        }
+      })
+      .catch(function () {
+        if ($('zb-chlog-win').hidden) return;
+        body.innerHTML = '<div class="zb-chlog-empty">\u65E0\u6CD5\u8BFB\u53D6\u66F4\u65B0\u65E5\u5FD7(\u7F8E\u5316\u670D\u52A1\u672A\u54CD\u5E94)</div>';
+      });
+  }
+  // Open on the running build's section: scroll so its h2 sits just below
+  // the pinned head (offsetTop is relative to the positioned card).
+  function zbChlogScrollCur(body) {
+    var cur = body.querySelector('.zb-chlog-cur');
+    if (!cur) return;
+    var h2 = cur.closest('h2');
+    if (h2) body.scrollTop = Math.max(0, h2.offsetTop - 46);
+  }
+  function zbChlogClose() { $('zb-chlog-win').hidden = true; }
+  $('zb-ab-chlog').addEventListener('click', zbChlogOpen);
+  $('zb-chlog-win-close').addEventListener('click', zbChlogClose);
+  $('zb-chlog-win-mask').addEventListener('click', zbChlogClose);
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
@@ -117015,7 +117382,7 @@ var init_media = __esm({
 
 // dist/core/weLibrary.js
 import fs12 from "node:fs";
-import path11 from "node:path";
+import path12 from "node:path";
 function isDirWithEntries(p2) {
   try {
     return fs12.statSync(p2).isDirectory() && fs12.readdirSync(p2).length > 0;
@@ -117035,8 +117402,8 @@ function findWeRoots() {
   const seen = /* @__PURE__ */ new Set();
   for (const lib of steamLibraryCandidates()) {
     const candidates = [
-      ["workshop", path11.join(lib, "steamapps", "workshop", "content", "431960")],
-      ["myprojects", path11.join(lib, "steamapps", "common", "wallpaper_engine", "projects", "myprojects")]
+      ["workshop", path12.join(lib, "steamapps", "workshop", "content", "431960")],
+      ["myprojects", path12.join(lib, "steamapps", "common", "wallpaper_engine", "projects", "myprojects")]
     ];
     for (const [kind, dir] of candidates) {
       const key = dir.toLowerCase();
@@ -117053,17 +117420,17 @@ function weInstallDirs() {
   for (const root of findWeRoots()) {
     if (root.kind !== "workshop")
       continue;
-    dirs.add(path11.resolve(root.dir, "..", "..", "..", "common", "wallpaper_engine"));
+    dirs.add(path12.resolve(root.dir, "..", "..", "..", "common", "wallpaper_engine"));
   }
   for (const lib of steamLibraryCandidates()) {
-    dirs.add(path11.join(lib, "steamapps", "common", "wallpaper_engine"));
+    dirs.add(path12.join(lib, "steamapps", "common", "wallpaper_engine"));
   }
-  return [...dirs].filter((d) => fs12.existsSync(path11.join(d, "config.json")));
+  return [...dirs].filter((d) => fs12.existsSync(path12.join(d, "config.json")));
 }
 function listWeFolders() {
   const out = [];
   for (const install of weInstallDirs()) {
-    const config = readJsonSafe(path11.join(install, "config.json"));
+    const config = readJsonSafe(path12.join(install, "config.json"));
     const userNodes = Object.values(config ?? {}).filter((v) => Boolean(v) && typeof v === "object" && !Array.isArray(v) && "general" in v);
     for (const node of userNodes) {
       const general = node.general;
@@ -117108,7 +117475,7 @@ function listWeWallpapers() {
       continue;
     }
     for (const name of entries) {
-      const dir = path11.join(root.dir, name);
+      const dir = path12.join(root.dir, name);
       let stat;
       try {
         stat = fs12.statSync(dir);
@@ -117120,11 +117487,11 @@ function listWeWallpapers() {
       const type = detectWallpaperType(dir);
       if (type !== "scene" && type !== "video" && type !== "web")
         continue;
-      const project = readJsonSafe(path11.join(dir, "project.json"));
+      const project = readJsonSafe(path12.join(dir, "project.json"));
       const title = typeof project?.title === "string" && project.title.trim() ? project.title.trim() : name;
       const declared = typeof project?.preview === "string" ? project.preview : void 0;
-      const previewName = declared && PREVIEW_NAME_RE.test(declared) ? declared : PREVIEW_FALLBACKS.find((f2) => fs12.existsSync(path11.join(dir, f2)));
-      const usable = previewName ? fs12.existsSync(path11.join(dir, previewName)) : false;
+      const previewName = declared && PREVIEW_NAME_RE.test(declared) ? declared : PREVIEW_FALLBACKS.find((f2) => fs12.existsSync(path12.join(dir, f2)));
+      const usable = previewName ? fs12.existsSync(path12.join(dir, previewName)) : false;
       let folder = folderByKey.get(name);
       if (!folder) {
         const dirLower = dir.toLowerCase();
@@ -117139,9 +117506,9 @@ function listWeWallpapers() {
       if (type === "video") {
         for (const sub of ["", "files"]) {
           try {
-            const hit = fs12.readdirSync(path11.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
+            const hit = fs12.readdirSync(path12.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
             if (hit) {
-              videoFile = path11.join(dir, sub, hit);
+              videoFile = path12.join(dir, sub, hit);
               break;
             }
           } catch {
@@ -117168,17 +117535,17 @@ function listWeWallpapers() {
 function weDirForPath(p2) {
   let abs;
   try {
-    abs = path11.resolve(p2).toLowerCase();
+    abs = path12.resolve(p2).toLowerCase();
   } catch {
     return void 0;
   }
   for (const root of findWeRoots()) {
-    const rootLower = root.dir.toLowerCase() + path11.sep;
+    const rootLower = root.dir.toLowerCase() + path12.sep;
     if (!abs.startsWith(rootLower))
       continue;
-    const id = abs.slice(rootLower.length).split(path11.sep)[0];
+    const id = abs.slice(rootLower.length).split(path12.sep)[0];
     if (id)
-      return path11.join(root.dir, id);
+      return path12.join(root.dir, id);
   }
   return void 0;
 }
@@ -117186,7 +117553,7 @@ function weTitleForPath(p2) {
   const dir = weDirForPath(p2);
   if (!dir)
     return void 0;
-  const project = readJsonSafe(path11.join(dir, "project.json"));
+  const project = readJsonSafe(path12.join(dir, "project.json"));
   return typeof project?.title === "string" && project.title.trim() ? project.title.trim() : void 0;
 }
 function resolveWePreview(source, id, file, nameRe = PREVIEW_NAME_RE) {
@@ -117200,12 +117567,12 @@ function resolveWePreview(source, id, file, nameRe = PREVIEW_NAME_RE) {
   const root = findWeRoots().find((r2) => r2.kind === kind);
   if (!root)
     return void 0;
-  const dir = path11.resolve(root.dir, id);
-  const rootResolved = path11.resolve(root.dir);
-  if (!dir.toLowerCase().startsWith(rootResolved.toLowerCase() + path11.sep))
+  const dir = path12.resolve(root.dir, id);
+  const rootResolved = path12.resolve(root.dir);
+  if (!dir.toLowerCase().startsWith(rootResolved.toLowerCase() + path12.sep))
     return void 0;
-  const fileAbs = path11.resolve(dir, file);
-  if (path11.dirname(fileAbs).toLowerCase() !== dir.toLowerCase())
+  const fileAbs = path12.resolve(dir, file);
+  if (path12.dirname(fileAbs).toLowerCase() !== dir.toLowerCase())
     return void 0;
   return fs12.existsSync(fileAbs) ? fileAbs : void 0;
 }
@@ -117228,10 +117595,11 @@ __export(server_exports, {
 });
 import http from "node:http";
 import fs13 from "node:fs";
-import path12 from "node:path";
+import path13 from "node:path";
 import crypto2 from "node:crypto";
-import { execFile as execFile4, spawn as spawn3 } from "node:child_process";
+import { execFile as execFile4, spawn as spawn4 } from "node:child_process";
 import { promisify as promisify4 } from "node:util";
+import { fileURLToPath } from "node:url";
 function rememberAssets(file, mtimeMs, assets) {
   assetsCache.set(file, { mtimeMs, assets });
   if (assetsCache.size > 6) {
@@ -117246,12 +117614,12 @@ async function ffmpegPath() {
   return ffmpegPathCache || void 0;
 }
 function thumbDir() {
-  return path12.join(dataDir(), "thumbs");
+  return path13.join(dataDir(), "thumbs");
 }
 async function themeThumbFor(source) {
   if (!isInsideDataDir(source))
     return source;
-  const thumb = path12.join(thumbDir(), path12.basename(source) + ".jpg");
+  const thumb = path13.join(thumbDir(), path13.basename(source) + ".jpg");
   try {
     if (!fs13.existsSync(thumb)) {
       const exe = await ffmpegPath();
@@ -117278,7 +117646,7 @@ async function getAssets(config) {
   const wallpaperPath = config.wallpaperPath;
   if (!wallpaperPath || !fs13.existsSync(wallpaperPath))
     return void 0;
-  const sourcePath = config.mediaType === "video" ? path12.join(path12.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
+  const sourcePath = config.mediaType === "video" ? path13.join(path13.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
   if (!fs13.existsSync(sourcePath))
     return void 0;
   const mtimeMs = fs13.statSync(sourcePath).mtimeMs;
@@ -117300,13 +117668,13 @@ function currentConfig() {
   return { ...DEFAULT_CONFIG, ...loadConfig() };
 }
 function backupFile() {
-  return path12.join(dataDir(), "config.backup.json");
+  return path13.join(dataDir(), "config.backup.json");
 }
 function hasBackup() {
   return fs13.existsSync(backupFile());
 }
 function weImportsFile() {
-  return path12.join(dataDir(), "we-imports.json");
+  return path13.join(dataDir(), "we-imports.json");
 }
 function loadWeImports() {
   try {
@@ -117326,7 +117694,7 @@ function cachedSceneNames() {
   try {
     for (const d of fs13.readdirSync(scenesCacheRoot())) {
       try {
-        const name = JSON.parse(fs13.readFileSync(path12.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+        const name = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
         if (name && !/^[0-9a-f]{8}$/.test(name)) {
           names3.set(name, [...names3.get(name) ?? [], d]);
         }
@@ -117367,6 +117735,24 @@ async function checkLatestRelease() {
   } catch {
     return { ok: false, error: "network", current: VERSION };
   }
+}
+function readChangelog() {
+  if (changelogCache)
+    return changelogCache;
+  let markdown = null;
+  try {
+    const here = path13.dirname(fileURLToPath(import.meta.url));
+    for (const dir of [path13.resolve(here, ".."), path13.resolve(here, "..", ".."), process.cwd()]) {
+      try {
+        markdown = fs13.readFileSync(path13.join(dir, "CHANGES.md"), "utf8");
+        break;
+      } catch {
+      }
+    }
+  } catch {
+  }
+  changelogCache = markdown !== null ? { ok: true, version: VERSION, markdown } : { ok: false, error: "missing" };
+  return changelogCache;
 }
 function effectiveLook(config) {
   const dn = config.dayNight;
@@ -117410,7 +117796,10 @@ function publicConfig(config) {
     mediaType: config.mediaType ?? "image",
     sceneHash: config.sceneHash,
     /** Current wallpaper file (image mode) — lets the panel preselect it. */
-    wallpaperPath: config.mediaType === "video" ? void 0 : config.wallpaperPath
+    wallpaperPath: config.mediaType === "video" ? void 0 : config.wallpaperPath,
+    // Opt-in state for the 关于/通用 disclosure card (read-only mirror; the
+    // gate itself flips via the experimental enable/disable surfaces).
+    experimental: config.experimental ?? { enabled: false }
   };
 }
 function sanitize(body) {
@@ -117725,21 +118114,21 @@ function migrateLegacySpinnerFiles() {
     fs13.mkdirSync(spinnerDir(), { recursive: true });
     let moved = false;
     for (const ext of [".gif", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".svg"]) {
-      const legacy = path12.join(dataDir(), "spinner" + ext);
+      const legacy = path13.join(dataDir(), "spinner" + ext);
       if (!fs13.existsSync(legacy))
         continue;
-      const dest = path12.join(spinnerDir(), "spinner" + ext);
+      const dest = path13.join(spinnerDir(), "spinner" + ext);
       fs13.rmSync(dest, { force: true });
       fs13.renameSync(legacy, dest);
       moved = true;
-      console.log(`serve: migrated spinner icon ${path12.basename(legacy)} \u2192 spinner/`);
+      console.log(`serve: migrated spinner icon ${path13.basename(legacy)} \u2192 spinner/`);
     }
     if (!moved)
       return;
     const stored = loadConfig();
     const img = stored.taskSpinnerLook?.image;
-    if (typeof img === "string" && SPINNER_FILE_RE.test(path12.basename(img)) && path12.dirname(path12.resolve(img)).toLowerCase() === path12.resolve(dataDir()).toLowerCase()) {
-      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path12.join(spinnerDir(), path12.basename(img)) };
+    if (typeof img === "string" && SPINNER_FILE_RE.test(path13.basename(img)) && path13.dirname(path13.resolve(img)).toLowerCase() === path13.resolve(dataDir()).toLowerCase()) {
+      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path13.join(spinnerDir(), path13.basename(img)) };
       saveConfig(stored);
     }
   } catch (err) {
@@ -117752,11 +118141,11 @@ async function startServe(opts) {
   mediaToken = crypto2.randomBytes(24).toString("hex");
   try {
     fs13.mkdirSync(dataDir(), { recursive: true });
-    fs13.writeFileSync(path12.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
+    fs13.writeFileSync(path13.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
   } catch {
   }
   migrateLegacySpinnerFiles();
-  const historyFile = () => path12.join(dataDir(), "history.json");
+  const historyFile = () => path13.join(dataDir(), "history.json");
   function readHistory() {
     try {
       return JSON.parse(fs13.readFileSync(historyFile(), "utf8"));
@@ -117780,12 +118169,12 @@ async function startServe(opts) {
   const applyRef = async (ref) => {
     const config = runtimeConfig();
     if (typeof ref.hash === "string") {
-      const loopPath = path12.join(scenesCacheRoot(), ref.hash, "loop.mp4");
+      const loopPath = path13.join(scenesCacheRoot(), ref.hash, "loop.mp4");
       if (!fs13.existsSync(loopPath))
         throw new Error("unknown scene hash");
       let label = ref.hash.slice(0, 8);
       try {
-        label = JSON.parse(fs13.readFileSync(path12.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
+        label = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
       } catch {
       }
       const next = {
@@ -117809,7 +118198,7 @@ async function startServe(opts) {
         sceneVideoUrl: void 0
       };
       saveConfig(persisted(next));
-      recordHistory({ label: path12.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path12.basename(ref.path))}` });
+      recordHistory({ label: path13.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path13.basename(ref.path))}` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
     throw new Error("provide hash or existing path");
@@ -117891,10 +118280,10 @@ async function startServe(opts) {
         const config = runtimeConfig();
         fs13.mkdirSync(dataDir(), { recursive: true });
         const ext = IMAGE_EXT[m[1]];
-        const safeBase = (typeof body?.name === "string" ? path12.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
-        let dest = path12.join(dataDir(), safeBase + ext);
+        const safeBase = (typeof body?.name === "string" ? path13.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
+        let dest = path13.join(dataDir(), safeBase + ext);
         for (let i2 = 2; fs13.existsSync(dest); i2++) {
-          dest = path12.join(dataDir(), `${safeBase}(${i2})${ext}`);
+          dest = path13.join(dataDir(), `${safeBase}(${i2})${ext}`);
         }
         fs13.writeFileSync(dest, bytes);
         const themeSrc = await themeThumbFor(dest);
@@ -117907,7 +118296,7 @@ async function startServe(opts) {
           sceneVideoUrl: void 0
         };
         saveConfig(persisted(nextCfg));
-        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path12.basename(dest))}` });
+        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path13.basename(dest))}` });
         const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
         sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
         return;
@@ -117925,14 +118314,14 @@ async function startServe(opts) {
         }
         const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
         const base = slot === "running" ? "spinner" : "spinner-" + slot;
-        const dest = path12.join(spinnerDir(), base + ext);
+        const dest = path13.join(spinnerDir(), base + ext);
         fs13.mkdirSync(spinnerDir(), { recursive: true });
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
           if (old !== ext)
-            fs13.rmSync(path12.join(spinnerDir(), base + old), { force: true });
+            fs13.rmSync(path13.join(spinnerDir(), base + old), { force: true });
         }
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
-          fs13.rmSync(path12.join(dataDir(), base + old), { force: true });
+          fs13.rmSync(path13.join(dataDir(), base + old), { force: true });
         }
         fs13.writeFileSync(dest, bytes);
         const config = runtimeConfig();
@@ -117998,6 +118387,7 @@ async function startServe(opts) {
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/health") {
+        const exp = loadConfig().experimental;
         sendJson(res, 200, {
           ok: true,
           service: "zcode-beautify",
@@ -118008,8 +118398,30 @@ async function startServe(opts) {
           version: VERSION,
           uptimeMs: Date.now() - startedAt,
           cdpPort,
-          apiPort
+          apiPort,
+          experimental: { enabled: exp?.enabled === true, migrated: exp?.migrated === true }
         });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/experimental/disable") {
+        let cleared = 0;
+        for (const [id, session] of held) {
+          try {
+            if (session.themeScriptId) {
+              await session.conn.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: session.themeScriptId }).catch(() => {
+              });
+              session.themeScriptId = void 0;
+            }
+            await session.conn.send("Runtime.evaluate", { expression: buildResetScript() });
+            cleared++;
+          } catch {
+          }
+          session.conn.close();
+          held.delete(id);
+        }
+        stopRotationTimers();
+        sendJson(res, 200, { ok: true, cleared });
+        setTimeout(() => process.exit(0), 200).unref();
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/update-check") {
@@ -118020,6 +118432,10 @@ async function startServe(opts) {
         const body = await checkLatestRelease();
         updateCheckCache = { at: Date.now(), body };
         sendJson(res, 200, body);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/changelog") {
+        sendJson(res, 200, readChangelog());
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/pick-scene") {
@@ -118050,12 +118466,12 @@ async function startServe(opts) {
           } else {
             const dir = (() => {
               try {
-                return fs13.statSync(scenePath).isDirectory() ? scenePath : path12.dirname(scenePath);
+                return fs13.statSync(scenePath).isDirectory() ? scenePath : path13.dirname(scenePath);
               } catch {
                 return scenePath;
               }
             })();
-            const probe = JSON.parse(fs13.readFileSync(path12.join(dir, "project.json"), "utf8"));
+            const probe = JSON.parse(fs13.readFileSync(path13.join(dir, "project.json"), "utf8"));
             const w = Number(probe?.general?.properties?.width);
             const h = Number(probe?.general?.properties?.height);
             if (w >= 256 && w <= 3840)
@@ -118092,16 +118508,16 @@ async function startServe(opts) {
           let label = result.hash.slice(0, 8);
           let named = false;
           try {
-            label = JSON.parse(fs13.readFileSync(path12.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
+            label = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
             named = true;
           } catch {
           }
           if (!named) {
-            const fallback = weTitleForPath(scenePath) ?? (path12.extname(scenePath) ? path12.basename(scenePath).replace(/\.[^.]+$/, "") : void 0);
+            const fallback = weTitleForPath(scenePath) ?? (path13.extname(scenePath) ? path13.basename(scenePath).replace(/\.[^.]+$/, "") : void 0);
             if (fallback) {
               label = fallback;
               try {
-                fs13.writeFileSync(path12.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
+                fs13.writeFileSync(path13.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
               } catch {
               }
             }
@@ -118153,15 +118569,15 @@ async function startServe(opts) {
       if (req.method === "GET" && url.pathname === "/api/library") {
         let fav = { hashes: [], paths: [] };
         try {
-          fav = JSON.parse(fs13.readFileSync(path12.join(dataDir(), "favorites.json"), "utf8"));
+          fav = JSON.parse(fs13.readFileSync(path13.join(dataDir(), "favorites.json"), "utf8"));
         } catch {
         }
         const images = [];
         for (const f2 of fs13.readdirSync(dataDir())) {
           if (/\.(jpe?g|png|webp|bmp)$/i.test(f2)) {
             try {
-              const p2 = path12.join(dataDir(), f2);
-              images.push({ name: f2, path: p2, mtimeMs: fs13.statSync(p2).mtimeMs, favorite: fav.paths.includes(path12.resolve(p2)) });
+              const p2 = path13.join(dataDir(), f2);
+              images.push({ name: f2, path: p2, mtimeMs: fs13.statSync(p2).mtimeMs, favorite: fav.paths.includes(path13.resolve(p2)) });
             } catch {
             }
           }
@@ -118175,12 +118591,12 @@ async function startServe(opts) {
         const scenes = [];
         try {
           for (const d of fs13.readdirSync(scenesCacheRoot())) {
-            const loop = path12.join(scenesCacheRoot(), d, "loop.mp4");
+            const loop = path13.join(scenesCacheRoot(), d, "loop.mp4");
             try {
               const st = fs13.statSync(loop);
               let name;
               try {
-                name = JSON.parse(fs13.readFileSync(path12.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               scenes.push({ hash: d, name, sizeBytes: st.size, mtimeMs: st.mtimeMs, favorite: fav.hashes.includes(d) });
@@ -118201,18 +118617,18 @@ async function startServe(opts) {
         if (name.includes("/") || name.includes("\\") || name.includes(".."))
           throw new Error("invalid name");
         if (body?.kind === "scene" && typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
-          const dir = path12.join(scenesCacheRoot(), body.hash);
+          const dir = path13.join(scenesCacheRoot(), body.hash);
           if (!fs13.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs13.writeFileSync(path12.join(dir, "name.json"), JSON.stringify({ name }));
+          fs13.writeFileSync(path13.join(dir, "name.json"), JSON.stringify({ name }));
           sendJson(res, 200, { ok: true });
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
-          const oldPath = path12.resolve(body.path);
+          const oldPath = path13.resolve(body.path);
           const renamed = renameLibraryImage(oldPath, name);
           const cfg = runtimeConfig();
-          if (cfg.wallpaperPath && path12.resolve(cfg.wallpaperPath) === oldPath) {
+          if (cfg.wallpaperPath && path13.resolve(cfg.wallpaperPath) === oldPath) {
             saveConfig(persisted({ ...cfg, wallpaperPath: renamed }));
           }
           sendJson(res, 200, { ok: true, path: renamed });
@@ -118243,7 +118659,7 @@ async function startServe(opts) {
           if (config.sceneHash === body.hash) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
-          const dir = path12.join(scenesCacheRoot(), body.hash);
+          const dir = path13.join(scenesCacheRoot(), body.hash);
           if (!fs13.existsSync(dir))
             throw new Error("unknown scene hash");
           fs13.rmSync(dir, { recursive: true, force: true });
@@ -118252,18 +118668,18 @@ async function startServe(opts) {
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
-          const target2 = path12.resolve(body.path);
-          if (config.wallpaperPath && path12.resolve(config.wallpaperPath) === target2) {
+          const target2 = path13.resolve(body.path);
+          if (config.wallpaperPath && path13.resolve(config.wallpaperPath) === target2) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
           if (!isInsideDataDir(target2) || !/\.(jpe?g|png|webp|bmp)$/i.test(target2)) {
             throw new Error("only plugin-managed wallpapers can be deleted here");
           }
           fs13.rmSync(target2, { force: true });
-          const thumb = path12.join(thumbDir(), path12.basename(target2) + ".jpg");
+          const thumb = path13.join(thumbDir(), path13.basename(target2) + ".jpg");
           if (isInsideDataDir(thumb))
             fs13.rmSync(thumb, { force: true });
-          dropFromPlans((e2) => Boolean(e2.path && path12.resolve(e2.path) === target2));
+          dropFromPlans((e2) => Boolean(e2.path && path13.resolve(e2.path) === target2));
           sendJson(res, 200, { ok: true });
           return;
         }
@@ -118336,7 +118752,7 @@ async function startServe(opts) {
               let size = 0;
               const walk = (dir) => {
                 for (const f2 of fs13.readdirSync(dir, { withFileTypes: true })) {
-                  const p2 = path12.join(dir, f2.name);
+                  const p2 = path13.join(dir, f2.name);
                   if (f2.isDirectory())
                     walk(p2);
                   else {
@@ -118347,10 +118763,10 @@ async function startServe(opts) {
                   }
                 }
               };
-              walk(path12.join(scenesCacheRoot(), d));
+              walk(path13.join(scenesCacheRoot(), d));
               let name;
               try {
-                name = JSON.parse(fs13.readFileSync(path12.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               entries.push({ hash: d, name, sizeBytes: size });
@@ -118364,7 +118780,7 @@ async function startServe(opts) {
         try {
           for (const f2 of fs13.readdirSync(thumbDir())) {
             try {
-              thumbsBytes += fs13.statSync(path12.join(thumbDir(), f2)).size;
+              thumbsBytes += fs13.statSync(path13.join(thumbDir(), f2)).size;
             } catch {
             }
           }
@@ -118383,7 +118799,7 @@ async function startServe(opts) {
         let savedBytes = 0;
         try {
           for (const d of fs13.readdirSync(scenesCacheRoot())) {
-            const loop = path12.join(scenesCacheRoot(), d, "loop.mp4");
+            const loop = path13.join(scenesCacheRoot(), d, "loop.mp4");
             try {
               if (!fs13.statSync(loop).isFile())
                 continue;
@@ -118441,7 +118857,7 @@ async function startServe(opts) {
             if (config.sceneHash === d)
               continue;
             try {
-              fs13.rmSync(path12.join(scenesCacheRoot(), d), { recursive: true, force: true });
+              fs13.rmSync(path13.join(scenesCacheRoot(), d), { recursive: true, force: true });
               removed++;
             } catch {
             }
@@ -118451,7 +118867,7 @@ async function startServe(opts) {
         if (removed) {
           const rot = normalizeRotation(runtimeConfig().rotation);
           for (const plan of rot.plans)
-            plan.entries = plan.entries.filter((e2) => !e2.hash || fs13.existsSync(path12.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
+            plan.entries = plan.entries.filter((e2) => !e2.hash || fs13.existsSync(path13.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
           saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
           if (rot.enabled)
             startRotation(true);
@@ -118492,7 +118908,7 @@ async function startServe(opts) {
           withWp.wallpaperPath = incoming.wallpaperPath;
           withWp.mediaType = incoming.mediaType === "video" ? "video" : "image";
           withWp.sceneHash = typeof incoming.sceneHash === "string" ? incoming.sceneHash : void 0;
-          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs13.existsSync(path12.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
+          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs13.existsSync(path13.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
             withWp.sceneHash = void 0;
             withWp.mediaType = "image";
           }
@@ -118510,7 +118926,7 @@ async function startServe(opts) {
         const body = JSON.parse(await readBody(req));
         const target2 = body?.target === "scenes" ? scenesCacheRoot() : body?.target === "thumbs" ? thumbDir() : dataDir();
         fs13.mkdirSync(target2, { recursive: true });
-        spawn3("explorer", [target2], { detached: true, stdio: "ignore" }).unref();
+        spawn4("explorer", [target2], { detached: true, stdio: "ignore" }).unref();
         sendJson(res, 200, { ok: true, path: target2 });
         return;
       }
@@ -118534,7 +118950,7 @@ async function startServe(opts) {
         sendJson(res, 200, { items: top });
         return;
       }
-      const favoritesFile = () => path12.join(dataDir(), "favorites.json");
+      const favoritesFile = () => path13.join(dataDir(), "favorites.json");
       const readFavorites = () => {
         try {
           return JSON.parse(fs13.readFileSync(favoritesFile(), "utf8"));
@@ -118555,7 +118971,7 @@ async function startServe(opts) {
         if (typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
           toggle(fav.hashes, body.hash, body.on === true);
         } else if (typeof body?.path === "string") {
-          toggle(fav.paths, path12.resolve(body.path), body.on === true);
+          toggle(fav.paths, path13.resolve(body.path), body.on === true);
         } else {
           throw new Error("hash or path required");
         }
@@ -118565,7 +118981,7 @@ async function startServe(opts) {
       }
       if (req.method === "GET" && url.pathname === "/api/palette") {
         const config = runtimeConfig();
-        const sourcePath = config.mediaType === "video" && config.sceneHash ? path12.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
+        const sourcePath = config.mediaType === "video" && config.sceneHash ? path13.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
         let colors = [];
         if (sourcePath && fs13.existsSync(sourcePath)) {
           try {
@@ -118608,10 +119024,10 @@ async function startServe(opts) {
             type: it.type,
             dir: it.dir,
             importable: it.importable,
-            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs13.existsSync(path12.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
+            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs13.existsSync(path13.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
             source: it.source,
             folder: it.folder ?? null,
-            videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path12.basename(it.videoFile))}` : null,
+            videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path13.basename(it.videoFile))}` : null,
             previewUrl: it.previewName ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}` : null
           }))
         });
@@ -118637,7 +119053,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad scene media path" });
           return;
         }
-        const file = path12.join(scenesCacheRoot(), hash, "loop.mp4");
+        const file = path13.join(scenesCacheRoot(), hash, "loop.mp4");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "scene media not found" });
         }
@@ -118649,7 +119065,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad poster path" });
           return;
         }
-        const file = path12.join(scenesCacheRoot(), hash, "poster.jpg");
+        const file = path13.join(scenesCacheRoot(), hash, "poster.jpg");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "poster not found" });
         }
@@ -118661,7 +119077,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad library media path" });
           return;
         }
-        const file = path12.join(dataDir(), name);
+        const file = path13.join(dataDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "library media not found" });
         }
@@ -118673,7 +119089,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad spinner media path" });
           return;
         }
-        const file = path12.join(spinnerDir(), name);
+        const file = path13.join(spinnerDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "spinner media not found" });
         }
@@ -118898,7 +119314,7 @@ function validPlanEntries(mode, raw) {
     if (!e2 || typeof e2 !== "object")
       continue;
     const { seconds, time, hash, path: imgPath } = e2;
-    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs13.existsSync(path12.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs13.existsSync(imgPath) ? { path: imgPath } : void 0;
+    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs13.existsSync(path13.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs13.existsSync(imgPath) ? { path: imgPath } : void 0;
     if (!ref)
       continue;
     if (mode === "schedule") {
@@ -118980,31 +119396,31 @@ function renameLibraryImage(oldPath, name) {
   if (!isInsideDataDir(oldPath) || !/\.(jpe?g|png|webp|bmp)$/i.test(oldPath)) {
     throw new Error("only plugin-managed wallpapers can be renamed here");
   }
-  const ext = path12.extname(oldPath);
+  const ext = path13.extname(oldPath);
   const safe = name.replace(/[\/:*?"<>|]/g, "").trim() || "wallpaper";
-  let newPath = path12.join(path12.dirname(oldPath), safe + ext);
-  if (path12.resolve(newPath) !== path12.resolve(oldPath)) {
-    if (newPath.toLowerCase() !== path12.resolve(oldPath).toLowerCase()) {
+  let newPath = path13.join(path13.dirname(oldPath), safe + ext);
+  if (path13.resolve(newPath) !== path13.resolve(oldPath)) {
+    if (newPath.toLowerCase() !== path13.resolve(oldPath).toLowerCase()) {
       for (let i2 = 2; fs13.existsSync(newPath); i2++) {
-        newPath = path12.join(path12.dirname(oldPath), `${safe}(${i2})${ext}`);
+        newPath = path13.join(path13.dirname(oldPath), `${safe}(${i2})${ext}`);
       }
     }
     fs13.renameSync(oldPath, newPath);
   }
-  const oldThumb = path12.join(thumbDir(), path12.basename(oldPath) + ".jpg");
+  const oldThumb = path13.join(thumbDir(), path13.basename(oldPath) + ".jpg");
   if (fs13.existsSync(oldThumb)) {
     try {
-      fs13.renameSync(oldThumb, path12.join(thumbDir(), path12.basename(newPath) + ".jpg"));
+      fs13.renameSync(oldThumb, path13.join(thumbDir(), path13.basename(newPath) + ".jpg"));
     } catch {
     }
   }
   return newPath;
 }
 function isInsideDataDir(target2) {
-  const rel = path12.relative(path12.resolve(dataDir()), path12.resolve(target2));
+  const rel = path13.relative(path13.resolve(dataDir()), path13.resolve(target2));
   return rel !== "" && !rel.startsWith("..");
 }
-var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, assetsCache, ffmpegPathCache, updateCheckCache, importJob, held, scrubbedUpdaters, mediaToken, IMAGE_EXT, spinnerDir, SPINNER_FILE_RE;
+var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, assetsCache, ffmpegPathCache, updateCheckCache, changelogCache, importJob, held, scrubbedUpdaters, mediaToken, IMAGE_EXT, spinnerDir, SPINNER_FILE_RE;
 var init_server = __esm({
   "dist/core/server.js"() {
     "use strict";
@@ -119027,6 +119443,7 @@ var init_server = __esm({
     POLL_MS = 1500;
     assetsCache = /* @__PURE__ */ new Map();
     updateCheckCache = null;
+    changelogCache = null;
     importJob = { running: false, stage: "idle" };
     held = /* @__PURE__ */ new Map();
     scrubbedUpdaters = /* @__PURE__ */ new Set();
@@ -119038,7 +119455,7 @@ var init_server = __esm({
       "image/gif": ".gif",
       "image/bmp": ".bmp"
     };
-    spinnerDir = () => path12.join(dataDir(), "spinner");
+    spinnerDir = () => path13.join(dataDir(), "spinner");
     SPINNER_FILE_RE = /^spinner\.(gif|png|webp|jpe?g|bmp|svg)$/i;
   }
 });
@@ -119049,7 +119466,7 @@ init_launch();
 init_session();
 init_target();
 import fs14 from "node:fs";
-import path13 from "node:path";
+import path14 from "node:path";
 var USAGE = `zcode-beautify <command> [options]
 
 Global:
@@ -119058,6 +119475,16 @@ Global:
                                  the BEAUTIFY_TARGET env var, then auto-detect.
 
 Commands:
+  enable                         Opt in to the experimental CDP injection
+                                 (off by default): records consent, adds
+                                 --remote-debugging-port to the app's launch
+                                 entries and starts the local service. The CDP
+                                 port binds 127.0.0.1 but is unauthenticated.
+  disable [--keep-launchers]     Opt out and roll back: clears the injected
+                                 theme (incl. the renderer's cached copy),
+                                 stops the service, and strips the flag from
+                                 the launch entries again (--keep-launchers
+                                 leaves the flag in place).
   launch [--port N]              Start the client with --remote-debugging-port=N
   apply <image> [options]        Set wallpaper and adapt colors
     --blur <px>                  Blur the wallpaper (default 0)
@@ -119080,9 +119507,10 @@ Commands:
   serve [--port N] [--api-port M] [--detach]
                                  Watch mode + settings panel + local API (default API port 9223)
                                  --detach runs it in the background, outliving this shell
-  repair-launchers [--port N] [--dry-run]
+  repair-launchers [--port N] [--dry-run] [--remove]
                                  Add --remote-debugging-port to the app's launch
-                                 entries (shortcuts, deep-link handler) missing it
+                                 entries (shortcuts, deep-link handler) missing it;
+                                 --remove strips the flag from every entry instead
 `;
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -119099,8 +119527,56 @@ async function main() {
   }
   const app = setTarget(requested);
   const port = Number(flag("--port") ?? app.cdpPort);
+  ensureExperimentalGate();
+  const gateNotice = () => {
+    if (!experimentalEnabled()) {
+      console.log("note: experimental CDP injection is disabled \u2014 this works right now, but the service will not auto-start and launch entries are not kept repaired. `zcode-beautify enable` opts in; see the README security notes.");
+    }
+  };
   try {
     switch (cmd) {
+      case "enable": {
+        const { enableExperimental: enableExperimental2, spawnServeDetached: spawnServeDetached2 } = await Promise.resolve().then(() => (init_experimental(), experimental_exports));
+        const r2 = await enableExperimental2();
+        const report = r2.launchers;
+        if (report && !report.error) {
+          for (const f2 of report.fixes.filter((x2) => x2.status === "updated"))
+            console.log(`launch entry updated: ${f2.path}`);
+          const failedFixes = report.fixes.filter((x2) => x2.status === "failed");
+          if (failedFixes.length > 0) {
+            console.log("some launch entries need one elevated run to update:");
+            for (const f2 of failedFixes)
+              console.log(`  - ${f2.path} (${f2.reason})`);
+          }
+        } else if (report?.error) {
+          console.log(`launcher check failed: ${report.error}`);
+        }
+        spawnServeDetached2(r2.apiPort, process.argv[1]);
+        console.log(`Experimental CDP injection enabled (consent recorded). CDP port ${r2.port} (127.0.0.1, unauthenticated).`);
+        console.log(`If ${app.appName} is running without the debug port, fully quit it (including any tray icon) and start it again from a shortcut.`);
+        console.log("`zcode-beautify disable` rolls everything back, including the flag in the launch entries.");
+        break;
+      }
+      case "disable": {
+        const { disableExperimental: disableExperimental2 } = await Promise.resolve().then(() => (init_experimental(), experimental_exports));
+        const r2 = await disableExperimental2({ cleanLaunchers: !has("--keep-launchers") });
+        if (r2.teardown.via === "service") {
+          console.log("Service stopped; injected theme cleared (including the renderer's cached copy).");
+        } else if (r2.teardown.via === "cdp" && r2.teardown.windows > 0) {
+          console.log(`Injected theme cleared over CDP in ${r2.teardown.windows} window(s).`);
+        } else {
+          console.log("No running client found \u2014 nothing injected to clear.");
+        }
+        if (r2.launchers) {
+          if (r2.launchers.error)
+            console.log(`launcher cleanup failed: ${r2.launchers.error}`);
+          else
+            for (const f2 of r2.launchers.fixes.filter((x2) => x2.status === "updated"))
+              console.log(`launch entry cleaned: ${f2.path}`);
+        }
+        console.log("Experimental mode disabled. Fully quit and restart the client to finish on the stock look.");
+        break;
+      }
       case "launch": {
         const r2 = await launchApp(port, app);
         const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
@@ -119129,6 +119605,7 @@ Quit ${app.appName} completely (including any tray icon), then run \`zcode-beaut
         break;
       }
       case "apply": {
+        gateNotice();
         const image2 = rest.find((a2) => !a2.startsWith("--"));
         if (!image2) {
           console.error(USAGE);
@@ -119147,6 +119624,7 @@ Quit ${app.appName} completely (including any tray icon), then run \`zcode-beaut
         break;
       }
       case "apply-scene": {
+        gateNotice();
         const scenePath = rest.find((a2) => !a2.startsWith("--"));
         if (!scenePath) {
           console.error(USAGE);
@@ -119170,6 +119648,7 @@ Quit ${app.appName} completely (including any tray icon), then run \`zcode-beaut
         break;
       }
       case "colors": {
+        gateNotice();
         const { applyColorsOnly: applyColorsOnly2 } = await Promise.resolve().then(() => (init_session(), session_exports));
         const windows = await applyColorsOnly2({ port });
         console.log(`Re-applied theme to ${windows} window(s).`);
@@ -119198,7 +119677,8 @@ then quit ${app.appName} completely and start it from one of the fixed shortcuts
       }
       case "repair-launchers": {
         const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
-        const report = await repairLaunchers2({ port, dryRun: has("--dry-run") });
+        const action = has("--remove") ? "remove" : "add";
+        const report = await repairLaunchers2({ port, action, dryRun: has("--dry-run") });
         if (report.error) {
           console.error(report.error);
           process.exitCode = 1;
@@ -119208,7 +119688,7 @@ then quit ${app.appName} completely and start it from one of the fixed shortcuts
           console.log(`[${f2.status}] ${f2.path}${f2.reason ? ` \u2014 ${f2.reason}` : ""}`);
         }
         const updated = report.fixes.filter((f2) => f2.status === "updated").length;
-        console.log(report.dryRun ? `${updated} of ${report.fixes.length} entry(ies) would be updated.` : `${updated} of ${report.fixes.length} entry(ies) updated.`);
+        console.log(report.dryRun ? `${updated} of ${report.fixes.length} entry(ies) would be ${action === "remove" ? "cleaned" : "updated"}.` : action === "remove" ? `Removed --remote-debugging-port from ${updated} of ${report.fixes.length} entry(ies).` : `${updated} of ${report.fixes.length} entry(ies) updated.`);
         break;
       }
       case "watch": {
@@ -119216,6 +119696,7 @@ then quit ${app.appName} completely and start it from one of the fixed shortcuts
         break;
       }
       case "serve": {
+        gateNotice();
         const apiPort = Number(flag("--api-port") ?? app.apiPort);
         if (has("--detach")) {
           await startServeDetached(port, apiPort);
@@ -119241,16 +119722,16 @@ then quit ${app.appName} completely and start it from one of the fixed shortcuts
   }
 }
 async function startServeDetached(cdpPort, apiPort) {
-  const { spawn: spawn4 } = await import("node:child_process");
+  const { spawn: spawn5 } = await import("node:child_process");
   const { existingServePid: existingServePid2 } = await Promise.resolve().then(() => (init_server(), server_exports));
   const already = await existingServePid2(apiPort);
   if (already !== void 0) {
     throw new Error(`a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) \u2014 open its panel, or stop that process first`);
   }
   fs14.mkdirSync(dataDir(), { recursive: true });
-  const logFile = path13.join(dataDir(), "serve.log");
+  const logFile = path14.join(dataDir(), "serve.log");
   const out = fs14.openSync(logFile, "a");
-  const child = spawn4(process.execPath, [process.argv[1], "serve", "--port", String(cdpPort), "--api-port", String(apiPort)], { detached: true, stdio: ["ignore", out, out], windowsHide: true });
+  const child = spawn5(process.execPath, [process.argv[1], "serve", "--port", String(cdpPort), "--api-port", String(apiPort)], { detached: true, stdio: ["ignore", out, out], windowsHide: true });
   child.unref();
   fs14.closeSync(out);
   for (let i2 = 0; i2 < 20; i2++) {

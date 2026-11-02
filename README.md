@@ -97,13 +97,17 @@ node dist/cli.js --help        # prebuilt bundle, zero install
 ## Quick start
 
 ```bash
-# 1) Quit ZCode completely, then start it with the CDP debug port (one-time).
+# 1) Opt in to the experimental CDP injection (off by default — see the
+#    section below for what this exposes and how to undo it).
+node dist/cli.js enable
+
+# 2) Quit ZCode completely, then start it with the CDP debug port (one-time).
 node dist/cli.js launch
 
-# 2) Set a wallpaper with Monet adaptation
+# 3) Set a wallpaper with Monet adaptation
 node dist/cli.js apply "D:\pictures\wallpaper.jpg" --blur 6 --dim 30
 
-# 3) (Recommended) Keep the theme alive + get the live settings panel.
+# 4) (Recommended) Keep the theme alive + get the live settings panel.
 #    --detach backgrounds it, so the panel keeps working after this shell
 #    (or the agent session that started it) is gone.
 node dist/cli.js serve --detach
@@ -118,13 +122,15 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 | Command | Purpose |
 |---|---|
 | `--target zcode\|workbuddy\|auto` | Global flag: pick the client to beautify (default `zcode`, `auto` detects the installed one); same as the `BEAUTIFY_TARGET` env var |
+| `enable` | Opt in to the experimental CDP injection: records consent, adds the CDP flag to the launch entries, starts the local service |
+| `disable [--keep-launchers]` | Opt out and roll back: clears the injected theme (incl. the renderer's cached copy), stops the service, strips the flag from the launch entries (`--keep-launchers` keeps it) |
 | `launch [--port N]` | Start the client with `--remote-debugging-port` (quit it first); 9222 for ZCode, 9333 for WorkBuddy |
 | `apply <image> [--blur] [--dim] [--fit] [--no-monet]` | Set wallpaper + adapt colors (`--fit cover\|contain\|smart`) |
 | `apply-scene <pkg-or-dir>` | Import a Wallpaper Engine scene / video wallpaper end-to-end |
 | `colors` | Re-apply the stored theme without changing the image |
 | `serve [--detach] [--api-port M]` | Watch mode + settings panel + local control API (default API port 9223); `--detach` survives the shell that started it |
 | `watch` | Headless watch mode: re-inject whenever ZCode restarts |
-| `repair-launchers [--dry-run]` | Scan/fix every launch entry so ZCode always starts with the CDP port |
+| `repair-launchers [--dry-run] [--remove]` | Scan/fix every launch entry so ZCode always starts with the CDP port; `--remove` strips the flag from every entry instead (the rollback) |
 | `reset` | Remove wallpaper and color overrides |
 | `status` | Show CDP reachability and renderer targets |
 
@@ -138,7 +144,9 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 | `refresh_theme` | Re-inject the stored theme after a restart |
 | `reset_appearance` | Remove wallpaper and overrides |
 | `beautify_status` | Show the stored config |
-| `repair_launchers` | Scan/fix launch entries (structured report) |
+| `enable_experimental` | Opt in to the experimental CDP injection (records consent, repairs launch entries, starts the service) |
+| `disable_experimental` | Opt out: live teardown + strip the flag from launch entries (`clean_launchers=false` keeps it) |
+| `repair_launchers` | Scan/fix launch entries (`action: "add"` default, `"remove"` strips the flag; structured report) |
 
 ## Project structure
 
@@ -201,12 +209,31 @@ list gathered from production. Versioned together with this repo. Grab it from
 the [releases page](https://github.com/Logocceai/zcode-beautify/releases) as a
 zip, or read [`skill-pack/SKILL.md`](skill-pack/SKILL.md) directly.
 
+## Experimental opt-in (CDP injection)
+
+The injection mechanism is **experimental** and **off by default** (since 0.6.0): until you opt in, the plugin starts no background service, writes nothing to your launch entries, and the agent-side tools answer with guidance instead of acting. It bypasses the plugin UI API by design — there is no supported desktop-client extension point yet — which is exactly why it stays behind an explicit gate.
+
+**What opting in does** (`enable_experimental`, or `zcode-beautify enable`):
+
+- Adds `--remote-debugging-port=9222` to the client's launch entries (your desktop / Start Menu / pinned-taskbar shortcuts, the `zcode://` handler, Explorer context-menu verbs) so ZCode opens a local CDP port. Machine-wide entries that need administrator rights are reported, never modified.
+- Starts the local service and re-enables the self-heal that keeps those entries carrying the flag across client updates.
+- Records consent (timestamp + plugin version) in the plugin's config. Installations that predate 0.6.0 keep working once, marked as migrated; the panel shows the state with a one-click opt-out.
+
+**What that exposes:** the CDP port binds to `127.0.0.1` (loopback only) but is **unauthenticated** — any process running as your user can attach to the renderer while the port is open. The plugin's own control API is additionally token-gated, but the CDP port itself is Chromium behavior outside this plugin's control. Don't enable it on a machine with untrusted local users or software.
+
+**Recovery / uninstall:**
+
+- `disable_experimental` (MCP) or `zcode-beautify disable` stops the service, clears the injected theme including the renderer's cached copy, and strips the flag from the launch entries again (`--keep-launchers` keeps it). Fully quit and restart ZCode afterwards. Stored wallpaper settings are kept, so re-enabling later restores the look.
+- `zcode-beautify repair-launchers --remove` only strips the flag — the rollback for what pre-0.6.0 versions wrote automatically, without touching anything else.
+- Uninstalling the plugin: run `node <plugin>/dist/cli.js disable` (or `repair-launchers --remove`) first, then remove the plugin.
+- Upgrades: ZCode's updater rebuilds the Start Menu shortcut without the flag; while enabled, the self-heal re-adds it on the next ZCode start — while disabled, nothing is ever re-added.
+
 ## Risks & limitations
 
-- Injection happens over CDP — an **unofficial** mechanism. Updates to ZCode may break it; `reset` always restores the default look.
-- `launch` restarts ZCode once. Without `serve`/`watch` running, the theme is lost on every ZCode restart (CDP sessions are scoped to the connection). No manual edits needed: the MCP server keeps every ZCode launch entry (shortcuts, protocol handler, context-menu verbs) carrying ` --remote-debugging-port=9222` automatically, so the theme survives every restart as long as `serve` runs. Start it with `serve --detach`: a foreground `serve` dies with the terminal (or agent session) that spawned it, and the panel then reports itself offline.
+- Injection happens over CDP — an **unofficial** mechanism, **experimental and opt-in** (see the section above). Updates to ZCode may break it; `reset` always restores the default look.
+- `launch` restarts ZCode once. Without `serve`/`watch` running, the theme is lost on every ZCode restart (CDP sessions are scoped to the connection). No manual edits needed: while the experimental mode is enabled, the MCP server keeps every ZCode launch entry (shortcuts, protocol handler, context-menu verbs) carrying ` --remote-debugging-port=9222` automatically, so the theme survives every restart as long as `serve` runs. Start it with `serve --detach`: a foreground `serve` dies with the terminal (or agent session) that spawned it, and the panel then reports itself offline.
 - Chat restyling hooks (`[data-v4-user-input-bubble]`, `conversation:max-w-*` container queries) are tied to ZCode's current DOM; a ZCode redesign may need selector updates.
-- The control API binds to `127.0.0.1` only and authenticates with a per-launch random token; media URLs carry the token as a query parameter.
+- The control API binds to `127.0.0.1` only and authenticates with a per-launch random token; media URLs carry the token as a query parameter. The CDP port itself is unauthenticated — see the opt-in section above.
 - Dynamic import (scene capture) is Windows-only (Desktop Duplication API); everything else is cross-platform.
 
 ## License

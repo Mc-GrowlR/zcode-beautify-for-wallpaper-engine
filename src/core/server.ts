@@ -15,6 +15,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import {
   CdpConnection,
   buildBootstrapScript,
@@ -229,6 +230,34 @@ async function checkLatestRelease(): Promise<unknown> {
   }
 }
 
+/** Cached /api/changelog payload — CHANGES.md never changes for an install. */
+let changelogCache: { ok: true; version: string; markdown: string } | { ok: false; error: string } | null = null;
+
+/**
+ * The plugin's own CHANGES.md (关于页「更新日志」). Walks up from this module's
+ * directory so both layouts resolve: the esbuild bundle (dist/cli.js → one
+ * level up) and tsx dev/test runs (src/core/ → two levels up). Missing or
+ * unreadable degrades to { ok:false } — the panel shows a plain "missing"
+ * note instead of an empty modal.
+ */
+function readChangelog(): { ok: true; version: string; markdown: string } | { ok: false; error: string } {
+  if (changelogCache) return changelogCache;
+  let markdown: string | null = null;
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    for (const dir of [path.resolve(here, ".."), path.resolve(here, "..", ".."), process.cwd()]) {
+      try {
+        markdown = fs.readFileSync(path.join(dir, "CHANGES.md"), "utf8");
+        break;
+      } catch { /* next candidate */ }
+    }
+  } catch { /* import.meta.url unavailable — fall through to missing */ }
+  changelogCache = markdown !== null
+    ? { ok: true, version: VERSION, markdown }
+    : { ok: false, error: "missing" };
+  return changelogCache;
+}
+
 /** The dim/blur actually in effect: day/night schedule overrides the flat
  *  sliders while enabled (the sliders then edit the CURRENT period's value). */
 function effectiveLook(config: BeautifyConfig): { dim: number; blur: number } {
@@ -279,6 +308,9 @@ function publicConfig(config: BeautifyConfig) {
     sceneHash: config.sceneHash,
     /** Current wallpaper file (image mode) — lets the panel preselect it. */
     wallpaperPath: config.mediaType === "video" ? undefined : config.wallpaperPath,
+    // Opt-in state for the 关于/通用 disclosure card (read-only mirror; the
+    // gate itself flips via the experimental enable/disable surfaces).
+    experimental: config.experimental ?? { enabled: false },
   };
 }
 
@@ -1064,6 +1096,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       if (req.method === "GET" && url.pathname === "/api/health") {
         // The panel 关于 page reads this; the MCP bootstrap health-check also
         // probes this route (it only needs service/pid, extras are additive).
+        const exp = loadConfig().experimental;
         sendJson(res, 200, {
           ok: true,
           service: "zcode-beautify",
@@ -1075,7 +1108,41 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           uptimeMs: Date.now() - startedAt,
           cdpPort,
           apiPort,
+          experimental: { enabled: exp?.enabled === true, migrated: exp?.migrated === true },
         });
+        return;
+      }
+
+      // --- experimental opt-out (disable_experimental / panel) ---------------
+      // Tears every held session down — injected nodes AND the renderer's
+      // cached copy, or a restart would self-heal the look right back — then
+      // exits so poll() cannot pick the renderers up again. The gate flip
+      // itself is the caller's job; this daemon is only the live teardown.
+      if (req.method === "POST" && url.pathname === "/api/experimental/disable") {
+        let cleared = 0;
+        for (const [id, session] of held) {
+          try {
+            if (session.themeScriptId) {
+              await session.conn
+                .send("Page.removeScriptToEvaluateOnNewDocument", { identifier: session.themeScriptId })
+                .catch(() => {});
+              session.themeScriptId = undefined;
+            }
+            await session.conn.send("Runtime.evaluate", { expression: buildResetScript() });
+            cleared++;
+          } catch {
+            /* session already dead */
+          }
+          session.conn.close();
+          held.delete(id);
+        }
+        // Without this the rotation would re-apply a playlist wallpaper into
+        // any session that still exists between here and process exit.
+        stopRotationTimers();
+        sendJson(res, 200, { ok: true, cleared });
+        // Leave a beat for the response to flush, then stop for good: the
+        // bootstrap only respawns a daemon while the gate is enabled.
+        setTimeout(() => process.exit(0), 200).unref();
         return;
       }
 
@@ -1091,6 +1158,17 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         const body = await checkLatestRelease();
         updateCheckCache = { at: Date.now(), body };
         sendJson(res, 200, body);
+        return;
+      }
+
+      // --- changelog (关于页「更新日志」) --------------------------------------
+      // Serves the plugin's own CHANGES.md so the panel can render it in a
+      // modal. Read at most once per process (the file is static for an
+      // install); resolved from the PLUGIN ROOT — dist/cli.js's parent —
+      // with the two-levels-up candidate covering tsx dev runs (src/core/),
+      // and cwd as the last resort for exotic launch layouts.
+      if (req.method === "GET" && url.pathname === "/api/changelog") {
+        sendJson(res, 200, readChangelog());
         return;
       }
 

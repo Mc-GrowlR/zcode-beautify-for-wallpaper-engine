@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { listTargets } from "./cdp.js";
 import { executableCandidates, findExecutable, target, type AppTarget } from "./target.js";
+import { VERSION } from "../version.js";
 
 export interface StoredConfig extends Partial<Omit<import("./inject.js").BeautifyConfig, "port">> {
   port?: number;
@@ -105,6 +106,51 @@ export function saveConfig(config: StoredConfig): void {
     fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
     fs.renameSync(tmp, file);
   });
+}
+
+/** Config keys whose presence proves the plugin was really used before the
+ *  opt-in gate existed (≤0.5.x); a config without any of them is fresh. */
+const PRIOR_USE_KEYS = [
+  "wallpaperPath",
+  "sceneHash",
+  "sceneVideoUrl",
+  "rotation",
+  "themeColor",
+  "chatLook",
+  "bubbleLook",
+  "taskSpinnerLook",
+  "dayNight",
+] as const;
+
+/** True when the experimental CDP injection is explicitly enabled. */
+export function experimentalEnabled(cfg: StoredConfig = loadConfig()): boolean {
+  return cfg.experimental?.enabled === true;
+}
+
+/**
+ * One-time migration for installs that predate the opt-in gate: a config
+ * proving real prior use is flipped to enabled with a `migrated` marker (so
+ * the panel can disclose that this was inherited, not consented), because
+ * silently disabling a wallpaper the user already had running would be a
+ * worse surprise than inheriting the old behavior. Fresh installs stay off
+ * and no file is written. Idempotent — after the first write the key exists
+ * and every later call is a no-op read.
+ */
+export function ensureExperimentalGate(): StoredConfig {
+  const cfg = loadConfig();
+  if (cfg.experimental) return cfg;
+  const used = PRIOR_USE_KEYS.some((k) => cfg[k] !== undefined);
+  if (!used) return cfg;
+  const migrated: StoredConfig = {
+    ...cfg,
+    experimental: { enabled: true, migrated: true, consentVersion: VERSION },
+  };
+  try {
+    saveConfig(migrated);
+  } catch {
+    return cfg; // unwritable store: run disabled rather than half-enabled
+  }
+  return migrated;
 }
 
 export function findAppExecutable(t: AppTarget = target()): string | undefined {

@@ -336,8 +336,26 @@ export function normalizeBubbleLook(raw?: Partial<BubbleLookConfig>): BubbleLook
   };
 }
 
+/**
+ * Opt-in state for the experimental CDP-injection capability. Off by default:
+ * until enabled, the plugin spawns no serve daemon, never touches launch
+ * entries, and the injection tools answer with guidance instead of acting.
+ */
+export interface ExperimentalConfig {
+  /** Injection active: serve auto-starts, launchers self-heal, tools act. */
+  enabled: boolean;
+  /** Auto-migrated from a pre-gate config (prior use, not explicit consent). */
+  migrated?: boolean;
+  /** ISO timestamp of the explicit enable (enable_experimental / cli enable). */
+  consentedAt?: string;
+  /** Plugin version that recorded the consent. */
+  consentVersion?: string;
+}
+
 export interface BeautifyConfig {
   port: number;
+  /** Master opt-in for the experimental CDP injection (default: off). */
+  experimental?: ExperimentalConfig;
   wallpaperPath?: string;
   blur: number;
   dim: number;
@@ -397,6 +415,7 @@ export interface BeautifyConfig {
 
 export const DEFAULT_CONFIG: BeautifyConfig = {
   port: 9222,
+  experimental: { enabled: false },
   blur: 0,
   dim: 25,
   sidebarDim: 0,

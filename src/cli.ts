@@ -8,13 +8,15 @@
  *   reset    Restore ZCode's default appearance.
  *   watch    Keep re-injecting: survives ZCode restarts while this process lives.
  *   serve    Watch mode + settings panel + local control API.
+ *   enable   Opt in to the experimental CDP injection (off by default).
+ *   disable  Opt out again and roll the launch entries back.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { applyToZCode, type BeautifyConfig } from "./core/inject.js";
 import type { ApplyOptions } from "./core/session.js";
-import { launchApp, dataDir } from "./core/launch.js";
+import { ensureExperimentalGate, experimentalEnabled, launchApp, loadConfig, dataDir } from "./core/launch.js";
 import { applyWallpaper, resetAppearance } from "./core/session.js";
 import { setTarget, target } from "./core/target.js";
 
@@ -26,6 +28,16 @@ Global:
                                  the BEAUTIFY_TARGET env var, then auto-detect.
 
 Commands:
+  enable                         Opt in to the experimental CDP injection
+                                 (off by default): records consent, adds
+                                 --remote-debugging-port to the app's launch
+                                 entries and starts the local service. The CDP
+                                 port binds 127.0.0.1 but is unauthenticated.
+  disable [--keep-launchers]     Opt out and roll back: clears the injected
+                                 theme (incl. the renderer's cached copy),
+                                 stops the service, and strips the flag from
+                                 the launch entries again (--keep-launchers
+                                 leaves the flag in place).
   launch [--port N]              Start the client with --remote-debugging-port=N
   apply <image> [options]        Set wallpaper and adapt colors
     --blur <px>                  Blur the wallpaper (default 0)
@@ -48,9 +60,10 @@ Commands:
   serve [--port N] [--api-port M] [--detach]
                                  Watch mode + settings panel + local API (default API port 9223)
                                  --detach runs it in the background, outliving this shell
-  repair-launchers [--port N] [--dry-run]
+  repair-launchers [--port N] [--dry-run] [--remove]
                                  Add --remote-debugging-port to the app's launch
-                                 entries (shortcuts, deep-link handler) missing it
+                                 entries (shortcuts, deep-link handler) missing it;
+                                 --remove strips the flag from every entry instead
 `;
 
 async function main(): Promise<void> {
@@ -71,8 +84,63 @@ async function main(): Promise<void> {
   const app = setTarget(requested);
   const port = Number(flag("--port") ?? app.cdpPort);
 
+  // One-time gate migration for pre-0.6.0 configs: a config with real prior
+  // use inherits enabled=true (marked `migrated`); fresh installs stay off.
+  ensureExperimentalGate();
+  // CLI commands are explicit user actions, so they run even while the gate
+  // is closed — but say so, or "works once, never survives a restart" would
+  // read like a bug.
+  const gateNotice = (): void => {
+    if (!experimentalEnabled()) {
+      console.log(
+        "note: experimental CDP injection is disabled — this works right now, but the " +
+          "service will not auto-start and launch entries are not kept repaired. " +
+          "`zcode-beautify enable` opts in; see the README security notes."
+      );
+    }
+  };
+
   try {
     switch (cmd) {
+      case "enable": {
+        const { enableExperimental, spawnServeDetached } = await import("./core/experimental.js");
+        const r = await enableExperimental();
+        const report = r.launchers;
+        if (report && !report.error) {
+          for (const f of report.fixes.filter((x) => x.status === "updated")) console.log(`launch entry updated: ${f.path}`);
+          const failedFixes = report.fixes.filter((x) => x.status === "failed");
+          if (failedFixes.length > 0) {
+            console.log("some launch entries need one elevated run to update:");
+            for (const f of failedFixes) console.log(`  - ${f.path} (${f.reason})`);
+          }
+        } else if (report?.error) {
+          console.log(`launcher check failed: ${report.error}`);
+        }
+        spawnServeDetached(r.apiPort, process.argv[1]);
+        console.log(`Experimental CDP injection enabled (consent recorded). CDP port ${r.port} (127.0.0.1, unauthenticated).`);
+        console.log(
+          `If ${app.appName} is running without the debug port, fully quit it (including any tray icon) and start it again from a shortcut.`
+        );
+        console.log("`zcode-beautify disable` rolls everything back, including the flag in the launch entries.");
+        break;
+      }
+      case "disable": {
+        const { disableExperimental } = await import("./core/experimental.js");
+        const r = await disableExperimental({ cleanLaunchers: !has("--keep-launchers") });
+        if (r.teardown.via === "service") {
+          console.log("Service stopped; injected theme cleared (including the renderer's cached copy).");
+        } else if (r.teardown.via === "cdp" && r.teardown.windows > 0) {
+          console.log(`Injected theme cleared over CDP in ${r.teardown.windows} window(s).`);
+        } else {
+          console.log("No running client found — nothing injected to clear.");
+        }
+        if (r.launchers) {
+          if (r.launchers.error) console.log(`launcher cleanup failed: ${r.launchers.error}`);
+          else for (const f of r.launchers.fixes.filter((x) => x.status === "updated")) console.log(`launch entry cleaned: ${f.path}`);
+        }
+        console.log("Experimental mode disabled. Fully quit and restart the client to finish on the stock look.");
+        break;
+      }
       case "launch": {
         const r = await launchApp(port, app);
         // Keep every launch path (start menu, taskbar, deep links…) able to
@@ -104,6 +172,7 @@ async function main(): Promise<void> {
         break;
       }
       case "apply": {
+        gateNotice();
         const image = rest.find((a) => !a.startsWith("--"));
         if (!image) {
           console.error(USAGE);
@@ -122,6 +191,7 @@ async function main(): Promise<void> {
         break;
       }
       case "apply-scene": {
+        gateNotice();
         const scenePath = rest.find((a) => !a.startsWith("--"));
         if (!scenePath) {
           console.error(USAGE);
@@ -145,6 +215,7 @@ async function main(): Promise<void> {
         break;
       }
       case "colors": {
+        gateNotice();
         const { applyColorsOnly } = await import("./core/session.js");
         const windows = await applyColorsOnly({ port });
         console.log(`Re-applied theme to ${windows} window(s).`);
@@ -174,7 +245,8 @@ async function main(): Promise<void> {
       }
       case "repair-launchers": {
         const { repairLaunchers } = await import("./core/launchers.js");
-        const report = await repairLaunchers({ port, dryRun: has("--dry-run") });
+        const action = has("--remove") ? ("remove" as const) : ("add" as const);
+        const report = await repairLaunchers({ port, action, dryRun: has("--dry-run") });
         if (report.error) {
           console.error(report.error);
           process.exitCode = 1;
@@ -186,8 +258,10 @@ async function main(): Promise<void> {
         const updated = report.fixes.filter((f) => f.status === "updated").length;
         console.log(
           report.dryRun
-            ? `${updated} of ${report.fixes.length} entry(ies) would be updated.`
-            : `${updated} of ${report.fixes.length} entry(ies) updated.`
+            ? `${updated} of ${report.fixes.length} entry(ies) would be ${action === "remove" ? "cleaned" : "updated"}.`
+            : action === "remove"
+              ? `Removed --remote-debugging-port from ${updated} of ${report.fixes.length} entry(ies).`
+              : `${updated} of ${report.fixes.length} entry(ies) updated.`
         );
         break;
       }
@@ -196,6 +270,7 @@ async function main(): Promise<void> {
         break;
       }
       case "serve": {
+        gateNotice();
         const apiPort = Number(flag("--api-port") ?? app.apiPort);
         if (has("--detach")) {
           await startServeDetached(port, apiPort);
