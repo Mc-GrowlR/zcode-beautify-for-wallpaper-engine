@@ -1614,14 +1614,18 @@ function buildBootstrapScript(payload) {
       css += '.' + MARKER + '-ld-grid{display:grid!important;grid-template-columns:repeat(3,1fr)!important;'
         + 'grid-template-rows:repeat(3,1fr)!important;gap:1.3px!important;width:13px!important;height:13px!important;'
         + 'flex:none!important;color:var(--color-foreground,rgba(200,200,205,.9))!important}'
-        + '.' + MARKER + '-ld-dot{width:100%!important;height:100%!important;border-radius:1px!important;'
-        + 'background:currentColor!important;opacity:.15!important;'
-        + 'animation:' + MARKER + '-ld-on 950ms ease-in-out infinite!important}'
-        + '.' + MARKER + '-ld-dot.zb-ld-center{opacity:.07!important;animation:none!important}'
+      // NO !important on the dot rules: an author !important BEATS CSS
+      // animations in the cascade (and an !important animation shorthand
+      // resets animation-delay, killing the ring stagger) \u2014 the 6.1.3 dots
+      // rendered as a static dim grid because opacity:.15!important froze
+      // the keyframes out. Namespaced selectors need no boosting anyway.
+        + '.' + MARKER + '-ld-dot{width:100%;height:100%;border-radius:1px;'
+        + 'background:currentColor;opacity:.15;'
+        + 'animation:' + MARKER + '-ld-on 950ms ease-in-out infinite}'
+        + '.' + MARKER + '-ld-dot.zb-ld-center{opacity:.07;animation:none}'
         + '@keyframes ' + MARKER + '-ld-on{0%,100%{opacity:.15;transform:scale(1)}'
         + '35%{opacity:' + (isDark ? '1' : '.75') + ';transform:scale(1.08)}}'
         // Ring delays: child index \u2192 ORBIT position \xD7 110ms (center = child 5).
-        + '.' + MARKER + '-ld-dot:nth-child(1){animation-delay:0ms}'
         + '.' + MARKER + '-ld-dot:nth-child(2){animation-delay:110ms}'
         + '.' + MARKER + '-ld-dot:nth-child(3){animation-delay:220ms}'
         + '.' + MARKER + '-ld-dot:nth-child(4){animation-delay:770ms}'
@@ -111699,7 +111703,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.1.3";
+    VERSION = "6.1.4";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";

@@ -143,6 +143,13 @@ const PNG_1PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
       css.includes(":nth-child(4){animation-delay:770ms}") && css.includes(":nth-child(6){animation-delay:330ms}")
       && css.includes(":nth-child(7){animation-delay:660ms}") && css.includes(":nth-child(8){animation-delay:550ms}")
       && css.includes(":nth-child(9){animation-delay:440ms}"));
+    // Cascade guard: an author !important on opacity beats the keyframes and
+    // an !important animation shorthand resets animation-delay — 6.1.3 shipped
+    // exactly that and the wave rendered STATIC. The dot rules must stay
+    // unimportant (they are namespaced, nothing competes).
+    check("dot rules carry no !important (animations must win the cascade)",
+      !css.includes("opacity:.15!important") && !css.includes("ease-in-out infinite!important")
+      && !css.includes("ms!important"));
     check("classic hides the stock glyph but not the grid",
       css.includes('>*:not(.zcode-beautify-ld-grid){display:none!important}'));
     check("classic colors ride the foreground token", css.includes("var(--color-foreground"));

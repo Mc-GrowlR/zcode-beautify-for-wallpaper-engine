@@ -19,7 +19,13 @@
 > 6.1.1：ZCode 3.18 适配 + 三个新功能——壁纸取色令牌桥接补 3.18 改名的 `--color-hover`；会话底部加载图标可换（旧版 3×3 波浪 / 自定义图片）；聊天输入框透明度；壁纸库图片列表随面板剩余空间自适应高度。
 > 6.1.2：输入框透明度语义修正（0 = 不透明实底，旧"0=原生"因 3.18 令牌自带半透明而名不副实）+ 面板下拉框全面重做（自绘弹层替换 OS 原生样式）。
 > 6.1.3：旧版波浪图标按 zai-org/ZCode 上游源码忠实重写（9 真实 DOM 点 + 原 keyframes，替换 6.1.1 的渐变模拟——后者渲染又暗又糊）。
+> 6.1.4：修复波浪不动——点规则上的 !important 会压过 CSS 动画（作者 !important > 动画,且 !important 简写清零 animation-delay）,去掉后波浪真正跑起来。
 
+## 6.1.4 — 修复波浪图标无动画
+
+- **根因（CSS 级联顺序坑）**：6.1.3 给点的基础规则写了 opacity:.15!important——**作者 !important 声明在级联中排在 CSS 动画之上**，关键帧的 opacity 全被冻结在 .15；且 animation 简写成 !important 后隐含 animation-delay:0s!important，把后面非重要的逐点延迟规则全部清零。九个点于是静止发暗。
+- **修复**：点/中心/延迟规则全部去掉 !important（命名空间选择器本无竞争；网格与隐藏原生图形的规则保留）。实机验证：getAnimations() 全部 running、八点延迟 0~0.77s 正确、opacity 实时采样 1.0→0.15 波动。
+- 测试：t29 新增级联防回归断言（点规则不得含 !important）。
 ## 6.1.3 — 旧版波浪图标按上游源码忠实重写
 
 - **根因**：6.1.1 的"旧版波浪"是 @property 渐变层模拟(@radial-gradient 九块 + 注册变量驱动 alpha)——渲染出来又暗又糊、点挤成一团。对照 zai-org/ZCode 上游源码(sync a60ba6a7 的 ChatLoadingPixels + styles.css)发现真身是**九个真实 DOM 元素**各自动画 opacity+transform,而非背景渐变。
