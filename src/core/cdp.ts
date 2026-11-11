@@ -171,6 +171,7 @@ export interface InjectionPayload {
    * resolved paint URL. absent/mode "default" = stock spinner.
    */
   spinnerLook?: { mode: "default" | "image"; image: string; spin: boolean; size: number };
+  chatLoadLook?: { mode: "default" | "classic" | "image"; image: string; spin: boolean; size: number };
   /** Defer mounting until the app's startup screen finished (default true). */
   startupClean?: boolean;
   /** False when the client has no chat-area extras wired (non-ZCode targets). */
@@ -240,9 +241,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
+  var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -284,6 +286,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       window.__zcodeBeautify.spinnerKey = SPIN;
       applySpinnerLook();
     }
+    if (window.__zcodeBeautify.loadKey !== LOAD) {
+      window.__zcodeBeautify.loadKey = LOAD;
+      applyLoadLook();
+    }
     return;
   }
 
@@ -299,6 +305,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.bubbleKey === BUBBLE
       && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
@@ -316,6 +323,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
       && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.bubbleKey = BUBBLE;
     applyBubbleLook();
@@ -334,10 +342,29 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
       && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.spinnerKey = SPIN;
     applySpinnerLook();
     if (spinnerOnly) return;
+  }
+
+  // Chat-load fast path (会话底部加载图标): same shape as the spinner — its
+  // rules live in their own style element, swapping the icon must not replay
+  // the wallpaper transition.
+  if (window.__zcodeBeautify.loadKey !== LOAD) {
+    var loadOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.loadKey = LOAD;
+    applyLoadLook();
+    if (loadOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -346,7 +373,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -622,6 +649,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   applyBubbleLook();
   window.__zcodeBeautify.spinnerKey = SPIN;
   applySpinnerLook();
+  window.__zcodeBeautify.loadKey = LOAD;
+  applyLoadLook();
 
   function applyChatLook() {
     if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
@@ -645,11 +674,20 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // 输入框透明度: T is the composer background's transparency in %. The
+    // token's OWN alpha is REPLACED by the slider's (rgb(from … r g b) strips
+    // it, then color-mix scales toward transparent) — ZCode 3.18 ships
+    // --color-input at .5 alpha natively and the wallpaper bridge keeps that,
+    // so "0 = native" read as still-half-transparent; the slider is now the
+    // single source of truth: 0 = solid, 100 = invisible, 50 ≈ the stock look.
+    var fade = Math.max(0, Math.min(100, Math.round(Number(C.composerFade) >= 0 && Number(C.composerFade) <= 100 ? Number(C.composerFade) : 50)));
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
+    // Feature teardown — but NOT of the style element itself: the composer
+    // fade rule is always-on (its 50 default reproduces the stock look), so
+    // the style stays mounted and the flow falls through to rewrite it.
     if (!masksOn && !widthOn && !perfOn && !decOn && !dragOn) {
-      if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
       if (window.__zcodeBeautify.chatObs) {
@@ -661,7 +699,6 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         window.__zcodeBeautify.elapsedObs = null;
       }
       zbGripClean();
-      return;
     }
     if (!st) {
       st = document.createElement('style');
@@ -669,7 +706,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       (document.head || document.documentElement).appendChild(st);
     }
     st.textContent = ':root{--zb-chat-dim:' + (C.chatDim / 100) + ';--zb-mask-top:' + (C.maskTop / 100)
-      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100) + '}'
+      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100)
+      + ';--zb-composer-fade:' + fade + '}'
       + (masksOn
         ? '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
           + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
@@ -678,6 +716,17 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           // classes; .zb-chat-col is the version-proof fallback (markChatCol).
           + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
           + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}'
+        : '')
+      + (fade >= 0
+        // 输入框透明度: [data-composer-layout] is the composer's painted box
+        // (bg-input → var(--color-input), 3.18). rgb(from … r g b / 1) takes
+        // the token's COLOR but FORCES alpha 1 — the omitted-alpha form would
+        // keep the token's own .5 (spec: alpha defaults to the origin's) and
+        // every level would read half-transparent. color-mix then applies
+        // exactly the slider's transparency. The focus ring / border are
+        // separate tokens and stay untouched. The var indirection gives the
+        // panel's slider an instant inline-var preview (same as the masks).
+        ? '[data-composer-layout]{background-color:color-mix(in srgb, rgb(from var(--color-input, rgba(128,128,128,.35)) r g b / 1) calc(100% - var(--zb-composer-fade, 50)*1%), transparent) !important}'
         : '')
       + (widthOn && !dragOn
         // Mirrors ZCode's own tiers against the "conversation" container so
@@ -1350,6 +1399,78 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     st.textContent = css;
   }
 
+  // 会话底部加载图标: ZCode 3.18 renders the conversation footer's status row
+  // as [data-testid="chat-loading"] with the glyph inside
+  // [data-chat-loading-icon="true"] (a brand-colored orbit svg). CSS-only
+  // swap — React re-renders this row constantly while streaming, so DOM
+  // surgery would fight the reconciler.
+  //   classic: repaint the PRE-3.18 pixel wave — nine dots in a 3×3 grid
+  //     (13px, 1.3px gaps), the ring pulsing clockwise (950ms cycle,
+  //     110ms per-dot stagger, order 0,1,2,5,8,7,6,3), center dot static.
+  //     Implemented as nine radial-gradient tiles; each dot's alpha rides a
+  //     @property-registered number so the wave animates without extra DOM.
+  //   image: paint the user picture over the glyph; optional CSS rotation.
+  function applyLoadLook() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
+    var L;
+    try { L = JSON.parse(LOAD); } catch (e) { return; }
+    var st = document.getElementById(MARKER + '-load-style');
+    var mode = L && (L.mode === 'classic' || L.mode === 'image') ? L.mode : 'default';
+    if (mode === 'image' && !L.image) mode = 'default';
+    if (mode === 'default') {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-load-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var ICON = '[data-chat-loading-icon="true"]';
+    var size = Math.max(10, Math.min(28, Math.round(L.size || 16)));
+    var css = '';
+    if (mode === 'classic') {
+      // Fallback-safe foreground: --color-foreground is ZCode's own token
+      // (and ours when Monet is on); the gray keeps the dots visible if a
+      // future build drops the token.
+      var FG = 'var(--color-foreground, rgba(200,200,205,.9))';
+      var dot = function(p) {
+        return 'radial-gradient(circle, rgb(from ' + FG + ' r g b / calc(.15 + var(--zb-ld-p' + p + ',0)*.85)) 0 62%, transparent 64%)';
+      };
+      // @property registration is required BEFORE the browser will animate a
+      // custom property; register all eight, then ONE comma-listed animation
+      // (each entry animates its own dot's keyframes with its own delay —
+      // separate animation properties would override each other).
+      var anims = '';
+      for (var pi = 0; pi < 8; pi++) {
+        css += '@property --zb-ld-p' + pi + '{syntax:"<number>";inherits:false;initial-value:0}';
+        css += '@keyframes zb-ld-w' + pi + '{0%,100%{--zb-ld-p' + pi + ':0}50%{--zb-ld-p' + pi + ':1}}';
+        anims += (pi ? ',' : '') + 'zb-ld-w' + pi + ' 950ms linear infinite ' + (pi * 110) + 'ms';
+      }
+      // Guarded by relative-color support: on an engine without rgb(from …)
+      // the whole block drops and the stock 3.18 glyph simply stays.
+      css += '@supports (color: rgb(from red r g b / 50%)) {'
+        + ICON + '>*{display:none!important}'
+        + ICON + '{width:13px!important;height:13px!important;'
+        + 'background-repeat:no-repeat!important;background-size:33.4% 33.4%!important;'
+        // ring order 0,1,2 / 5 / 8,7,6 / 3 → delays 0..7*110ms; center static .07
+        + 'background-image:' + dot(0) + ',' + dot(1) + ',' + dot(2) + ',' + dot(3) + ',' + dot(4) + ',' + dot(5) + ',' + dot(6) + ',' + dot(7) + ','
+        + 'radial-gradient(circle, rgb(from ' + FG + ' r g b / .07) 0 62%, transparent 64%)!important;'
+        + 'background-position:0 0,50% 0,100% 0,100% 50%,100% 100%,50% 100%,0 100%,0 50%,50% 50%!important;'
+        + 'animation:' + anims + '!important}'
+        + '}';
+    } else {
+      css += ICON + '>*{display:none!important}'
+        + ICON + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'background:url("' + L.image + '") center/contain no-repeat!important}';
+      if (L.spin) {
+        css += ICON + '{animation:zb-ld-rot 1s linear infinite!important}'
+          + '@keyframes zb-ld-rot{to{transform:rotate(360deg)}}';
+      }
+    }
+    st.textContent = css;
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops — occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -1441,6 +1562,7 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-load-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
@@ -1453,6 +1575,7 @@ export function buildResetScript(marker = "zcode-beautify"): string {
     window.__zcodeBeautify.chatKey = null;
     window.__zcodeBeautify.bubbleKey = null;
     window.__zcodeBeautify.spinnerKey = null;
+    window.__zcodeBeautify.loadKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;

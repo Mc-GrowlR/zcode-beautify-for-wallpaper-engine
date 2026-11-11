@@ -48,9 +48,10 @@ function config(extra: Partial<BeautifyConfig> = {}): BeautifyConfig {
   check("dim variable still drives the wallpaper scrim", payload.css.includes("--zcode-beautify-dim:"));
 
   // Chat extras must be forced to stock, not merely ignored.
-  check("chat look forced to stock", JSON.stringify(payload.chatLook) === JSON.stringify({ chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0 }));
+  check("chat look forced to stock", JSON.stringify(payload.chatLook) === JSON.stringify({ chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 50 }));
   check("bubble look forced to stock", payload.bubbleLook?.preset === "default");
   check("spinner look forced to stock", payload.taskSpinnerLook?.mode === "default");
+  check("chat-load look forced to stock", payload.chatLoadLook?.mode === "default");
   check("payload flags the chat UI as unavailable", payload.chatUi === false);
   check("payload selects the WorkBuddy startup probe", payload.startupProbe === "workbuddy-skeleton");
 

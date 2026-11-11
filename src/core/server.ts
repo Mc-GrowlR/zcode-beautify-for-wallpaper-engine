@@ -24,7 +24,8 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLook, normalizeTaskSpinnerLook, resolveSpinnerImageRef, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLoadLook, normalizeChatLook, normalizeTaskSpinnerLook, resolveSpinnerImageRef, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
+import { normalizeComponentLook } from "./componentLook.js";
 import { loadWallpaper, extractPalette, type WallpaperAssets } from "./monet.js";
 import { themeFromSourceColor, argbFromRgb } from "@material/material-color-utilities";
 import { buildPanelScript } from "../panel/panelScript.js";
@@ -287,6 +288,8 @@ function publicConfig(config: BeautifyConfig) {
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
     bubbleLook: normalizeBubbleLook(config.bubbleLook),
+    // 组件精修 (WorkBuddy-only): normalized look for the panel's 组件 tab.
+    componentLook: normalizeComponentLook(config.componentLook),
     // 运行中图标: normalized look plus the RESOLVED paint URL so the panel can
     // preview exactly what the sidebar will show ("" = stock spinner). The
     // 完成未读 / 出错 slots get their own resolved preview URLs.
@@ -297,6 +300,11 @@ function publicConfig(config: BeautifyConfig) {
         : "",
     spinnerUnreadUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.unreadImage ?? "", config.apiPort ?? appTarget().apiPort, mediaToken),
     spinnerErrorUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.errorImage ?? "", config.apiPort ?? appTarget().apiPort, mediaToken),
+    // 会话底部加载图标: normalized look + resolved paint URL for the preview.
+    chatLoadLook: normalizeChatLoadLook(config.chatLoadLook),
+    chatLoadImageUrl: normalizeChatLoadLook(config.chatLoadLook).mode === "image"
+      ? resolveSpinnerImageRef(config.chatLoadLook?.image ?? "", config.apiPort ?? appTarget().apiPort, mediaToken)
+      : "",
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -362,6 +370,7 @@ function sanitize(body: any): Partial<BeautifyConfig> {
       perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
       hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0,
       dragResize: cl.dragResize === 1 || cl.dragResize === true ? 1 : 0,
+      composerFade: pct(cl.composerFade) ?? 50,
     };
   }
   // User message bubble look (聊天气泡): normalizeBubbleLook fills any field
@@ -369,11 +378,20 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   if (body?.bubbleLook && typeof body.bubbleLook === "object") {
     out.bubbleLook = normalizeBubbleLook(body.bubbleLook);
   }
+  // 组件精修 (组件 tab, WorkBuddy-only): same full-object contract — the panel
+  // posts every field, the normalizer clamps and fills the rest.
+  if (body?.componentLook && typeof body.componentLook === "object") {
+    out.componentLook = normalizeComponentLook(body.componentLook);
+  }
   // 运行中图标: same contract as bubbleLook — the panel always posts the full
   // object; normalizeTaskSpinnerLook fills/clamps the rest. The image REF is
   // stored as-is; buildPayload resolves it to a paintable URL.
   if (body?.taskSpinnerLook && typeof body.taskSpinnerLook === "object") {
     out.taskSpinnerLook = normalizeTaskSpinnerLook(body.taskSpinnerLook);
+  }
+  // 会话底部加载图标: identical contract, mirrored normalizer.
+  if (body?.chatLoadLook && typeof body.chatLoadLook === "object") {
+    out.chatLoadLook = normalizeChatLoadLook(body.chatLoadLook);
   }
   // Day/night look schedule (护眼): two dim/blur presets switch at times.
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -503,6 +521,7 @@ async function holdSession(
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
+    chatLoadLook: payload.chatLoadLook,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
@@ -557,6 +576,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
+    chatLoadLook: payload.chatLoadLook,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
@@ -992,7 +1012,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // the loading slot's mode.
       if (req.method === "POST" && url.pathname === "/api/spinner") {
         const body = JSON.parse(await readBody(req));
-        const slot = body?.slot === "unread" || body?.slot === "error" ? body.slot : "running";
+        const slot = body?.slot === "unread" || body?.slot === "error" || body?.slot === "loading" ? body.slot : "running";
         const dataUri = typeof body?.dataUri === "string" ? body.dataUri : "";
         const m = /^data:(image\/(?:gif|png|webp|jpeg|bmp|svg\+xml));base64,(.+)$/.exec(dataUri);
         if (!m) throw new Error("dataUri must be a base64 image data URI (gif/png/webp/jpeg/bmp/svg)");
@@ -1017,6 +1037,18 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         }
         fs.writeFileSync(dest, bytes);
         const config = runtimeConfig();
+        if (slot === "loading") {
+          // 会话底部加载图标 lives in its own config object.
+          const look = normalizeChatLoadLook(config.chatLoadLook);
+          const nextCfg: BeautifyConfig = {
+            ...config,
+            chatLoadLook: { ...look, mode: "image" as const, image: dest },
+          };
+          saveConfig(persisted(nextCfg));
+          const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
+          sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
+          return;
+        }
         const look = normalizeTaskSpinnerLook(config.taskSpinnerLook);
         const nextCfg: BeautifyConfig = {
           ...config,

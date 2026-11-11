@@ -60,6 +60,9 @@ function transparencyRows(mode: "light" | "dark", opts: { dim: number }): string
     `--color-sidebar:rgba(${rgb},${panelAlpha});`,
     `--color-surface:rgba(${rgb},${baseAlpha});`,
     `--color-surface-hover:rgba(${rgb},${baseAlpha});`,
+    // 3.18 renamed the row-hover paint to --color-hover (session list rows
+    // hover:bg-[var(--color-hover)]); map both so the bridge survives either.
+    `--color-hover:rgba(${rgb},${baseAlpha});`,
     `--color-card:rgba(${rgb},${baseAlpha});`,
     `--color-card-selected:rgba(${rgb},${Math.min(1, baseAlpha + 0.15)});`,
     `--color-popover:rgba(${rgb},${popoverAlpha});`,
@@ -94,6 +97,8 @@ function tokenRows(theme: Theme, mode: "light" | "dark", opts: ThemeOptions): st
     `--color-sidebar:${A(n.tone(t.low), panelAlpha)};`,
     `--color-surface:${A(n.tone(t.lowest === 100 ? 98 : 6), baseAlpha)};`,
     `--color-surface-hover:${A(n.tone(t.high), baseAlpha)};`,
+    // 3.18 hover paint token (see transparencyRows note).
+    `--color-hover:${A(n.tone(t.high), baseAlpha)};`,
     `--color-card:${A(n.tone(t.container), baseAlpha)};`,
     `--color-card-selected:${A(n.tone(t.highest), Math.min(1, baseAlpha + 0.15))};`,
     `--color-card-border:${A(s.outlineVariant, 0.5)};`,
@@ -145,7 +150,26 @@ const WB_LIGHT = 'html[data-theme="light"],html.cb-light,:root';
 const WB_DARK = 'html[data-theme="dark"],html.cb-dark,html.dark,body.dark,.dark';
 
 function buildWorkbuddyOverrides(theme: Theme, opts: ThemeOptions): string {
-  return `${WB_LIGHT}{${wbRows(theme, "light", opts).join("")}}\n${WB_DARK}{${wbRows(theme, "dark", opts).join("")}}`;
+  const vars = `${WB_LIGHT}{${wbRows(theme, "light", opts).join("")}}\n${WB_DARK}{${wbRows(theme, "dark", opts).join("")}}`;
+  return opts.wallpaperVisible ? vars + workbuddyShellRules() : vars;
+}
+
+/**
+ * WorkBuddy's shell containers paint hard-coded opaque backgrounds
+ * (`rgb(31,31,31)` / `rgb(20,20,20)`) instead of reading `--wb-bg-*`, so the
+ * fixed wallpaper layer behind the app is covered completely. The token
+ * family in `wbRows()` cannot reach them — these selectors are the shells
+ * that actually paint the window: the teams grid (full-bleed backdrop),
+ * the conversation column and the menubar. Transparent for the pure
+ * backdrop layers, the translucent content token for anything that sits
+ * directly under UI text, so the wallpaper shows through without hurting
+ * readability. `[class*="gridViewItem"]` matches a CSS-Modules hashed class
+ * (`_gridViewItem_xxxxx_yy`) whose hash changes between builds.
+ */
+function workbuddyShellRules(): string {
+  return `
+.teams-container,.teams-grid-scroll-content,[class*="gridViewItem"]{background-color:transparent !important;}
+.conversation-shell,#workbuddy-menubar-container{background-color:var(--wb-bg-content,rgba(26,26,26,.55)) !important;}`;
 }
 
 function buildWorkbuddyTransparency(opts: { dim: number }): string {
@@ -166,7 +190,7 @@ function buildWorkbuddyTransparency(opts: { dim: number }): string {
       opts.dim > 0 ? `--zcode-beautify-dim:${opts.dim / 100};` : "",
     ].join("");
   };
-  return `${WB_LIGHT}{${rows("light")}}\n${WB_DARK}{${rows("dark")}}`;
+  return `${WB_LIGHT}{${rows("light")}}\n${WB_DARK}{${rows("dark")}}` + workbuddyShellRules();
 }
 
 function wbRows(theme: Theme, mode: "light" | "dark", opts: ThemeOptions): string[] {

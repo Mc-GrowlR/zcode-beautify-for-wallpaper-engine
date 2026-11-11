@@ -41,6 +41,7 @@ export function buildPanelScript(
   var CHAT_UI = ${JSON.stringify(chatUi)};
   var HAS_UPDATER = ${JSON.stringify(hasUpdater)};
   var PROBE = ${JSON.stringify(opts.appName === "WorkBuddy" ? "workbuddy-skeleton" : "zcode-body-class")};
+  var IS_WB = PROBE === 'workbuddy-skeleton';
   var VERSION = ${JSON.stringify(VERSION)};
   var REPO_URL = ${JSON.stringify(REPO_URL)};
   var FORK_URL = ${JSON.stringify(FORK_URL)};
@@ -151,7 +152,7 @@ export function buildPanelScript(
     '.zb-tab[data-active="1"] { background: rgba(122,162,247,.16); opacity: 1; color: #dbe6ff; font-weight: 600; }',
     '.zb-tab[data-active="1"]::before { content: ""; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px;',
       ' border-radius: 2px; background: #7aa2f7; }',
-    '#zb-tab-main.zb-pane-in, #zb-tab-look.zb-pane-in, #zb-tab-chat.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in, #zb-tab-about.zb-pane-in { animation: zb-pane-in 150ms ease; }',
+    '#zb-tab-main.zb-pane-in, #zb-tab-look.zb-pane-in, #zb-tab-chat.zb-pane-in, #zb-tab-components.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in, #zb-tab-about.zb-pane-in { animation: zb-pane-in 150ms ease; }',
     '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
     '#zb-body { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 16px;',
       ' display: flex; flex-direction: column; }',
@@ -372,6 +373,37 @@ export function buildPanelScript(
       ' background: rgba(0,0,0,.3); color: inherit; font-size: 12px; outline: none; color-scheme: dark; }',
     '.zb-set input[type=time] { width: 80px; }',
     '.zb-set input[type=number] { width: 56px; }',
+    // Custom dropdown (下拉框): the native <select> popup is OS-drawn — system
+    // blue highlight, hard-edged black arrow patch — and cannot be themed.
+    // The enhancer hides the native control and paints a matching button plus
+    // a fixed-position popup card (same surface language as .zb-wp-pop).
+    'select.zb-dd-src { display: none !important; }',
+    '.zb-dd { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px 4px 10px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 12px;',
+      ' line-height: 1.4; cursor: pointer; outline: none; flex: 0 1 auto;',
+      ' transition: border-color .12s ease, background .12s ease; }',
+    '.zb-dd:hover, .zb-dd:focus-visible { border-color: rgba(122,162,247,.55); background: rgba(0,0,0,.38); }',
+    '.zb-dd[aria-expanded="true"] { border-color: rgba(122,162,247,.8); background: rgba(0,0,0,.42); }',
+    '.zb-dd-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }',
+    '.zb-dd-chev { flex: none; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.5);',
+      ' transition: transform .15s ease, color .12s ease; }',
+    '.zb-dd[aria-expanded="true"] .zb-dd-chev { transform: rotate(180deg); color: #9db8ff; }',
+    '.zb-dd-pop { position: fixed; z-index: 2147483647; max-height: 246px; overflow-y: auto; padding: 4px;',
+      ' border-radius: 10px; border: 1px solid rgba(255,255,255,.13); background: rgba(30,30,38,.97);',
+      ' box-shadow: 0 12px 36px rgba(0,0,0,.5); backdrop-filter: blur(18px);',
+      ' animation: zb-dd-in 120ms ease; }',
+    '.zb-dd-pop[hidden] { display: none; }',
+    '@keyframes zb-dd-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }',
+    '.zb-dd-pop::-webkit-scrollbar { width: 5px; }',
+    '.zb-dd-pop::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
+    '.zb-dd-item { position: relative; display: flex; align-items: center; padding: 6px 14px 6px 12px; border-radius: 6px;',
+      ' font-size: 12px; cursor: pointer; white-space: nowrap; color: #d6d9e0; }',
+    '.zb-dd-item:hover, .zb-dd-item[data-kb="1"] { background: rgba(122,162,247,.16); color: #eef1f8; }',
+    '.zb-dd-item[data-cur="1"] { background: rgba(122,162,247,.24); color: #dbe6ff; font-weight: 600; }',
+    '.zb-dd-item[data-cur="1"]::before { content: ""; position: absolute; left: 2px; top: 6px; bottom: 6px; width: 2px;',
+      ' border-radius: 2px; background: #7aa2f7; }',
+    '.zb-dd-item[data-disabled="1"] { opacity: .38; cursor: default; }',
+    '.zb-dd-item[data-disabled="1"]:hover { background: none; color: #d6d9e0; }',
     '.zb-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 8px; }',
     '.zb-cfg-row .zb-btn { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
@@ -559,6 +591,7 @@ export function buildPanelScript(
     '      <button class="zb-tab" data-tab="main"><span class="zb-ico">🖼</span><span>壁纸</span></button>' +
     '      <button class="zb-tab" data-tab="look"><span class="zb-ico">🎨</span><span>外观</span></button>' +
     '      <button class="zb-tab" data-tab="chat"><span class="zb-ico">💬</span><span>聊天</span></button>' +
+    '      <button class="zb-tab" data-tab="components"><span class="zb-ico">🧩</span><span>组件</span></button>' +
     '      <button class="zb-tab" data-tab="sched"><span class="zb-ico">⏱</span><span>轮播</span></button>' +
     '      <button class="zb-tab" data-tab="settings"><span class="zb-ico">⚙</span><span>通用</span></button>' +
     '      <button class="zb-tab" data-tab="about"><span class="zb-ico">ℹ</span><span>关于</span></button>' +
@@ -690,6 +723,8 @@ export function buildPanelScript(
     '        <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-bot-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">大容器偏白</span><span class="zb-set-sub">整窗白色薄纱浓度,暗色壁纸下提升文字可读性</span></div>' +
     '        <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-frost-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">输入框透明度</span><span class="zb-set-sub">输入框底色的透明程度:0 = 不透明实底,100 = 全透明;50 ≈ ZCode 原生</span></div>' +
+    '        <input type="range" id="zb-chat-composer" min="0" max="100" step="1" value="50" title="输入框底色的透明度:0=不透明(实底),50≈ZCode 原生半透明,100=完全透明露出壁纸;文字与边框不受影响"><span class="zb-val"><span id="zb-chat-composer-val">50</span>%</span></div>' +
     '      </div>' +
     '    </div>' +
     '    <div class="zb-block">' +
@@ -741,6 +776,74 @@ export function buildPanelScript(
     '        <label class="zb-sw"><input type="checkbox" id="zb-spinner-spin" title="自定义图标是否沿用原生的旋转动画"></label></div>' +
     '      <div class="zb-set zb-slide" id="zb-spinner-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">图标大小</span><span class="zb-set-sub">原生槽位约 16px,过大可能挤到行内其他元素</span></div>' +
     '        <input type="range" id="zb-spinner-size" min="10" max="24" step="1" value="16" title="自定义图标的显示尺寸(10-24px)"><span class="zb-val"><span id="zb-spinner-size-val">16</span>px</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">会话底部加载图标</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">图标样式</span><span class="zb-set-sub">对话下方"工作中"行首的加载图标;3.18 起新版为品牌色粒子,旧版为 3×3 波浪点阵</span></div>' +
+    '        <div class="zb-ctrl"><select id="zb-load-mode" title="会话底部加载图标:新版=3.18 品牌色粒子;旧版波浪=3.18 之前的像素点阵;自定义图片=换成图片或 GIF 动图">' +
+    '          <option value="default">新版(原生)</option>' +
+    '          <option value="classic">旧版波浪</option>' +
+    '          <option value="image">自定义图片</option>' +
+    '        </select>' +
+    '        <button class="zb-btn" id="zb-load-pick" title="选择本地图片或 GIF 动图(≤2MB,支持 gif/png/webp/jpeg/svg)">📁 选图</button>' +
+    '        <input type="file" id="zb-load-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set" id="zb-load-img-row" hidden><div class="zb-set-main"><span class="zb-set-name">当前图标</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-load-preview" alt="当前加载图标" title="当前加载图标" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-load-clear" title="恢复新版原生图标">✕ 恢复新版</button></div></div>' +
+    '      <div class="zb-set" id="zb-load-opts" hidden><div class="zb-set-main"><span class="zb-set-name">保留旋转</span><span class="zb-set-sub">静态图建议开;GIF 动图建议关(自带动画)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-load-spin" title="自定义图标是否加旋转动画"></label></div>' +
+    '      <div class="zb-set zb-slide" id="zb-load-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">图标大小</span><span class="zb-set-sub">原生槽位约 16px,过大可能挤到"工作中"文字</span></div>' +
+    '        <input type="range" id="zb-load-size" min="10" max="28" step="1" value="16" title="自定义图标的显示尺寸(10-28px)"><span class="zb-val"><span id="zb-load-size-val">16</span>px</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-components" hidden>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">组件精修 · WorkBuddy</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">启用组件精修</span><span class="zb-set-sub">按下方数值改写侧栏 / 输入框 / 工具卡 / 通用组件;关闭 = 完全原生</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-cp-on" title="总开关:关闭时不注入任何组件覆盖规则,WorkBuddy 保持原生外观"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">为什么需要它</span><span class="zb-set-sub">侧栏 #1f1f1f、输入框 #1f1f1f / 边框 #333、菜单栏文字都是写死的颜色,设计令牌改不到;只能点名覆盖。数值仅在开启后生效</span></div></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">壳层</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">侧栏底色</span><span class="zb-set-sub">会话侧栏与主题表面的混合浓度;100% 最实,0% 全透明</span></div>' +
+    '        <input type="range" id="zb-cp-sidebar" min="0" max="100" step="1" value="72"><span class="zb-val"><span id="zb-cp-sidebar-val">72</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">菜单栏文字</span><span class="zb-set-sub">30px 菜单栏「编辑 / 窗口 / 帮助」的文字浓度;原生偏淡(约 52%)</span></div>' +
+    '        <input type="range" id="zb-cp-menubar" min="20" max="100" step="1" value="72"><span class="zb-val"><span id="zb-cp-menubar-val">72</span>%</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">输入框</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">圆角</span><span class="zb-set-sub">输入容器圆角,原生 24px</span></div>' +
+    '        <input type="range" id="zb-cp-composer-radius" min="8" max="40" step="1" value="24"><span class="zb-val"><span id="zb-cp-composer-radius-val">24</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">底色</span><span class="zb-set-sub">输入容器与主题卡片的混合浓度;0% 全透明(露出壁纸)</span></div>' +
+    '        <input type="range" id="zb-cp-composer-tone" min="0" max="100" step="1" value="72"><span class="zb-val"><span id="zb-cp-composer-tone-val">72</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">描边</span><span class="zb-set-sub">输入容器边框浓度;原生 #333,0% 无边框</span></div>' +
+    '        <input type="range" id="zb-cp-composer-border" min="0" max="100" step="1" value="55"><span class="zb-val"><span id="zb-cp-composer-border-val">55</span>%</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">消息与工具</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">工具卡圆角</span><span class="zb-set-sub">工具调用结果卡与折叠块的圆角,原生 8px</span></div>' +
+    '        <input type="range" id="zb-cp-tool-radius" min="0" max="20" step="1" value="8"><span class="zb-val"><span id="zb-cp-tool-radius-val">8</span>px</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">会话文字跟随主题</span><span class="zb-set-sub">把消息渲染层的 --cr-* 文字色接到 --wb-* 上,消除「半跟随」色差</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-cp-cr-sync" title="消息正文 / 次级文字 / 链接 / 滚动条改用设计系统令牌"></label></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">通用组件</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">控件圆角</span><span class="zb-set-sub">输入框 / 卡片 / 次级按钮共用的 --wb-radius-md/lg,原生 6 / 8px</span></div>' +
+    '        <input type="range" id="zb-cp-control-radius" min="0" max="20" step="1" value="8"><span class="zb-val"><span id="zb-cp-control-radius-val">8</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">弹层圆角</span><span class="zb-set-sub">模态框 / 对话框圆角(--wb-modal-radius),原生 24px</span></div>' +
+    '        <input type="range" id="zb-cp-modal-radius" min="8" max="40" step="1" value="24"><span class="zb-val"><span id="zb-cp-modal-radius-val">24</span>px</span></div>' +
     '      </div>' +
     '    </div>' +
     '    </div>' +
@@ -936,6 +1039,15 @@ export function buildPanelScript(
   if (!CHAT_UI) {
     var zbChatTab = root.querySelector('.zb-tab[data-tab="chat"]');
     if (zbChatTab) zbChatTab.remove();
+  }
+  // 组件精修 is bound to WorkBuddy's own shell (.conversation-list /
+  // .cr-input-container / .codebuddy-menubar); ZCode has none of those, so a
+  // tab promising it would be a lie.
+  if (!IS_WB) {
+    var zbCpTab = root.querySelector('.zb-tab[data-tab="components"]');
+    if (zbCpTab) zbCpTab.remove();
+    var zbCpPane = root.querySelector('#zb-tab-components');
+    if (zbCpPane) zbCpPane.remove();
   }
   // No update-status window on the client → drop the toggle instead of
   // offering a switch that can never do anything.
@@ -1158,9 +1270,11 @@ export function buildPanelScript(
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
+        setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
+        setComponentUI(c.componentLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
@@ -1304,6 +1418,9 @@ export function buildPanelScript(
     var b = document.getElementById('zb-rows-images');
     if (a) a.value = libRows.scenes;
     if (b) b.value = libRows.images;
+    // The fill pass runs AFTER the floors land: it raises the images list to
+    // the leftover pane space when that exceeds the row preference.
+    if (typeof sizeImagesList === 'function') sizeImagesList();
   }
   ['zb-rows-scenes', 'zb-rows-images'].forEach(function (id) {
     var el = document.getElementById(id);
@@ -1342,11 +1459,13 @@ export function buildPanelScript(
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
     $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
+    var cfEl = $('zb-chat-composer');
+    if (cfEl) { cfEl.value = cf ?? 50; $('zb-chat-composer-val').textContent = String(cf ?? 50); }
     var perfEl = $('zb-chat-perf');
     if (perfEl) perfEl.checked = perf === 1;
     var decEl = $('zb-chat-elapsed');
@@ -1362,6 +1481,7 @@ export function buildPanelScript(
     rs.removeProperty('--zb-mask-top');
     rs.removeProperty('--zb-mask-bot');
     rs.removeProperty('--zb-frost');
+    rs.removeProperty('--zb-composer-fade');
   }
   // Live preview via the same CSS vars the injected style consumes — inline
   // vars outrank the :root block, so drags feel instant; the server push
@@ -1387,7 +1507,8 @@ export function buildPanelScript(
           widthInsetRem: widthServerInset,
           perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
           hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0,
-          dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0
+          dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0,
+          composerFade: Number($('zb-chat-composer').value) || 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -1399,6 +1520,14 @@ export function buildPanelScript(
       chatPreview(Number($('zb-chat-dim').value), Number($('zb-chat-top').value), Number($('zb-chat-bot').value), Number($('zb-chat-frost').value));
       pushChatLook();
     });
+  });
+  // 输入框透明度: instant inline-var preview (same mechanism as the masks),
+  // pushed through the regular chatLook debounce.
+  $('zb-chat-composer').addEventListener('input', function () {
+    var v = Number(this.value) || 0;
+    $('zb-chat-composer-val').textContent = String(v);
+    document.documentElement.style.setProperty('--zb-composer-fade', String(v));
+    pushChatLook();
   });
   // Column width: a gear writes both numbers and pushes immediately. The
   // custom editor is opened by the ➕ button and only pushes on ✓ 应用 —
@@ -1652,6 +1781,78 @@ export function buildPanelScript(
     reflectSpinnerRows($('zb-spinner-mode').value);
     pushSpinnerLook();
     status('已恢复原生错误标志');
+  });
+
+  // --- 会话底部加载图标 (conversation footer loading icon) --------------------
+  // Mirrors the spinner pipeline (upload slot "loading", /api/config pushes),
+  // plus the "classic" mode that needs no image at all.
+  var loadImageRef = '';
+  function loadUIState() {
+    return {
+      mode: $('zb-load-mode').value,
+      image: loadImageRef,
+      spin: $('zb-load-spin').checked,
+      size: Number($('zb-load-size').value)
+    };
+  }
+  function reflectLoadRows(mode) {
+    var on = mode === 'image' && Boolean(loadImageRef);
+    $('zb-load-img-row').hidden = !on;
+    $('zb-load-opts').hidden = mode !== 'image';
+    $('zb-load-size-row').hidden = mode !== 'image';
+    if (on && lastConfig && lastConfig.chatLoadImageUrl) $('zb-load-preview').src = lastConfig.chatLoadImageUrl;
+  }
+  function setLoadUI(s, url) {
+    s = s || {};
+    var mode = s.mode === 'classic' || s.mode === 'image' ? s.mode : 'default';
+    if (mode === 'image' && !s.image) mode = 'default';
+    loadImageRef = typeof s.image === 'string' ? s.image : '';
+    $('zb-load-mode').value = mode;
+    $('zb-load-spin').checked = s.spin !== false;
+    $('zb-load-size').value = s.size ?? 16;
+    $('zb-load-size-val').textContent = String(s.size ?? 16);
+    reflectLoadRows(mode);
+  }
+  function pushLoadLook() {
+    post('/api/config', { chatLoadLook: loadUIState() }, function (d) { if (d && d.error) status(d.error); });
+  }
+  $('zb-load-mode').addEventListener('change', function () {
+    reflectLoadRows(this.value);
+    pushLoadLook();
+  });
+  $('zb-load-spin').addEventListener('change', pushLoadLook);
+  $('zb-load-size').addEventListener('input', function () {
+    $('zb-load-size-val').textContent = this.value;
+  });
+  $('zb-load-size').addEventListener('change', pushLoadLook);
+  $('zb-load-pick').addEventListener('click', function () {
+    $('zb-load-file').click();
+  });
+  $('zb-load-file').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { status('图片超过 2MB,小图标请选小一点的文件'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      post('/api/spinner', { dataUri: fr.result, name: f.name, slot: 'loading' }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        if (d && d.chatLoadLook && d.chatLoadLook.image) {
+          loadImageRef = d.chatLoadLook.image;
+          lastConfig = d; // resolved preview URL rides on the same payload
+          $('zb-load-mode').value = 'image';
+          reflectLoadRows('image');
+        }
+        status(d && d.windows > 0 ? '加载图标已应用' : '加载图标已保存(ZCode 未连接)');
+      });
+    };
+    fr.readAsDataURL(f);
+  });
+  $('zb-load-clear').addEventListener('click', function () {
+    $('zb-load-mode').value = 'default';
+    reflectLoadRows('default');
+    pushLoadLook();
+    status('已恢复新版原生加载图标');
   });
 
   // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
@@ -2531,6 +2732,57 @@ export function buildPanelScript(
   bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
   bindFold('zb-card-images', 'zcode-beautify:fold-images');
 
+  // 壁纸库·图片 list fill: the images block is the pane's LAST block and the
+  // pane's flex chain stretches the CARD to the bottom of the body — but the
+  // chain breaks at the card (its content is plain grid/block), so with
+  // 动态/最近使用 collapsed the card grew tall while the list kept its
+  // 行数-preference cap: a tall empty card background under a short list.
+  // Fill instead: size the list to the CARD's live height minus the card's
+  // own chrome (padding/border) and the non-list rows inside (toolbar etc.).
+  // The card's height already accounts for every other block's fold state and
+  // the window size, so no separate pane math is needed. Floor = the user's
+  // 行数 preference (applyLibRows) so a busy pane never shows fewer rows.
+  function sizeImagesList() {
+    var card = $('zb-card-images'), list = $('zb-lib-images');
+    if (!card || !list) return;
+    var pane = $('zb-tab-main');
+    if (pane && pane.hidden) return;
+    var cs = getComputedStyle(card);
+    var chromeY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+      + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    var inner = list.parentElement; // .zb-collapse-inner
+    var others = 0;
+    if (inner) {
+      for (var i = 0; i < inner.children.length; i++) {
+        var sib = inner.children[i];
+        if (sib === list) continue;
+        var sc = getComputedStyle(sib);
+        others += sib.offsetHeight + (parseFloat(sc.marginTop) || 0) + (parseFloat(sc.marginBottom) || 0);
+      }
+    }
+    var avail = card.offsetHeight - chromeY - others;
+    var floor = zbRowH * libRows.images;
+    list.style.maxHeight = Math.max(floor, avail) + 'px';
+  }
+  // The 0fr→1fr fold animates over 180ms, so measure now (sync), when the
+  // transition lands, and twice mid-flight — cheap offsetHeight reads.
+  var sizeImagesListSoon = function () {
+    sizeImagesList();
+    requestAnimationFrame(function () { requestAnimationFrame(sizeImagesList); });
+    setTimeout(sizeImagesList, 220);
+  };
+  ['zb-card-history', 'zb-card-scenes', 'zb-card-images'].forEach(function (id) {
+    var wrap = document.getElementById(id) && document.getElementById(id).querySelector('.zb-collapse-wrap');
+    if (wrap) wrap.addEventListener('transitionend', sizeImagesListSoon);
+  });
+  if (window.ResizeObserver) {
+    // Watch the CARD: its height is the fill budget and it moves with folds
+    // (its own and the other blocks') and window resizes alike.
+    new ResizeObserver(sizeImagesList).observe($('zb-card-images'));
+  } else {
+    window.addEventListener('resize', sizeImagesList);
+  }
+
   // Image sort mode (F6): default newest first; toggles to name order.
   var imgSort = 'time';
   var LIB_QUERY = '';
@@ -2562,6 +2814,7 @@ export function buildPanelScript(
           images.innerHTML = '<div class="zb-lib-head">暂无图片壁纸 — 用上方更换图片</div>';
         }
         if (batchMode) enterBatchMode(false); // re-arm checkboxes on the fresh rows
+        sizeImagesList();
       })
       .catch(function () { /* offline */ });
   }
@@ -3417,6 +3670,79 @@ export function buildPanelScript(
     });
   });
 
+  // --- 组件精修 (WorkBuddy-only) -------------------------------------------
+  // Every control mirrors one field of componentLook; the master switch only
+  // decides whether the injected sheet exists, so the sliders are disabled
+  // (not hidden) while it is off — the values stay visible for tuning.
+  var CP_FIELDS = [
+    ['zb-cp-sidebar', 'sidebarTone', '%'],
+    ['zb-cp-menubar', 'menubarText', '%'],
+    ['zb-cp-composer-radius', 'composerRadius', 'px'],
+    ['zb-cp-composer-tone', 'composerTone', '%'],
+    ['zb-cp-composer-border', 'composerBorder', '%'],
+    ['zb-cp-tool-radius', 'toolRadius', 'px'],
+    ['zb-cp-control-radius', 'controlRadius', 'px'],
+    ['zb-cp-modal-radius', 'modalRadius', 'px']
+  ];
+  function cpSetEnabled(on) {
+    for (var i = 0; i < CP_FIELDS.length; i++) {
+      var el = $(CP_FIELDS[i][0]);
+      if (el) el.disabled = !on;
+    }
+    var sync = $('zb-cp-cr-sync');
+    if (sync) sync.disabled = !on;
+  }
+  function setComponentUI(c) {
+    if (!IS_WB) return;
+    c = c || {};
+    var on = c.enabled === true;
+    $('zb-cp-on').checked = on;
+    for (var i = 0; i < CP_FIELDS.length; i++) {
+      var id = CP_FIELDS[i][0], unit = CP_FIELDS[i][2];
+      var v = c[CP_FIELDS[i][1]];
+      if (typeof v !== 'number') v = 0;
+      var el = $(id);
+      if (el) el.value = v;
+      var lab = $(id + '-val');
+      if (lab) lab.textContent = v + unit;
+    }
+    var syncEl = $('zb-cp-cr-sync');
+    if (syncEl) syncEl.checked = c.syncCrTokens !== false;
+    cpSetEnabled(on);
+  }
+  function componentUIState() {
+    var out = { enabled: $('zb-cp-on').checked };
+    for (var i = 0; i < CP_FIELDS.length; i++) {
+      out[CP_FIELDS[i][1]] = Number($(CP_FIELDS[i][0]).value);
+    }
+    out.syncCrTokens = $('zb-cp-cr-sync').checked;
+    return out;
+  }
+  var cpPushTimer = null;
+  function pushComponentLook() {
+    if (!IS_WB) return;
+    clearTimeout(cpPushTimer);
+    cpPushTimer = setTimeout(function () {
+      post('/api/config', { componentLook: componentUIState() }, function (d) { if (d && d.error) status(d.error); });
+    }, 250);
+  }
+  if (IS_WB) {
+    $('zb-cp-on').addEventListener('change', function () {
+      cpSetEnabled(this.checked);
+      pushComponentLook();
+    });
+    for (var cpi = 0; cpi < CP_FIELDS.length; cpi++) {
+      (function (pair) {
+        $(pair[0]).addEventListener('input', function () {
+          var lab = $(pair[0] + '-val');
+          if (lab) lab.textContent = this.value + pair[2];
+          pushComponentLook();
+        });
+      })(CP_FIELDS[cpi]);
+    }
+    $('zb-cp-cr-sync').addEventListener('change', pushComponentLook);
+  }
+
   // --- tabs (壁纸 / 定时播放) ------------------------------------------------
   // Library/history rebuilds are DIRTY-driven: re-rendering the lists on
   // every tab switch recreated every <img> and the panel flashed black
@@ -3437,6 +3763,8 @@ export function buildPanelScript(
     setTimeout(function () { if (typeof applyLibRows === 'function') applyLibRows(); }, 350);
   }
   var ZB_TABS = ['main', 'look', 'chat', 'sched', 'settings', 'about'];
+  // WorkBuddy-only pane; added at its visual position (after 聊天).
+  if (IS_WB) ZB_TABS.splice(3, 0, 'components');
   function switchTab(name) {
     if (ZB_TABS.indexOf(name) < 0) name = 'main';
     var tabs = document.querySelectorAll('.zb-tab');
@@ -3454,6 +3782,9 @@ export function buildPanelScript(
     void pane.offsetWidth;
     pane.classList.add('zb-pane-in');
     try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
+    // Coming back to 壁纸: the pane was display:none (no measurable heights),
+    // so re-fill the images list now that it renders again.
+    if (name === 'main' && typeof sizeImagesListSoon === 'function') sizeImagesListSoon();
     if (name === 'sched') loadRotation();
     else if (name === 'about') { refresh(); updateAbout(); }
     else {
@@ -3677,6 +4008,167 @@ export function buildPanelScript(
   $('zb-ab-chlog').addEventListener('click', zbChlogOpen);
   $('zb-chlog-win-close').addEventListener('click', zbChlogClose);
   $('zb-chlog-win-mask').addEventListener('click', zbChlogClose);
+
+  // --- custom dropdowns (下拉框) ---------------------------------------------
+  // The native <select> popup is OS-drawn (system blue highlight, hard black
+  // arrow patch) and cannot follow the panel's look. The enhancer keeps every
+  // <select> as the single source of truth — state, 'change' events, and all
+  // existing listeners stay untouched — and only swaps the visuals: the
+  // native control is hidden and a themed button + fixed popup card render
+  // in its place. External .value writes (the 4s reflect beat) keep the
+  // button label in sync through a value-property hook; option text edits
+  // (none today, but cheap) through a MutationObserver.
+  function zbEnhanceSelect(sel) {
+    if (sel.getAttribute('data-zb-dd')) return;
+    sel.setAttribute('data-zb-dd', '1');
+    // Pin the button's min-width to the WIDEST option so the row layout
+    // matches the native control (which auto-sizes that way). Canvas text
+    // measurement also works while the tab is display:none; engines without
+    // a 2d context (jsdom) fall back to a per-character estimate.
+    var wmax = 0;
+    var meas = null;
+    try { meas = document.createElement('canvas').getContext('2d'); } catch (e) {}
+    if (meas) meas.font = '12px system-ui, sans-serif';
+    for (var i = 0; i < sel.options.length; i++) {
+      var t = sel.options[i].textContent || '';
+      var w = meas ? meas.measureText(t).width : t.length * 7.5;
+      if (w > wmax) wmax = w;
+    }
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'zb-dd';
+    if (sel.id) btn.id = sel.id + '-dd';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    if (sel.title) btn.title = sel.title;
+    btn.style.minWidth = Math.min(300, Math.max(96, Math.ceil(wmax) + 38)) + 'px';
+    btn.innerHTML = '<span class="zb-dd-val"></span>'
+      + '<span class="zb-dd-chev"><svg width="10" height="10" viewBox="0 0 10 10" fill="none">'
+      + '<path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+    sel.parentNode.insertBefore(btn, sel);
+    sel.classList.add('zb-dd-src');
+    // The popup lives on <body>: #zb-panel is overflow:hidden and would clip
+    // a list that hangs past the panel's edge. Stale popups from earlier
+    // panel generations are swept here (each generation rebuilds its own).
+    var pop = document.createElement('div');
+    pop.className = 'zb-dd-pop';
+    pop.setAttribute('role', 'listbox');
+    pop.hidden = true;
+    document.body.appendChild(pop);
+    var curIdx = -1; // keyboard focus index while open
+    function syncLabel() {
+      var o = sel.options[sel.selectedIndex];
+      btn.querySelector('.zb-dd-val').textContent = o ? o.textContent : '';
+    }
+    function close() {
+      if (pop.hidden) return;
+      pop.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('pointerdown', onDoc, true);
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('scroll', onScrollAway, true);
+      window.removeEventListener('resize', close);
+    }
+    function open() {
+      // Rebuild on every open: labels/current may have moved since last time.
+      pop.innerHTML = '';
+      curIdx = -1;
+      for (var i = 0; i < sel.options.length; i++) {
+        var o = sel.options[i];
+        var it = document.createElement('div');
+        it.className = 'zb-dd-item';
+        it.setAttribute('role', 'option');
+        it.textContent = o.textContent || '';
+        it.dataset.v = o.value;
+        it.dataset.i = String(i);
+        if (o.disabled) it.setAttribute('data-disabled', '1');
+        if (i === sel.selectedIndex) { it.setAttribute('data-cur', '1'); curIdx = i; }
+        pop.appendChild(it);
+      }
+      pop.hidden = false;
+      pop.style.minWidth = btn.offsetWidth + 'px';
+      var r = btn.getBoundingClientRect();
+      var ph = pop.offsetHeight, pw = pop.offsetWidth;
+      var x = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
+      var below = window.innerHeight - r.bottom > ph + 12;
+      pop.style.left = x + 'px';
+      pop.style.top = (below ? r.bottom + 6 : Math.max(8, r.top - ph - 6)) + 'px';
+      btn.setAttribute('aria-expanded', 'true');
+      document.addEventListener('pointerdown', onDoc, true);
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('scroll', onScrollAway, true);
+      window.addEventListener('resize', close);
+      var cur = pop.querySelector('[data-cur="1"]');
+      if (cur) cur.scrollIntoView({ block: 'nearest' });
+    }
+    function pick(idx) {
+      var o = sel.options[idx];
+      if (!o || o.disabled) return;
+      sel.value = o.value; // the hook below keeps the label in sync
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      close();
+    }
+    function onDoc(e) {
+      if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { close(); btn.focus(); e.stopPropagation(); return; }
+      var items = pop.querySelectorAll('.zb-dd-item:not([data-disabled="1"])');
+      if (!items.length) return;
+      var next = -1;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        var active = pop.querySelector('.zb-dd-item[data-kb="1"]');
+        var list = Array.prototype.slice.call(items);
+        var at = active ? list.indexOf(active) : list.indexOf(pop.querySelector('[data-cur="1"]'));
+        next = e.key === 'ArrowDown' ? (at + 1) % list.length : (at - 1 + list.length) % list.length;
+        for (var j = 0; j < list.length; j++) list[j].removeAttribute('data-kb');
+        list[next].setAttribute('data-kb', '1');
+        list[next].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        var kb = pop.querySelector('.zb-dd-item[data-kb="1"]');
+        e.preventDefault();
+        if (kb) pick(Number(kb.dataset.i));
+        else close();
+      }
+    }
+    function onScrollAway(e) {
+      // Only scroll events OUTSIDE the popup itself detach it from the button.
+      if (!(e.target === pop || (e.target && e.target.contains && pop.contains(e.target)))) close();
+    }
+    btn.addEventListener('click', function () {
+      if (btn.getAttribute('aria-expanded') === 'true') close(); else open();
+    });
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (pop.hidden) open();
+      }
+    });
+    pop.addEventListener('click', function (e) {
+      var it = e.target && e.target.closest ? e.target.closest('.zb-dd-item') : null;
+      if (it && it.getAttribute('data-disabled') !== '1') pick(Number(it.dataset.i));
+    });
+    // Property hook: reflect code paths write select.value directly; route
+    // them through the prototype setter and refresh the label.
+    var desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    try {
+      Object.defineProperty(sel, 'value', {
+        get: function () { return desc.get.call(sel); },
+        set: function (v) { desc.set.call(sel, v); syncLabel(); },
+        configurable: true,
+      });
+    } catch (e) { /* exotic engine: label sync falls back to the MO below */ }
+    var mo = new MutationObserver(syncLabel);
+    mo.observe(sel, { childList: true, subtree: true, characterData: true });
+    syncLabel();
+  }
+  (function zbEnhanceSelects() {
+    // Sweep popups orphaned by previous panel generations before rebuilding.
+    document.querySelectorAll('body > .zb-dd-pop').forEach(function (n) { n.remove(); });
+    var sels = root.querySelectorAll('select');
+    for (var i = 0; i < sels.length; i++) zbEnhanceSelect(sels[i]);
+  })();
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');

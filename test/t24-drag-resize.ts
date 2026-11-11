@@ -149,10 +149,16 @@ const widthVar = (w: typeof window) => w.document.documentElement.style.getPrope
   check("flag off drops the observers", !st.gripObs && !st.gripWinResize && st.dragOn === false);
   check("flag off drops the width var", widthVar(window) === "");
   check("flag off keeps the stored percent", window.localStorage.getItem("zcode-beautify:chat-drag-pct") === "75");
-  // cap stays on via the config tiers; now drop everything at once.
+  // cap stays on via the config tiers; now drop everything at once. The style
+  // element itself STAYS mounted: since 6.1.1 the composer-fade rule is
+  // always-on (its 50 default reproduces the stock input), but every other
+  // chat-look rule must be gone.
   boot({ dragResize: 0, widthCapRem: 0, widthInsetRem: 0 });
   await sleep(80);
-  check("all-off removes the chat style element", !window.document.getElementById("zcode-beautify-chatlook-style"));
+  const allOffCss = styleText(window);
+  check("all-off keeps only the always-on composer rule",
+    allOffCss.includes("--zb-composer-fade:50") && allOffCss.includes("[data-composer-layout]")
+    && !allOffCss.includes("@container") && !allOffCss.includes("zb-grip"));
 }
 
 // C6: stock boot never mounts anything.

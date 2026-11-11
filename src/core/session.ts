@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLook, normalizeTaskSpinnerLook, type BeautifyConfig, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig, type BuiltPayload } from "./inject.js";
+import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLoadLook, normalizeChatLook, normalizeTaskSpinnerLook, type BeautifyConfig, type BubbleLookConfig, type ChatLoadLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig, type BuiltPayload } from "./inject.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { target } from "./target.js";
 import { detectWallpaperType } from "./wallpaperType.js";
@@ -24,6 +24,8 @@ export interface ApplyOptions {
   bubbleLook?: Partial<BubbleLookConfig>;
   /** Session-list running indicator look (运行中图标); merged over the stored config. */
   taskSpinnerLook?: Partial<TaskSpinnerLookConfig>;
+  /** Conversation-footer loading icon (会话底部加载图标); merged over the stored config. */
+  chatLoadLook?: Partial<ChatLoadLookConfig>;
   /** Chat-area look patch (聊天界面); merged over the stored config. */
   chatLook?: Partial<ChatLookConfig>;
 }
@@ -109,6 +111,10 @@ export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>):
     // inside buildPayload where the image reference is resolved too.
     taskSpinnerLook: normalizeTaskSpinnerLook(
       opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook
+    ),
+    // 会话底部加载图标 merges the same way (mode/image/spin/size).
+    chatLoadLook: normalizeChatLoadLook(
+      opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook
     ),
   };
 }

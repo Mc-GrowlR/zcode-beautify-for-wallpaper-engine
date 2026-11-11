@@ -12,7 +12,7 @@ import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, re
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { ensureExperimentalGate, experimentalEnabled, loadConfig } from "../core/launch.js";
 import { target } from "../core/target.js";
-import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
+import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLoadLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
 import { spawnServeDetached } from "../core/experimental.js";
 import { VERSION } from "../version.js";
 
@@ -262,9 +262,16 @@ server.registerTool(
       chat_width_inset_rem: z.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
       chat_hide_elapsed_decimal: z.boolean().optional().describe("Hide the decimal in the running elapsed time under the conversation (耗时秒数去小数): true rewrites the live working-row seconds from \"53.4 秒\" to \"53 秒\"; false restores stock"),
       chat_drag_resize: z.boolean().optional().describe("Drag handles on both edges of the conversation column (两侧拖拽调宽): true mounts two hidden vertical strips — hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips"),
+      chat_composer_fade: z.number().min(0).max(100).optional().describe("输入框透明度: 0 = stock composer background, 1-100 fades the chat input box's paint toward transparent so the wallpaper shows through (text and border untouched)"),
+      chat_loading_icon: z.object({
+        mode: z.enum(["default", "classic", "image"]).optional().describe("会话底部加载图标: default = ZCode 3.18's stock brand-colored orbit glyph, classic = the pre-3.18 3×3 pixel-wave dots, image = a user picture/GIF"),
+        image_path: z.string().optional().describe("Absolute path of the image/GIF to paint over the loading icon (resolved serve-side; required when mode = image)"),
+        spin: z.boolean().optional().describe("Keep a CSS rotation on the replaced icon (true, default — good for static images; false for animated GIFs)"),
+        size: z.number().min(10).max(28).optional().describe("Icon size in px (stock slot 16); only meaningful for image mode — classic is a fixed 13px grid"),
+      }).optional().describe("Conversation-footer loading icon look; omitted fields keep their current value"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_composer_fade, chat_loading_icon }) => {
     try {
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       // Send only the fields the caller provided: the session layer merges
@@ -283,15 +290,24 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]),
             ) as Partial<TaskSpinnerLookConfig>);
       const chatLook: Partial<ChatLookConfig> | undefined =
-        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined
+        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined && chat_composer_fade === undefined
           ? undefined
           : {
               ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
               ...(chat_width_inset_rem !== undefined ? { widthInsetRem: chat_width_inset_rem } : {}),
               ...(chat_hide_elapsed_decimal !== undefined ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {}),
               ...(chat_drag_resize !== undefined ? { dragResize: chat_drag_resize ? 1 : 0 } : {}),
+              ...(chat_composer_fade !== undefined ? { composerFade: chat_composer_fade } : {}),
             };
-      const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
+      const chatLoadLook =
+        chat_loading_icon === undefined
+          ? undefined
+          : (Object.fromEntries(
+              Object.entries(chat_loading_icon)
+                .filter(([, v]) => v !== undefined)
+                .map(([k, v]) => [k === "image_path" ? "image" : k, v]),
+            ) as Partial<ChatLoadLookConfig>);
+      const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook });
       return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };

@@ -15,6 +15,42 @@
 > 0.5.0：双客户端——同一套引擎现在也支持 WorkBuddy（`--target` 选择目标、端口隔离 9333/9334、`--wb-*` 配色映射、启动屏探针；聊天增强仅 ZCode）。
 > 0.5.1：两侧拖拽调宽——对话列左右边缘的隐形竖条，悬停现形、拖动调宽（参考 DeepSeek 聊天页的拖拽边条交互）；关于页更新日志——「插件信息」新增 📄 按钮，弹窗内直接阅读本文件并自动定位到当前版本。
 > 0.6.0：实验性 CDP 注入改为显式 opt-in（默认关闭）——新装不拉服务、不写启动项，注入工具只返回指引；新增可回滚启动项剥离（repair-launchers --remove / disable）与完整的恢复文档。
+> 6.1.0：组件精修（WorkBuddy 专属）——新增「组件」页，把分析出的写死容器（侧栏 / 输入框 / 菜单栏）与通用组件圆角、`--cr-*` 令牌桥接变成可调项；版本号改走 6.1.x 第三位递增。
+> 6.1.1：ZCode 3.18 适配 + 三个新功能——壁纸取色令牌桥接补 3.18 改名的 `--color-hover`；会话底部加载图标可换（旧版 3×3 波浪 / 自定义图片）；聊天输入框透明度；壁纸库图片列表随面板剩余空间自适应高度。
+> 6.1.2：输入框透明度语义修正（0 = 不透明实底，旧"0=原生"因 3.18 令牌自带半透明而名不副实）+ 面板下拉框全面重做（自绘弹层替换 OS 原生样式）。
+
+## 6.1.2 — 输入框透明度语义修正 + 面板下拉框重做
+
+- **修复：输入框透明度设 0 仍半透明**。根因有两层：① ZCode 3.18 的 `--color-input` 原生就是 `.5` alpha（壁纸桥接也保持），旧语义"0 = 原生"对用户来说就是半透明——0 应当是"不透明"；② 相对色语法 `rgb(from … r g b)` **省略 alpha 时保留源 alpha**（实测 0 档依旧 .5），必须显式 `/ 1` 才能剥掉。重定义语义：**滑杆即唯一事实来源——0 = 不透明实底，100 = 全透明，50 ≈ ZCode 原生观感**（缺省 50，6.1.1 之前的配置观感不变）；`chatlook` 样式元素改为常驻（其余特性全关时仅含 composer 规则）。
+- **面板下拉框全面重做**。原生 `<select>` 的弹层列表是 OS 绘制的（系统蓝高亮、黑色箭头贴片），CSS 无法主题化。新增 `zbEnhanceSelect` 增强器：原生 select 隐藏（`display:none`）但保留全部状态与 `change` 事件——所有既有监听器零改动；自绘下拉按钮（深底、聚焦/展开蓝边、SVG 箭头展开时旋转 180°）+ 定位弹层（毛玻璃深底、10px 圆角、阴影、选中项左侧 2px 蓝条 + 高亮底、禁用项灰显、120ms 浮现动画、超高翻折到按钮上方）；键盘可用（Enter/↓ 展开、↑↓ 移动、Enter 选中、Esc 关闭）、外点/滚动/缩放自动关闭；按钮最小宽度按最宽选项 canvas 测量（隐藏页签也能测），`value` 属性钩子 + MutationObserver 保证 4s 心跳回显实时同步按钮文案；弹层挂 `<body>`（面板 `overflow:hidden` 会裁切），重注入时清扫上一代孤儿节点。面板全部 9 个下拉框（消息流宽度 / 填充方式 / 气泡预设 / 运行中图标 / 加载图标 / 轮播特效等）统一生效。
+
+## 6.1.1 — ZCode 3.18 适配 + 会话底部加载图标 / 输入框透明度 / 壁纸库列表高度
+
+> 背景：ZCode 3.18.0 更新后实测（CDP 实机 + 解包对比）——注入引擎、面板、聊天气泡、运行中图标的选择器全部仍然有效；3.16→3.18 的 DOM 变化集中在三处：会话列表行 hover 令牌从 `--color-surface-hover` 改名为 `--color-hover`、会话底部"工作中"行的加载图标从 3×3 像素波浪点阵换成品牌色粒子 SVG、输入框从 textarea 改为 contenteditable（`[data-testid="v4-composer-input"]`，外壳 `[data-composer-layout]` 读 `var(--color-input)`）。
+
+- **3.18 适配（壁纸取色跟随 hover）**：ZCode 3.18 的会话列表行 hover 改用 `--color-hover` 令牌（旧名 `--color-surface-hover` 已不被行使用），壁纸 Monet 桥接在 tokens.ts 同时输出两个名字——旧版客户端不受影响，3.18 行 hover 重新跟随壁纸配色。
+- **新配置 `chatLoadLook`（会话底部加载图标）**：3.18 把对话底部"工作中"行首的加载图标换成了品牌色粒子轨道 SVG（`[data-testid="chat-loading"]` 内 `[data-chat-loading-icon]`）。现在可选三种样式：
+  - **新版（原生）**：保持 3.18 自带粒子不动。
+  - **旧版波浪**：恢复 3.18 之前的 3×3 像素点阵波浪——纯 CSS 重建（九个 radial-gradient 网格 + 八个 `@property` 注册的数字变量驱动逐点脉冲，950ms 周期、110ms 逐点延迟、顺时针 0,1,2,5,8,7,6,3、中心点常暗），颜色跟 `--color-foreground`（即壁纸取色），不注入任何 DOM（React 高频重渲该行，DOM 手术会打架）。
+  - **自定义图片**：与运行中图标同一套槽位契约（≤2MB gif/png/webp/jpeg/svg，存 `<dataDir>/spinner/spinner-loading.<ext>`，serve 媒体端点分发），可选保留旋转与 10-28px 尺寸。
+  - 快路径：图标样式独立 style 元素（`-load-style`）+ `loadKey` 状态键，切换图标不再重播壁纸过渡动画；WorkBuddy 强制原生（聊天增强仍仅 ZCode）。
+- **新配置 `chatLook.composerFade`（输入框透明度）**：0-100 把聊天输入框底色向透明混合——`[data-composer-layout]{background-color:color-mix(in srgb, var(--color-input) calc(100% - var(--zb-composer-fade)*1%), transparent)}`。混合的是**活令牌**：明暗主题与壁纸取色都继续生效，文字、光标、边框、焦点环不受影响。滑杆拖动走 `--zb-composer-fade` 内联变量即时预览（与聊天区遮罩同款机制）。
+- **修复：壁纸库·图片列表高度不随收起自适应**。壁纸页的图片卡是页内末块、被 flex 链拉伸填满面板剩余高度，但列表本身钉在"行数偏好"的上限（默认 3 行 ×32px）——把「最近使用 / 壁纸库·动态」收起后，卡片拉高而列表不变，卡片背景在列表下方露出大片空白。现在 `sizeImagesList()` 以面板 body 剩余高度实时计算图片列表的 `max-height`，**行数偏好退化为下限**（空间不够时仍保证你设定的行数）；折叠/展开（含 180ms 折叠动画期间多帧复测）、切页、窗口缩放（ResizeObserver）、列表重渲染都会重算。
+- **MCP**：`apply_options` 新增 `chat_loading_icon { mode, image_path, spin, size }` 与 `chat_composer_fade`（部分补丁语义，与气泡/运行中图标一致）；`/api/spinner` 上传端点新增 `slot: "loading"`。
+- 测试：t29（normalize 钳制、payload 解析与降级、jsdom 实跑 bootstrap 断言波浪 CSS 的 @property/单条逗号动画/九块渐变/居中常暗、图片模式旋转开关、default 快路径清场、面板 UI 与 serve/MCP 接线、行数下限）；t23 补 chatLoadLook 强制原生与 composerFade 归零断言。
+
+## 6.1.0 — 组件精修（WorkBuddy 专属）
+
+> 背景：对 WorkBuddy 5.9.3 的界面组件做了一轮实测（asar 解包 + 运行中 CDP），确认四套样式体系并存（`--vscode-*` → `--cb-*` → `--wb-*` → `--cr-*`），且若干壳层容器直接写死颜色：`.conversation-list` 与 `.cr-input-container` 是 `rgb(31,31,31)`、输入框边框 `#333`、菜单栏文字 `rgba(228,228,228,.37)`。这些位置改 `--wb-*` 令牌无效，必须点名选择器。6.1.0 把它们收敛成一组显式开关。
+
+- **新配置 `componentLook`（组件精修）**：`enabled` 总开关（默认 false，关闭时零注入）+ 8 个数值项 + 1 个开关：
+  - 壳层：`sidebarTone` 侧栏底色浓度（0-100，与 `--wb-bg-secondary` 混合）、`menubarText` 菜单栏文字浓度（20-100）。
+  - 输入框：`composerRadius`（8-40，原生 24）、`composerTone` 底色浓度（0-100）、`composerBorder` 描边浓度（0-100）。
+  - 消息与工具：`toolRadius` 工具卡圆角（0-20，原生 8）、`syncCrTokens` 把 `--cr-*` 文字/链接/滚动条令牌接到 `--wb-*`（修复"半跟随"色差）。
+  - 通用组件：`controlRadius` 控件圆角（覆盖 `--wb-radius-md/lg`，0-20）、`modalRadius` 弹层圆角（覆盖 `--wb-modal-radius`，8-40）。
+- **注入实现**（`src/core/componentLook.ts`）：仅在 `target.tokens === "wb"` 且 `enabled` 时追加一段覆盖表，排在令牌块之后；颜色统一走 `color-mix(in srgb, var(--wb-*) N%, transparent)`，跟随明暗主题与壁纸配色，不引入新的固定色。规则带 `!important`——WorkBuddy 的暗色规则常见 `[data-theme=dark] .conversation-list`（0,2,0），只靠顺序不可靠。
+- **面板**：新增「组件」页（仅 WorkBuddy 显示，ZCode 直接移除页签与面板），按「壳层 / 输入框 / 消息与工具 / 通用组件」四张卡片排列；总开关关闭时滑杆禁用，数值保留可先调好再开。保存走 `POST /api/config { componentLook }`，与气泡 / 运行中图标相同的 250ms 防抖 + 服务端回灌。
+- **版本策略**：自本版起版本号固定为 `6.1.x`——功能/修复只递增第三位（6.1.1、6.1.2…），不再动主次版本号。
 
 ## 0.6.0 — 实验性 CDP 注入改为显式 opt-in
 

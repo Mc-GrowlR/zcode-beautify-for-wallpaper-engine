@@ -6,15 +6,15 @@
     "url": "https://github.com/Mc-GrowlR"
   },
   "metadata": {
-    "version": "0.5.1"
+    "version": "6.1.2"
   },
   "plugins": [
     {
       "name": "zcode-beautify-workbuddy",
-      "description": "给 WorkBuddy 桌面客户端换壁纸:静态图片 / 视频 / Wallpaper Engine 场景无缝循环,配莫奈(MD3)动态取色与实时设置面板。",
+      "description": "给 WorkBuddy 桌面客户端换壁纸:静态图片 / 视频 / Wallpaper Engine 场景无缝循环,配莫奈(MD3)动态取色与实时设置面板。实验性 CDP 注入改为显式 opt-in(默认关闭)。",
       "source": "./",
       "category": "themes",
-      "version": "0.5.1",
+      "version": "6.1.2",
       "author": {
         "name": "Mc-GrowlR"
       }

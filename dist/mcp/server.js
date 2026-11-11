@@ -7549,9 +7549,10 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
+  var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -7593,6 +7594,10 @@ function buildBootstrapScript(payload) {
       window.__zcodeBeautify.spinnerKey = SPIN;
       applySpinnerLook();
     }
+    if (window.__zcodeBeautify.loadKey !== LOAD) {
+      window.__zcodeBeautify.loadKey = LOAD;
+      applyLoadLook();
+    }
     return;
   }
 
@@ -7608,6 +7613,7 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.bubbleKey === BUBBLE
       && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
@@ -7625,6 +7631,7 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
       && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.bubbleKey = BUBBLE;
     applyBubbleLook();
@@ -7643,10 +7650,29 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
       && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.spinnerKey = SPIN;
     applySpinnerLook();
     if (spinnerOnly) return;
+  }
+
+  // Chat-load fast path (\u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807): same shape as the spinner \u2014 its
+  // rules live in their own style element, swapping the icon must not replay
+  // the wallpaper transition.
+  if (window.__zcodeBeautify.loadKey !== LOAD) {
+    var loadOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.loadKey = LOAD;
+    applyLoadLook();
+    if (loadOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -7655,7 +7681,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -7931,6 +7957,8 @@ function buildBootstrapScript(payload) {
   applyBubbleLook();
   window.__zcodeBeautify.spinnerKey = SPIN;
   applySpinnerLook();
+  window.__zcodeBeautify.loadKey = LOAD;
+  applyLoadLook();
 
   function applyChatLook() {
     if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
@@ -7954,11 +7982,20 @@ function buildBootstrapScript(payload) {
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // \u8F93\u5165\u6846\u900F\u660E\u5EA6: T is the composer background's transparency in %. The
+    // token's OWN alpha is REPLACED by the slider's (rgb(from \u2026 r g b) strips
+    // it, then color-mix scales toward transparent) \u2014 ZCode 3.18 ships
+    // --color-input at .5 alpha natively and the wallpaper bridge keeps that,
+    // so "0 = native" read as still-half-transparent; the slider is now the
+    // single source of truth: 0 = solid, 100 = invisible, 50 \u2248 the stock look.
+    var fade = Math.max(0, Math.min(100, Math.round(Number(C.composerFade) >= 0 && Number(C.composerFade) <= 100 ? Number(C.composerFade) : 50)));
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
+    // Feature teardown \u2014 but NOT of the style element itself: the composer
+    // fade rule is always-on (its 50 default reproduces the stock look), so
+    // the style stays mounted and the flow falls through to rewrite it.
     if (!masksOn && !widthOn && !perfOn && !decOn && !dragOn) {
-      if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
       if (window.__zcodeBeautify.chatObs) {
@@ -7970,7 +8007,6 @@ function buildBootstrapScript(payload) {
         window.__zcodeBeautify.elapsedObs = null;
       }
       zbGripClean();
-      return;
     }
     if (!st) {
       st = document.createElement('style');
@@ -7978,7 +8014,8 @@ function buildBootstrapScript(payload) {
       (document.head || document.documentElement).appendChild(st);
     }
     st.textContent = ':root{--zb-chat-dim:' + (C.chatDim / 100) + ';--zb-mask-top:' + (C.maskTop / 100)
-      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100) + '}'
+      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100)
+      + ';--zb-composer-fade:' + fade + '}'
       + (masksOn
         ? '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
           + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
@@ -7987,6 +8024,17 @@ function buildBootstrapScript(payload) {
           // classes; .zb-chat-col is the version-proof fallback (markChatCol).
           + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
           + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}'
+        : '')
+      + (fade >= 0
+        // \u8F93\u5165\u6846\u900F\u660E\u5EA6: [data-composer-layout] is the composer's painted box
+        // (bg-input \u2192 var(--color-input), 3.18). rgb(from \u2026 r g b / 1) takes
+        // the token's COLOR but FORCES alpha 1 \u2014 the omitted-alpha form would
+        // keep the token's own .5 (spec: alpha defaults to the origin's) and
+        // every level would read half-transparent. color-mix then applies
+        // exactly the slider's transparency. The focus ring / border are
+        // separate tokens and stay untouched. The var indirection gives the
+        // panel's slider an instant inline-var preview (same as the masks).
+        ? '[data-composer-layout]{background-color:color-mix(in srgb, rgb(from var(--color-input, rgba(128,128,128,.35)) r g b / 1) calc(100% - var(--zb-composer-fade, 50)*1%), transparent) !important}'
         : '')
       + (widthOn && !dragOn
         // Mirrors ZCode's own tiers against the "conversation" container so
@@ -8659,6 +8707,78 @@ function buildBootstrapScript(payload) {
     st.textContent = css;
   }
 
+  // \u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807: ZCode 3.18 renders the conversation footer's status row
+  // as [data-testid="chat-loading"] with the glyph inside
+  // [data-chat-loading-icon="true"] (a brand-colored orbit svg). CSS-only
+  // swap \u2014 React re-renders this row constantly while streaming, so DOM
+  // surgery would fight the reconciler.
+  //   classic: repaint the PRE-3.18 pixel wave \u2014 nine dots in a 3\xD73 grid
+  //     (13px, 1.3px gaps), the ring pulsing clockwise (950ms cycle,
+  //     110ms per-dot stagger, order 0,1,2,5,8,7,6,3), center dot static.
+  //     Implemented as nine radial-gradient tiles; each dot's alpha rides a
+  //     @property-registered number so the wave animates without extra DOM.
+  //   image: paint the user picture over the glyph; optional CSS rotation.
+  function applyLoadLook() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
+    var L;
+    try { L = JSON.parse(LOAD); } catch (e) { return; }
+    var st = document.getElementById(MARKER + '-load-style');
+    var mode = L && (L.mode === 'classic' || L.mode === 'image') ? L.mode : 'default';
+    if (mode === 'image' && !L.image) mode = 'default';
+    if (mode === 'default') {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-load-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var ICON = '[data-chat-loading-icon="true"]';
+    var size = Math.max(10, Math.min(28, Math.round(L.size || 16)));
+    var css = '';
+    if (mode === 'classic') {
+      // Fallback-safe foreground: --color-foreground is ZCode's own token
+      // (and ours when Monet is on); the gray keeps the dots visible if a
+      // future build drops the token.
+      var FG = 'var(--color-foreground, rgba(200,200,205,.9))';
+      var dot = function(p) {
+        return 'radial-gradient(circle, rgb(from ' + FG + ' r g b / calc(.15 + var(--zb-ld-p' + p + ',0)*.85)) 0 62%, transparent 64%)';
+      };
+      // @property registration is required BEFORE the browser will animate a
+      // custom property; register all eight, then ONE comma-listed animation
+      // (each entry animates its own dot's keyframes with its own delay \u2014
+      // separate animation properties would override each other).
+      var anims = '';
+      for (var pi = 0; pi < 8; pi++) {
+        css += '@property --zb-ld-p' + pi + '{syntax:"<number>";inherits:false;initial-value:0}';
+        css += '@keyframes zb-ld-w' + pi + '{0%,100%{--zb-ld-p' + pi + ':0}50%{--zb-ld-p' + pi + ':1}}';
+        anims += (pi ? ',' : '') + 'zb-ld-w' + pi + ' 950ms linear infinite ' + (pi * 110) + 'ms';
+      }
+      // Guarded by relative-color support: on an engine without rgb(from \u2026)
+      // the whole block drops and the stock 3.18 glyph simply stays.
+      css += '@supports (color: rgb(from red r g b / 50%)) {'
+        + ICON + '>*{display:none!important}'
+        + ICON + '{width:13px!important;height:13px!important;'
+        + 'background-repeat:no-repeat!important;background-size:33.4% 33.4%!important;'
+        // ring order 0,1,2 / 5 / 8,7,6 / 3 \u2192 delays 0..7*110ms; center static .07
+        + 'background-image:' + dot(0) + ',' + dot(1) + ',' + dot(2) + ',' + dot(3) + ',' + dot(4) + ',' + dot(5) + ',' + dot(6) + ',' + dot(7) + ','
+        + 'radial-gradient(circle, rgb(from ' + FG + ' r g b / .07) 0 62%, transparent 64%)!important;'
+        + 'background-position:0 0,50% 0,100% 0,100% 50%,100% 100%,50% 100%,0 100%,0 50%,50% 50%!important;'
+        + 'animation:' + anims + '!important}'
+        + '}';
+    } else {
+      css += ICON + '>*{display:none!important}'
+        + ICON + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'background:url("' + L.image + '") center/contain no-repeat!important}';
+      if (L.spin) {
+        css += ICON + '{animation:zb-ld-rot 1s linear infinite!important}'
+          + '@keyframes zb-ld-rot{to{transform:rotate(360deg)}}';
+      }
+    }
+    st.textContent = css;
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops \u2014 occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -8748,6 +8868,7 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-load-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
@@ -8760,6 +8881,7 @@ function buildResetScript(marker = "zcode-beautify") {
     window.__zcodeBeautify.chatKey = null;
     window.__zcodeBeautify.bubbleKey = null;
     window.__zcodeBeautify.spinnerKey = null;
+    window.__zcodeBeautify.loadKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -8846,6 +8968,90 @@ var init_cdp = __esm({
         }
       }
     };
+  }
+});
+
+// dist/core/componentLook.js
+function normalizeComponentLook(raw) {
+  return {
+    enabled: raw?.enabled === true,
+    sidebarTone: clamp(raw?.sidebarTone, 0, 100, DEFAULT_COMPONENT_LOOK.sidebarTone),
+    menubarText: clamp(raw?.menubarText, 20, 100, DEFAULT_COMPONENT_LOOK.menubarText),
+    composerTone: clamp(raw?.composerTone, 0, 100, DEFAULT_COMPONENT_LOOK.composerTone),
+    composerBorder: clamp(raw?.composerBorder, 0, 100, DEFAULT_COMPONENT_LOOK.composerBorder),
+    composerRadius: clamp(raw?.composerRadius, 8, 40, DEFAULT_COMPONENT_LOOK.composerRadius),
+    toolRadius: clamp(raw?.toolRadius, 0, 20, DEFAULT_COMPONENT_LOOK.toolRadius),
+    controlRadius: clamp(raw?.controlRadius, 0, 20, DEFAULT_COMPONENT_LOOK.controlRadius),
+    modalRadius: clamp(raw?.modalRadius, 8, 40, DEFAULT_COMPONENT_LOOK.modalRadius),
+    syncCrTokens: raw?.syncCrTokens !== false
+  };
+}
+function workbuddyComponentCss(look) {
+  if (!look.enabled)
+    return "";
+  const parts = [];
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u58F3\u5C42 */
+.conversation-list {
+  background-color: color-mix(in srgb, var(--wb-bg-secondary) ${look.sidebarTone}%, transparent) !important;
+}
+.menubar-menu-title,
+.menubar-mnemonic {
+  color: color-mix(in srgb, var(--wb-color-text-primary) ${look.menubarText}%, transparent) !important;
+}`);
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u8F93\u5165\u6846 */
+.cr-input-container {
+  background-color: color-mix(in srgb, var(--wb-bg-card) ${look.composerTone}%, transparent) !important;
+  border-color: color-mix(in srgb, var(--wb-border-strong) ${look.composerBorder}%, transparent) !important;
+  border-radius: ${look.composerRadius}px !important;
+}`);
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u5DE5\u5177\u5361 */
+.assistant-message-tool,
+.assistant-message-tool-container .assistant-message-tool,
+.cr-collapse,
+.cr-tool-call {
+  border-radius: ${look.toolRadius}px !important;
+}`);
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u901A\u7528\u7EC4\u4EF6 */
+html[data-theme="light"], html[data-theme="dark"], html.cb-light, html.cb-dark, :root {
+  --wb-radius-md: ${look.controlRadius}px;
+  --wb-radius-lg: ${look.controlRadius}px;
+  --wb-modal-radius: ${look.modalRadius}px;
+  --wb-modal-radius-confirm: ${look.modalRadius}px;
+}`);
+  if (look.syncCrTokens) {
+    parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u4F1A\u8BDD\u4EE4\u724C\u8DDF\u968F\u4E3B\u9898 */
+html[data-theme="light"], html[data-theme="dark"], html.cb-light, html.cb-dark, :root {
+  --cr-text-primary: var(--wb-color-text-primary);
+  --cr-text-secondary: var(--wb-color-text-secondary);
+  --cr-text-tertiary: var(--wb-color-text-tertiary);
+  --cr-text-link: var(--wb-color-text-link-default);
+  --cr-internal-text-primary: var(--wb-color-text-primary);
+  --cr-internal-text-secondary: var(--wb-color-text-secondary);
+  --cr-internal-text-tertiary: var(--wb-color-text-tertiary);
+  --cr-tag-bg: color-mix(in srgb, var(--wb-color-text-primary) 6%, transparent);
+  --cr-user-bubble-bg: color-mix(in srgb, var(--wb-bg-card) 88%, transparent);
+  --cr-scrollbar-thumb: color-mix(in srgb, var(--wb-color-text-primary) 16%, transparent);
+}`);
+  }
+  return parts.join("\n");
+}
+var DEFAULT_COMPONENT_LOOK, clamp;
+var init_componentLook = __esm({
+  "dist/core/componentLook.js"() {
+    "use strict";
+    DEFAULT_COMPONENT_LOOK = {
+      enabled: false,
+      sidebarTone: 72,
+      menubarText: 72,
+      composerTone: 72,
+      composerBorder: 55,
+      composerRadius: 24,
+      toolRadius: 8,
+      controlRadius: 8,
+      modalRadius: 24,
+      syncCrTokens: true
+    };
+    clamp = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
   }
 });
 
@@ -118256,8 +118462,8 @@ function analyzeFocus(bitmap) {
     wy += y2 * w;
     wsum += w;
   }
-  const clamp = (v) => Math.min(1, Math.max(0, v));
-  return { x: clamp(wx / wsum / width), y: clamp(wy / wsum / height), fit };
+  const clamp2 = (v) => Math.min(1, Math.max(0, v));
+  return { x: clamp2(wx / wsum / width), y: clamp2(wy / wsum / height), fit };
 }
 function extractSourceColor(bitmap) {
   const { width, height, data } = bitmap;
@@ -118328,6 +118534,9 @@ function transparencyRows(mode, opts) {
     `--color-sidebar:rgba(${rgb},${panelAlpha});`,
     `--color-surface:rgba(${rgb},${baseAlpha});`,
     `--color-surface-hover:rgba(${rgb},${baseAlpha});`,
+    // 3.18 renamed the row-hover paint to --color-hover (session list rows
+    // hover:bg-[var(--color-hover)]); map both so the bridge survives either.
+    `--color-hover:rgba(${rgb},${baseAlpha});`,
     `--color-card:rgba(${rgb},${baseAlpha});`,
     `--color-card-selected:rgba(${rgb},${Math.min(1, baseAlpha + 0.15)});`,
     `--color-popover:rgba(${rgb},${popoverAlpha});`,
@@ -118357,6 +118566,8 @@ function tokenRows(theme, mode, opts) {
     `--color-sidebar:${A2(n2.tone(t2.low), panelAlpha)};`,
     `--color-surface:${A2(n2.tone(t2.lowest === 100 ? 98 : 6), baseAlpha)};`,
     `--color-surface-hover:${A2(n2.tone(t2.high), baseAlpha)};`,
+    // 3.18 hover paint token (see transparencyRows note).
+    `--color-hover:${A2(n2.tone(t2.high), baseAlpha)};`,
     `--color-card:${A2(n2.tone(t2.container), baseAlpha)};`,
     `--color-card-selected:${A2(n2.tone(t2.highest), Math.min(1, baseAlpha + 0.15))};`,
     `--color-card-border:${A2(s2.outlineVariant, 0.5)};`,
@@ -118387,8 +118598,14 @@ function tokenRows(theme, mode, opts) {
   ].filter(Boolean);
 }
 function buildWorkbuddyOverrides(theme, opts) {
-  return `${WB_LIGHT}{${wbRows(theme, "light", opts).join("")}}
+  const vars = `${WB_LIGHT}{${wbRows(theme, "light", opts).join("")}}
 ${WB_DARK}{${wbRows(theme, "dark", opts).join("")}}`;
+  return opts.wallpaperVisible ? vars + workbuddyShellRules() : vars;
+}
+function workbuddyShellRules() {
+  return `
+.teams-container,.teams-grid-scroll-content,[class*="gridViewItem"]{background-color:transparent !important;}
+.conversation-shell,#workbuddy-menubar-container{background-color:var(--wb-bg-content,rgba(26,26,26,.55)) !important;}`;
 }
 function buildWorkbuddyTransparency(opts) {
   const rows = (mode) => {
@@ -118409,7 +118626,7 @@ function buildWorkbuddyTransparency(opts) {
     ].join("");
   };
   return `${WB_LIGHT}{${rows("light")}}
-${WB_DARK}{${rows("dark")}}`;
+${WB_DARK}{${rows("dark")}}` + workbuddyShellRules();
 }
 function wbRows(theme, mode, opts) {
   const s2 = mode === "light" ? theme.schemes.light : theme.schemes.dark;
@@ -118539,7 +118756,7 @@ var VERSION;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "0.6.0";
+    VERSION = "6.1.2";
   }
 });
 
@@ -118682,7 +118899,8 @@ function normalizeChatLook(raw) {
     widthInsetRem: inset,
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
     hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
-    dragResize: drag === 1 || drag === true ? 1 : 0
+    dragResize: drag === 1 || drag === true ? 1 : 0,
+    composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade) ? pct(raw.composerFade) : 50
   };
 }
 function normalizeTaskSpinnerLook(raw) {
@@ -118694,6 +118912,17 @@ function normalizeTaskSpinnerLook(raw) {
     image: ref(raw?.image),
     unreadImage: ref(raw?.unreadImage),
     errorImage: ref(raw?.errorImage),
+    spin: raw?.spin !== false,
+    size
+  };
+}
+function normalizeChatLoadLook(raw) {
+  const mode = raw?.mode === "classic" || raw?.mode === "image" ? raw.mode : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size) ? Math.max(10, Math.min(28, Math.round(raw.size))) : DEFAULT_CHAT_LOAD_LOOK.size;
+  const ref = (v) => typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode: mode === "image" && !ref(raw?.image) ? "default" : mode,
+    image: ref(raw?.image),
     spin: raw?.spin !== false,
     size
   };
@@ -118840,6 +119069,10 @@ ${rootSelector} { background: transparent !important; }
       parts.push(buildTransparencyOverrides({ dim: config2.dim }));
     }
   }
+  const componentLook = app.tokens === "wb" ? normalizeComponentLook(config2.componentLook) : normalizeComponentLook(void 0);
+  if (app.tokens === "wb" && componentLook.enabled) {
+    parts.push(workbuddyComponentCss(componentLook));
+  }
   let wallpaperDataUri;
   if (!config2.sceneVideoUrl && config2.wallpaperVisible) {
     const p2 = path3.resolve(config2.wallpaperPath ?? "").toLowerCase();
@@ -118862,6 +119095,12 @@ ${rootSelector} { background: transparent !important; }
   if (spinnerLook.errorImage) {
     spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config2.apiPort ?? target().apiPort, mediaToken);
   }
+  const chatLoadLook = normalizeChatLoadLook(config2.chatLoadLook);
+  if (chatLoadLook.image) {
+    chatLoadLook.image = resolveSpinnerImageRef(chatLoadLook.image, config2.apiPort ?? target().apiPort, mediaToken);
+    if (!chatLoadLook.image)
+      chatLoadLook.mode = "default";
+  }
   return {
     css: parts.join("\n"),
     wallpaperDataUri,
@@ -118877,7 +119116,9 @@ ${rootSelector} { background: transparent !important; }
     // copied from ZCode can never inject rules for elements that do not exist.
     chatLook: chatUi ? normalizeChatLook(config2.chatLook) : normalizeChatLook(void 0),
     bubbleLook: chatUi ? normalizeBubbleLook(config2.bubbleLook) : normalizeBubbleLook(void 0),
+    componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(void 0),
+    chatLoadLook: chatUi ? chatLoadLook : normalizeChatLoadLook(void 0),
     startupClean: config2.startupClean !== false,
     chatUi,
     startupProbe: app.startupProbe
@@ -118916,12 +119157,13 @@ async function resetZCode(port) {
   }
   return count;
 }
-var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
+var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, DEFAULT_CHAT_LOAD_LOOK, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
     init_cdp();
     init_bubbleRecipes();
+    init_componentLook();
     init_monet();
     init_tokens();
     init_target();
@@ -118941,6 +119183,12 @@ var init_inject = __esm({
       size: 16
     };
     SPINNER_REF_MAX_CHARS = 5e5;
+    DEFAULT_CHAT_LOAD_LOOK = {
+      mode: "default",
+      image: "",
+      spin: true,
+      size: 16
+    };
     SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
     SPINNER_MIME = {
       ".gif": "image/gif",
@@ -149748,7 +149996,9 @@ function baseConfig(opts, stored) {
     chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook),
     // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
     // inside buildPayload where the image reference is resolved too.
-    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook)
+    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook),
+    // 会话底部加载图标 merges the same way (mode/image/spin/size).
+    chatLoadLook: normalizeChatLoadLook(opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -149992,21 +150242,30 @@ server.registerTool("apply_options", {
     chat_width_cap_rem: external_exports.number().min(0).max(120).optional().describe("Conversation column width ceiling in rem (\u6D88\u606F\u6D41\u5BBD\u5EA6\u4E0A\u9650). 0 = stock responsive width; 40-120 widens the column (78 \u2248 wide, 100+ \u2248 near full width on large windows). The column still tracks window resizes \u2014 only the ceiling changes"),
     chat_width_inset_rem: external_exports.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
     chat_hide_elapsed_decimal: external_exports.boolean().optional().describe('Hide the decimal in the running elapsed time under the conversation (\u8017\u65F6\u79D2\u6570\u53BB\u5C0F\u6570): true rewrites the live working-row seconds from "53.4 \u79D2" to "53 \u79D2"; false restores stock'),
-    chat_drag_resize: external_exports.boolean().optional().describe("Drag handles on both edges of the conversation column (\u4E24\u4FA7\u62D6\u62FD\u8C03\u5BBD): true mounts two hidden vertical strips \u2014 hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips")
+    chat_drag_resize: external_exports.boolean().optional().describe("Drag handles on both edges of the conversation column (\u4E24\u4FA7\u62D6\u62FD\u8C03\u5BBD): true mounts two hidden vertical strips \u2014 hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips"),
+    chat_composer_fade: external_exports.number().min(0).max(100).optional().describe("\u8F93\u5165\u6846\u900F\u660E\u5EA6: 0 = stock composer background, 1-100 fades the chat input box's paint toward transparent so the wallpaper shows through (text and border untouched)"),
+    chat_loading_icon: external_exports.object({
+      mode: external_exports.enum(["default", "classic", "image"]).optional().describe("\u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807: default = ZCode 3.18's stock brand-colored orbit glyph, classic = the pre-3.18 3\xD73 pixel-wave dots, image = a user picture/GIF"),
+      image_path: external_exports.string().optional().describe("Absolute path of the image/GIF to paint over the loading icon (resolved serve-side; required when mode = image)"),
+      spin: external_exports.boolean().optional().describe("Keep a CSS rotation on the replaced icon (true, default \u2014 good for static images; false for animated GIFs)"),
+      size: external_exports.number().min(10).max(28).optional().describe("Icon size in px (stock slot 16); only meaningful for image mode \u2014 classic is a fixed 13px grid")
+    }).optional().describe("Conversation-footer loading icon look; omitted fields keep their current value")
   }
-}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize }) => {
+}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_composer_fade, chat_loading_icon }) => {
   try {
     if (!experimentalEnabled(loadConfig()))
       return disabledNotice();
     const bubbleLook = bubble === void 0 ? void 0 : Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== void 0));
     const taskSpinnerLook = spinner === void 0 ? void 0 : Object.fromEntries(Object.entries(spinner).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]));
-    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 && chat_hide_elapsed_decimal === void 0 && chat_drag_resize === void 0 ? void 0 : {
+    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 && chat_hide_elapsed_decimal === void 0 && chat_drag_resize === void 0 && chat_composer_fade === void 0 ? void 0 : {
       ...chat_width_cap_rem !== void 0 ? { widthCapRem: chat_width_cap_rem } : {},
       ...chat_width_inset_rem !== void 0 ? { widthInsetRem: chat_width_inset_rem } : {},
       ...chat_hide_elapsed_decimal !== void 0 ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {},
-      ...chat_drag_resize !== void 0 ? { dragResize: chat_drag_resize ? 1 : 0 } : {}
+      ...chat_drag_resize !== void 0 ? { dragResize: chat_drag_resize ? 1 : 0 } : {},
+      ...chat_composer_fade !== void 0 ? { composerFade: chat_composer_fade } : {}
     };
-    const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook });
+    const chatLoadLook = chat_loading_icon === void 0 ? void 0 : Object.fromEntries(Object.entries(chat_loading_icon).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k, v]));
+    const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook });
     return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };

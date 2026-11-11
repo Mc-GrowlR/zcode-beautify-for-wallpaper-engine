@@ -1,8 +1,10 @@
-# zcode-beautify
+# zcode-beautify（fork）
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI；还能美化聊天区（消息气泡、对话列宽度、大会话流畅模式）——并附带实时悬浮设置面板。
+[Logocceai/zcode-beautify](https://github.com/Logocceai/zcode-beautify) 的 fork，由 [Mc-GrowlR](https://github.com/Mc-GrowlR) 持续维护——功能开发在本仓库进行（完整演进史见 [CHANGES.md](CHANGES.md)，0.3.0 → 6.1.x）。
+
+美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI；还能美化聊天区（消息气泡、对话列宽度与拖拽调宽、大会会话流畅模式、会话底部加载图标、输入框透明度）——并附带实时悬浮设置面板。在上游基础上，本 fork 新增：动态壁纸（WE 场景 / 视频导入与无缝循环）、本机 Wallpaper Engine 壁纸库浏览器、定时轮播方案、聊天区全套改样式、ZCode 3.18 适配，以及双客户端支持（ZCode + WorkBuddy）。
 
 > 🧩 **0.5.0 起同时支持 WorkBuddy 桌面客户端**：加 `--target workbuddy`（或使用仓库内 `.codebuddy-plugin` 清单，已内置 `BEAUTIFY_TARGET=workbuddy`）即可把壁纸与莫奈配色注入 WorkBuddy。两个客户端的 CDP 端口（9222 / 9333）、控制 API 端口（9223 / 9334）、数据目录、启动项全部隔离，可同时开着互不干扰。WorkBuddy 使用其 `--wb-*` 设计变量族取色；气泡 / 消息流宽度 / 运行中图标这些聊天区增强仍为 ZCode 专属（绑定 ZCode 的 DOM），WorkBuddy 上面板会自动隐藏对应页签。
 
@@ -25,6 +27,8 @@
 - **两侧拖拽调宽**（默认关）——对话列左右边缘的隐形竖条：悬停浮现 3px 主题色竖线，拖动对称加宽/收窄对话列（DeepSeek 式交互），双击竖条恢复档位设置，Esc 取消本次拖动。拖拽宽度存本地、优先于档位；未拖拽时布局与原生逐像素一致。
 - **大会话流畅模式**（默认关）——对远屏外的消息行先量真实高度再跳过布局与绘制（`content-visibility:auto` + 精确 `contain-intrinsic-size`）。51MB 会话实测打开耗时 **-41%**、滚动条零失真；长会话滚动更顺。
 - **耗时秒数去小数**（默认关）——对话下方"工作中"耗时的秒数隐藏小数位（53.4 秒 → 53 秒），实时改写、关闭即恢复原生。
+- **会话底部加载图标**——3.18 把对话底部"工作中"行首的加载图标换成了品牌色粒子；可一键换回**旧版 3×3 波浪点阵**（纯 CSS 重建，颜色跟壁纸取色），或换成**自定义图片 / GIF 动图**（可选旋转、10-28px）。
+- **输入框透明度**——把聊天输入框底色在 0（不透明实底）到 100（全透明）间调节，50 ≈ ZCode 原生；壁纸从输入框底下透出；文字、边框、焦点环不受影响，明暗主题与莫奈取色继续生效。
 
 ### 面板与服务
 
@@ -56,7 +60,18 @@ WorkBuddy 与 ZCode 同为 Electron 客户端，但配色体系不同：它由�
 3. 用壁纸的 MD3 primary 色阶整条重建 `--wb-palette-brand-1..10`，按钮、链接、选中态、焦点环一次跟随；
 4. 选择器写成 `html[data-theme=light|dark]`（特异性 0,1,1），稳压应用自身 `[data-theme=dark]`（0,1,0），React 水合重渲染也不会被盖回。
 
-气泡、消息流宽度、运行中图标、耗时去小数、队列遮罩这些依赖 ZCode 具体 DOM 的增强不会注入 WorkBuddy（面板自动隐藏对应页签）。
+气泡、消息流宽度、运行中图标、耗时去小数、队列遮罩这些依赖 ZCode 具体 DOM 的增强不会注入 WorkBuddy（面板自动隐藏对应页签）；反过来，「组件」页签只在 WorkBuddy 出现。
+
+### 组件精修（WorkBuddy 专属）
+
+实测（asar 解包 + 运行中 CDP）发现 WorkBuddy 有几处壳层容器写死了颜色：侧栏与输入框背景 `rgb(31,31,31)`、输入框边框 `#333`、菜单栏文字 `rgba(228,228,228,.37)`——`--wb-*` 令牌改不到它们；消息渲染层另有一套 `--cr-*` 文字令牌，不跟随设计系统。面板的「组件」页把这些差异收敛成一组显式开关：
+
+- **壳层**：侧栏底色浓度、菜单栏文字浓度；
+- **输入框**：圆角（原生 24px）、底色浓度、描边浓度；
+- **消息与工具**：工具卡圆角（原生 8px）、会话文字跟随主题（把 `--cr-*` 接到 `--wb-*`）；
+- **通用组件**：控件圆角（`--wb-radius-md/lg`）、弹层圆角（`--wb-modal-radius`）。
+
+总开关默认关闭，关闭时零注入；所有颜色都用 `color-mix(in srgb, var(--wb-*) N%, transparent)` 从令牌派生，明暗主题与壁纸配色都会跟随，不引入新的固定色。
 
 ## 环境要求
 
@@ -66,7 +81,7 @@ WorkBuddy 与 ZCode 同为 Electron 客户端，但配色体系不同：它由�
 
 ## 两种包，都可以直接把链接扔给 AI 安装
 
-只需把 <https://github.com/Logocceai/zcode-beautify> 交给你的 AI 智能体——它会 clone 仓库并按其中的说明执行。选对包：
+只需把 <https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine> 交给你的 AI 智能体——它会 clone 仓库并按其中的说明执行。选对包：
 
 | | **插件包**（`INSTALL-FOR-AI.md`） | **技能包**（`skill-pack/SKILL.md`） |
 |---|---|---|
@@ -78,11 +93,11 @@ WorkBuddy 与 ZCode 同为 Electron 客户端，但配色体系不同：它由�
 插件包复制即用的提示词：
 
 ```text
-https://github.com/Logocceai/zcode-beautify
+https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine
 把这个美化插件安装到我的 ZCode 桌面客户端，按仓库中的 INSTALL-FOR-AI.md 执行。
 ```
 
-离线环境？两种包都在 [Releases 页面](https://github.com/Logocceai/zcode-beautify/releases) 附有 zip。
+离线环境？两种包都在 [Releases 页面](https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine/releases) 附有 zip。
 
 ## 安装（手动路径）
 
@@ -105,8 +120,8 @@ WorkBuddy 首次使用仍需带调试端口重启一次（见下），`launch --
 ### 方式 B —— clone 直接运行
 
 ```bash
-git clone https://github.com/Logocceai/zcode-beautify.git
-cd zcode-beautify
+git clone https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine.git
+cd zcode-beautify-for-wallpaper-engine
 node dist/cli.js --help        # 预构建产物，零安装
 ```
 
@@ -228,7 +243,7 @@ npm run bundle   # 预构建单文件产物（仓库随附）
 
 ## 技能包（`skill-pack/`）
 
-`skill-pack/` 是一份自包含、平台无关的 AI 编码智能体技能包（Claude、DeepSeek、Codex、豆包……均可）：把文件夹交给任意智能体，它就能为**任意** Electron 应用重建这套美化能力——CDP 通道、MD3 取色、注入模板、实时调参 API，以及来自实战的踩坑清单。与本仓库同步版本。可从 [Releases 页面](https://github.com/Logocceai/zcode-beautify/releases)下载 zip，或直接阅读 [`skill-pack/SKILL.md`](skill-pack/SKILL.md)。
+`skill-pack/` 是一份自包含、平台无关的 AI 编码智能体技能包（Claude、DeepSeek、Codex、豆包……均可）：把文件夹交给任意智能体，它就能为**任意** Electron 应用重建这套美化能力——CDP 通道、MD3 取色、注入模板、实时调参 API，以及来自实战的踩坑清单。与本仓库同步版本。可从 [Releases 页面](https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine/releases)下载 zip，或直接阅读 [`skill-pack/SKILL.md`](skill-pack/SKILL.md)。
 
 ## 实验性 opt-in（CDP 注入）
 

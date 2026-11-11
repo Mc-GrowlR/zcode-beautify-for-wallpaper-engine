@@ -40,13 +40,14 @@ const SCRIPT = buildPanelScript(9223, "t11-token", false);
 {
   check("script embeds API base + token", SCRIPT.includes('"http://127.0.0.1:9223"') && SCRIPT.includes('"t11-token"'));
 
-  // Navigation: six pages, one pane per page, one button per page.
-  const TABS = ["main", "look", "chat", "sched", "settings", "about"];
+  // Navigation: seven panes in the markup (组件 is WorkBuddy-only and is
+  // removed at runtime on ZCode), one button per page.
+  const TABS = ["main", "look", "chat", "components", "sched", "settings", "about"];
   for (const t of TABS) check(`nav button data-tab=${t}`, SCRIPT.includes(`data-tab="${t}"`));
   for (const t of TABS) check(`pane #zb-tab-${t} exists`, SCRIPT.includes(`id="zb-tab-${t}"`));
   const tabButtons = SCRIPT.match(/class="zb-tab"/g)?.length ?? 0;
-  check("exactly 6 nav buttons", tabButtons === 6, String(tabButtons));
-  check("pane-in animation covers all six panes", TABS.every((t) => SCRIPT.includes(`#zb-tab-${t}.zb-pane-in`)));
+  check("exactly 7 nav buttons", tabButtons === 7, String(tabButtons));
+  check("pane-in animation covers all seven panes", TABS.every((t) => SCRIPT.includes(`#zb-tab-${t}.zb-pane-in`)));
   check("关于 nav pinned to the sidebar bottom", SCRIPT.includes('#zb-tabs .zb-tab[data-tab="about"] { margin-top: auto; }'));
 
   // Version module is the panel/health source of truth — must match package.json.

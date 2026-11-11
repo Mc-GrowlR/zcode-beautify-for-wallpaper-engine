@@ -402,9 +402,10 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0 }))};
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
+  var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -446,6 +447,10 @@ function buildBootstrapScript(payload) {
       window.__zcodeBeautify.spinnerKey = SPIN;
       applySpinnerLook();
     }
+    if (window.__zcodeBeautify.loadKey !== LOAD) {
+      window.__zcodeBeautify.loadKey = LOAD;
+      applyLoadLook();
+    }
     return;
   }
 
@@ -461,6 +466,7 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.bubbleKey === BUBBLE
       && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.chatKey = CHAT;
     applyChatLook();
@@ -478,6 +484,7 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
       && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.bubbleKey = BUBBLE;
     applyBubbleLook();
@@ -496,10 +503,29 @@ function buildBootstrapScript(payload) {
       && window.__zcodeBeautify.vol === VOL
       && window.__zcodeBeautify.chatKey === CHAT
       && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.loadKey === LOAD
       && document.getElementById(MARKER + '-style');
     window.__zcodeBeautify.spinnerKey = SPIN;
     applySpinnerLook();
     if (spinnerOnly) return;
+  }
+
+  // Chat-load fast path (\u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807): same shape as the spinner \u2014 its
+  // rules live in their own style element, swapping the icon must not replay
+  // the wallpaper transition.
+  if (window.__zcodeBeautify.loadKey !== LOAD) {
+    var loadOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.loadKey = LOAD;
+    applyLoadLook();
+    if (loadOnly) return;
   }
 
   // State alone is not proof the DOM work succeeded: an earlier run may have
@@ -508,7 +534,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -784,6 +810,8 @@ function buildBootstrapScript(payload) {
   applyBubbleLook();
   window.__zcodeBeautify.spinnerKey = SPIN;
   applySpinnerLook();
+  window.__zcodeBeautify.loadKey = LOAD;
+  applyLoadLook();
 
   function applyChatLook() {
     if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
@@ -807,11 +835,20 @@ function buildBootstrapScript(payload) {
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // \u8F93\u5165\u6846\u900F\u660E\u5EA6: T is the composer background's transparency in %. The
+    // token's OWN alpha is REPLACED by the slider's (rgb(from \u2026 r g b) strips
+    // it, then color-mix scales toward transparent) \u2014 ZCode 3.18 ships
+    // --color-input at .5 alpha natively and the wallpaper bridge keeps that,
+    // so "0 = native" read as still-half-transparent; the slider is now the
+    // single source of truth: 0 = solid, 100 = invisible, 50 \u2248 the stock look.
+    var fade = Math.max(0, Math.min(100, Math.round(Number(C.composerFade) >= 0 && Number(C.composerFade) <= 100 ? Number(C.composerFade) : 50)));
     var st = document.getElementById(MARKER + '-chatlook-style');
     var fr = document.getElementById(MARKER + '-frost');
     var zm = document.getElementById(MARKER + '-zonemask');
+    // Feature teardown \u2014 but NOT of the style element itself: the composer
+    // fade rule is always-on (its 50 default reproduces the stock look), so
+    // the style stays mounted and the flow falls through to rewrite it.
     if (!masksOn && !widthOn && !perfOn && !decOn && !dragOn) {
-      if (st) st.remove();
       if (fr) fr.remove();
       if (zm) zm.remove();
       if (window.__zcodeBeautify.chatObs) {
@@ -823,7 +860,6 @@ function buildBootstrapScript(payload) {
         window.__zcodeBeautify.elapsedObs = null;
       }
       zbGripClean();
-      return;
     }
     if (!st) {
       st = document.createElement('style');
@@ -831,7 +867,8 @@ function buildBootstrapScript(payload) {
       (document.head || document.documentElement).appendChild(st);
     }
     st.textContent = ':root{--zb-chat-dim:' + (C.chatDim / 100) + ';--zb-mask-top:' + (C.maskTop / 100)
-      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100) + '}'
+      + ';--zb-mask-bot:' + (C.maskBottom / 100) + ';--zb-frost:' + (C.frost / 100)
+      + ';--zb-composer-fade:' + fade + '}'
       + (masksOn
         ? '#' + MARKER + '-frost{position:fixed;inset:0;z-index:-2147483645;pointer-events:none;background:rgb(255 255 255 / var(--zb-frost))}'
           + '#' + MARKER + '-zonemask{position:fixed;inset:0;z-index:-2147483644;pointer-events:none;'
@@ -840,6 +877,17 @@ function buildBootstrapScript(payload) {
           // classes; .zb-chat-col is the version-proof fallback (markChatCol).
           + 'div[class*="scrollbar-gutter:stable"][class*="overflow-y-auto"],.zb-chat-col'
           + '{background-color:rgb(0 0 0 / var(--zb-chat-dim)) !important}'
+        : '')
+      + (fade >= 0
+        // \u8F93\u5165\u6846\u900F\u660E\u5EA6: [data-composer-layout] is the composer's painted box
+        // (bg-input \u2192 var(--color-input), 3.18). rgb(from \u2026 r g b / 1) takes
+        // the token's COLOR but FORCES alpha 1 \u2014 the omitted-alpha form would
+        // keep the token's own .5 (spec: alpha defaults to the origin's) and
+        // every level would read half-transparent. color-mix then applies
+        // exactly the slider's transparency. The focus ring / border are
+        // separate tokens and stay untouched. The var indirection gives the
+        // panel's slider an instant inline-var preview (same as the masks).
+        ? '[data-composer-layout]{background-color:color-mix(in srgb, rgb(from var(--color-input, rgba(128,128,128,.35)) r g b / 1) calc(100% - var(--zb-composer-fade, 50)*1%), transparent) !important}'
         : '')
       + (widthOn && !dragOn
         // Mirrors ZCode's own tiers against the "conversation" container so
@@ -1512,6 +1560,78 @@ function buildBootstrapScript(payload) {
     st.textContent = css;
   }
 
+  // \u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807: ZCode 3.18 renders the conversation footer's status row
+  // as [data-testid="chat-loading"] with the glyph inside
+  // [data-chat-loading-icon="true"] (a brand-colored orbit svg). CSS-only
+  // swap \u2014 React re-renders this row constantly while streaming, so DOM
+  // surgery would fight the reconciler.
+  //   classic: repaint the PRE-3.18 pixel wave \u2014 nine dots in a 3\xD73 grid
+  //     (13px, 1.3px gaps), the ring pulsing clockwise (950ms cycle,
+  //     110ms per-dot stagger, order 0,1,2,5,8,7,6,3), center dot static.
+  //     Implemented as nine radial-gradient tiles; each dot's alpha rides a
+  //     @property-registered number so the wave animates without extra DOM.
+  //   image: paint the user picture over the glyph; optional CSS rotation.
+  function applyLoadLook() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
+    var L;
+    try { L = JSON.parse(LOAD); } catch (e) { return; }
+    var st = document.getElementById(MARKER + '-load-style');
+    var mode = L && (L.mode === 'classic' || L.mode === 'image') ? L.mode : 'default';
+    if (mode === 'image' && !L.image) mode = 'default';
+    if (mode === 'default') {
+      if (st) st.remove();
+      return;
+    }
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-load-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var ICON = '[data-chat-loading-icon="true"]';
+    var size = Math.max(10, Math.min(28, Math.round(L.size || 16)));
+    var css = '';
+    if (mode === 'classic') {
+      // Fallback-safe foreground: --color-foreground is ZCode's own token
+      // (and ours when Monet is on); the gray keeps the dots visible if a
+      // future build drops the token.
+      var FG = 'var(--color-foreground, rgba(200,200,205,.9))';
+      var dot = function(p) {
+        return 'radial-gradient(circle, rgb(from ' + FG + ' r g b / calc(.15 + var(--zb-ld-p' + p + ',0)*.85)) 0 62%, transparent 64%)';
+      };
+      // @property registration is required BEFORE the browser will animate a
+      // custom property; register all eight, then ONE comma-listed animation
+      // (each entry animates its own dot's keyframes with its own delay \u2014
+      // separate animation properties would override each other).
+      var anims = '';
+      for (var pi = 0; pi < 8; pi++) {
+        css += '@property --zb-ld-p' + pi + '{syntax:"<number>";inherits:false;initial-value:0}';
+        css += '@keyframes zb-ld-w' + pi + '{0%,100%{--zb-ld-p' + pi + ':0}50%{--zb-ld-p' + pi + ':1}}';
+        anims += (pi ? ',' : '') + 'zb-ld-w' + pi + ' 950ms linear infinite ' + (pi * 110) + 'ms';
+      }
+      // Guarded by relative-color support: on an engine without rgb(from \u2026)
+      // the whole block drops and the stock 3.18 glyph simply stays.
+      css += '@supports (color: rgb(from red r g b / 50%)) {'
+        + ICON + '>*{display:none!important}'
+        + ICON + '{width:13px!important;height:13px!important;'
+        + 'background-repeat:no-repeat!important;background-size:33.4% 33.4%!important;'
+        // ring order 0,1,2 / 5 / 8,7,6 / 3 \u2192 delays 0..7*110ms; center static .07
+        + 'background-image:' + dot(0) + ',' + dot(1) + ',' + dot(2) + ',' + dot(3) + ',' + dot(4) + ',' + dot(5) + ',' + dot(6) + ',' + dot(7) + ','
+        + 'radial-gradient(circle, rgb(from ' + FG + ' r g b / .07) 0 62%, transparent 64%)!important;'
+        + 'background-position:0 0,50% 0,100% 0,100% 50%,100% 100%,50% 100%,0 100%,0 50%,50% 50%!important;'
+        + 'animation:' + anims + '!important}'
+        + '}';
+    } else {
+      css += ICON + '>*{display:none!important}'
+        + ICON + '{width:' + size + 'px!important;height:' + size + 'px!important;'
+        + 'background:url("' + L.image + '") center/contain no-repeat!important}';
+      if (L.spin) {
+        css += ICON + '{animation:zb-ld-rot 1s linear infinite!important}'
+          + '@keyframes zb-ld-rot{to{transform:rotate(360deg)}}';
+      }
+    }
+    st.textContent = css;
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops \u2014 occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -1601,6 +1721,7 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-chatlook-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-load-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
@@ -1613,6 +1734,7 @@ function buildResetScript(marker = "zcode-beautify") {
     window.__zcodeBeautify.chatKey = null;
     window.__zcodeBeautify.bubbleKey = null;
     window.__zcodeBeautify.spinnerKey = null;
+    window.__zcodeBeautify.loadKey = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -1699,6 +1821,90 @@ var init_cdp = __esm({
         }
       }
     };
+  }
+});
+
+// dist/core/componentLook.js
+function normalizeComponentLook(raw) {
+  return {
+    enabled: raw?.enabled === true,
+    sidebarTone: clamp(raw?.sidebarTone, 0, 100, DEFAULT_COMPONENT_LOOK.sidebarTone),
+    menubarText: clamp(raw?.menubarText, 20, 100, DEFAULT_COMPONENT_LOOK.menubarText),
+    composerTone: clamp(raw?.composerTone, 0, 100, DEFAULT_COMPONENT_LOOK.composerTone),
+    composerBorder: clamp(raw?.composerBorder, 0, 100, DEFAULT_COMPONENT_LOOK.composerBorder),
+    composerRadius: clamp(raw?.composerRadius, 8, 40, DEFAULT_COMPONENT_LOOK.composerRadius),
+    toolRadius: clamp(raw?.toolRadius, 0, 20, DEFAULT_COMPONENT_LOOK.toolRadius),
+    controlRadius: clamp(raw?.controlRadius, 0, 20, DEFAULT_COMPONENT_LOOK.controlRadius),
+    modalRadius: clamp(raw?.modalRadius, 8, 40, DEFAULT_COMPONENT_LOOK.modalRadius),
+    syncCrTokens: raw?.syncCrTokens !== false
+  };
+}
+function workbuddyComponentCss(look) {
+  if (!look.enabled)
+    return "";
+  const parts = [];
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u58F3\u5C42 */
+.conversation-list {
+  background-color: color-mix(in srgb, var(--wb-bg-secondary) ${look.sidebarTone}%, transparent) !important;
+}
+.menubar-menu-title,
+.menubar-mnemonic {
+  color: color-mix(in srgb, var(--wb-color-text-primary) ${look.menubarText}%, transparent) !important;
+}`);
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u8F93\u5165\u6846 */
+.cr-input-container {
+  background-color: color-mix(in srgb, var(--wb-bg-card) ${look.composerTone}%, transparent) !important;
+  border-color: color-mix(in srgb, var(--wb-border-strong) ${look.composerBorder}%, transparent) !important;
+  border-radius: ${look.composerRadius}px !important;
+}`);
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u5DE5\u5177\u5361 */
+.assistant-message-tool,
+.assistant-message-tool-container .assistant-message-tool,
+.cr-collapse,
+.cr-tool-call {
+  border-radius: ${look.toolRadius}px !important;
+}`);
+  parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u901A\u7528\u7EC4\u4EF6 */
+html[data-theme="light"], html[data-theme="dark"], html.cb-light, html.cb-dark, :root {
+  --wb-radius-md: ${look.controlRadius}px;
+  --wb-radius-lg: ${look.controlRadius}px;
+  --wb-modal-radius: ${look.modalRadius}px;
+  --wb-modal-radius-confirm: ${look.modalRadius}px;
+}`);
+  if (look.syncCrTokens) {
+    parts.push(`/* \u7EC4\u4EF6\u7CBE\u4FEE \xB7 \u4F1A\u8BDD\u4EE4\u724C\u8DDF\u968F\u4E3B\u9898 */
+html[data-theme="light"], html[data-theme="dark"], html.cb-light, html.cb-dark, :root {
+  --cr-text-primary: var(--wb-color-text-primary);
+  --cr-text-secondary: var(--wb-color-text-secondary);
+  --cr-text-tertiary: var(--wb-color-text-tertiary);
+  --cr-text-link: var(--wb-color-text-link-default);
+  --cr-internal-text-primary: var(--wb-color-text-primary);
+  --cr-internal-text-secondary: var(--wb-color-text-secondary);
+  --cr-internal-text-tertiary: var(--wb-color-text-tertiary);
+  --cr-tag-bg: color-mix(in srgb, var(--wb-color-text-primary) 6%, transparent);
+  --cr-user-bubble-bg: color-mix(in srgb, var(--wb-bg-card) 88%, transparent);
+  --cr-scrollbar-thumb: color-mix(in srgb, var(--wb-color-text-primary) 16%, transparent);
+}`);
+  }
+  return parts.join("\n");
+}
+var DEFAULT_COMPONENT_LOOK, clamp;
+var init_componentLook = __esm({
+  "dist/core/componentLook.js"() {
+    "use strict";
+    DEFAULT_COMPONENT_LOOK = {
+      enabled: false,
+      sidebarTone: 72,
+      menubarText: 72,
+      composerTone: 72,
+      composerBorder: 55,
+      composerRadius: 24,
+      toolRadius: 8,
+      controlRadius: 8,
+      modalRadius: 24,
+      syncCrTokens: true
+    };
+    clamp = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
   }
 });
 
@@ -111109,8 +111315,8 @@ function analyzeFocus(bitmap) {
     wy += y2 * w;
     wsum += w;
   }
-  const clamp = (v) => Math.min(1, Math.max(0, v));
-  return { x: clamp(wx / wsum / width), y: clamp(wy / wsum / height), fit };
+  const clamp2 = (v) => Math.min(1, Math.max(0, v));
+  return { x: clamp2(wx / wsum / width), y: clamp2(wy / wsum / height), fit };
 }
 function extractSourceColor(bitmap) {
   const { width, height, data } = bitmap;
@@ -111209,6 +111415,9 @@ function transparencyRows(mode, opts) {
     `--color-sidebar:rgba(${rgb},${panelAlpha});`,
     `--color-surface:rgba(${rgb},${baseAlpha});`,
     `--color-surface-hover:rgba(${rgb},${baseAlpha});`,
+    // 3.18 renamed the row-hover paint to --color-hover (session list rows
+    // hover:bg-[var(--color-hover)]); map both so the bridge survives either.
+    `--color-hover:rgba(${rgb},${baseAlpha});`,
     `--color-card:rgba(${rgb},${baseAlpha});`,
     `--color-card-selected:rgba(${rgb},${Math.min(1, baseAlpha + 0.15)});`,
     `--color-popover:rgba(${rgb},${popoverAlpha});`,
@@ -111238,6 +111447,8 @@ function tokenRows(theme, mode, opts) {
     `--color-sidebar:${A2(n2.tone(t2.low), panelAlpha)};`,
     `--color-surface:${A2(n2.tone(t2.lowest === 100 ? 98 : 6), baseAlpha)};`,
     `--color-surface-hover:${A2(n2.tone(t2.high), baseAlpha)};`,
+    // 3.18 hover paint token (see transparencyRows note).
+    `--color-hover:${A2(n2.tone(t2.high), baseAlpha)};`,
     `--color-card:${A2(n2.tone(t2.container), baseAlpha)};`,
     `--color-card-selected:${A2(n2.tone(t2.highest), Math.min(1, baseAlpha + 0.15))};`,
     `--color-card-border:${A2(s2.outlineVariant, 0.5)};`,
@@ -111268,8 +111479,14 @@ function tokenRows(theme, mode, opts) {
   ].filter(Boolean);
 }
 function buildWorkbuddyOverrides(theme, opts) {
-  return `${WB_LIGHT}{${wbRows(theme, "light", opts).join("")}}
+  const vars = `${WB_LIGHT}{${wbRows(theme, "light", opts).join("")}}
 ${WB_DARK}{${wbRows(theme, "dark", opts).join("")}}`;
+  return opts.wallpaperVisible ? vars + workbuddyShellRules() : vars;
+}
+function workbuddyShellRules() {
+  return `
+.teams-container,.teams-grid-scroll-content,[class*="gridViewItem"]{background-color:transparent !important;}
+.conversation-shell,#workbuddy-menubar-container{background-color:var(--wb-bg-content,rgba(26,26,26,.55)) !important;}`;
 }
 function buildWorkbuddyTransparency(opts) {
   const rows = (mode) => {
@@ -111290,7 +111507,7 @@ function buildWorkbuddyTransparency(opts) {
     ].join("");
   };
   return `${WB_LIGHT}{${rows("light")}}
-${WB_DARK}{${rows("dark")}}`;
+${WB_DARK}{${rows("dark")}}` + workbuddyShellRules();
 }
 function wbRows(theme, mode, opts) {
   const s2 = mode === "light" ? theme.schemes.light : theme.schemes.dark;
@@ -111431,7 +111648,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "0.6.0";
+    VERSION = "6.1.2";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -111657,7 +111874,8 @@ function normalizeChatLook(raw) {
     widthInsetRem: inset,
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
     hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
-    dragResize: drag === 1 || drag === true ? 1 : 0
+    dragResize: drag === 1 || drag === true ? 1 : 0,
+    composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade) ? pct(raw.composerFade) : 50
   };
 }
 function normalizeTaskSpinnerLook(raw) {
@@ -111669,6 +111887,17 @@ function normalizeTaskSpinnerLook(raw) {
     image: ref(raw?.image),
     unreadImage: ref(raw?.unreadImage),
     errorImage: ref(raw?.errorImage),
+    spin: raw?.spin !== false,
+    size
+  };
+}
+function normalizeChatLoadLook(raw) {
+  const mode = raw?.mode === "classic" || raw?.mode === "image" ? raw.mode : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size) ? Math.max(10, Math.min(28, Math.round(raw.size))) : DEFAULT_CHAT_LOAD_LOOK.size;
+  const ref = (v) => typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode: mode === "image" && !ref(raw?.image) ? "default" : mode,
+    image: ref(raw?.image),
     spin: raw?.spin !== false,
     size
   };
@@ -111815,6 +112044,10 @@ ${rootSelector} { background: transparent !important; }
       parts.push(buildTransparencyOverrides({ dim: config.dim }));
     }
   }
+  const componentLook = app.tokens === "wb" ? normalizeComponentLook(config.componentLook) : normalizeComponentLook(void 0);
+  if (app.tokens === "wb" && componentLook.enabled) {
+    parts.push(workbuddyComponentCss(componentLook));
+  }
   let wallpaperDataUri;
   if (!config.sceneVideoUrl && config.wallpaperVisible) {
     const p2 = path3.resolve(config.wallpaperPath ?? "").toLowerCase();
@@ -111837,6 +112070,12 @@ ${rootSelector} { background: transparent !important; }
   if (spinnerLook.errorImage) {
     spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config.apiPort ?? target().apiPort, mediaToken2);
   }
+  const chatLoadLook = normalizeChatLoadLook(config.chatLoadLook);
+  if (chatLoadLook.image) {
+    chatLoadLook.image = resolveSpinnerImageRef(chatLoadLook.image, config.apiPort ?? target().apiPort, mediaToken2);
+    if (!chatLoadLook.image)
+      chatLoadLook.mode = "default";
+  }
   return {
     css: parts.join("\n"),
     wallpaperDataUri,
@@ -111852,7 +112091,9 @@ ${rootSelector} { background: transparent !important; }
     // copied from ZCode can never inject rules for elements that do not exist.
     chatLook: chatUi ? normalizeChatLook(config.chatLook) : normalizeChatLook(void 0),
     bubbleLook: chatUi ? normalizeBubbleLook(config.bubbleLook) : normalizeBubbleLook(void 0),
+    componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(void 0),
+    chatLoadLook: chatUi ? chatLoadLook : normalizeChatLoadLook(void 0),
     startupClean: config.startupClean !== false,
     chatUi,
     startupProbe: app.startupProbe
@@ -111891,12 +112132,13 @@ async function resetZCode(port) {
   }
   return count;
 }
-var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
+var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, DEFAULT_CHAT_LOAD_LOOK, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
     init_cdp();
     init_bubbleRecipes();
+    init_componentLook();
     init_monet();
     init_tokens();
     init_target();
@@ -111916,6 +112158,12 @@ var init_inject = __esm({
       size: 16
     };
     SPINNER_REF_MAX_CHARS = 5e5;
+    DEFAULT_CHAT_LOAD_LOOK = {
+      mode: "default",
+      image: "",
+      spin: true,
+      size: 16
+    };
     SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
     SPINNER_MIME = {
       ".gif": "image/gif",
@@ -113190,7 +113438,9 @@ function baseConfig(opts, stored) {
     chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook),
     // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
     // inside buildPayload where the image reference is resolved too.
-    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook)
+    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook),
+    // 会话底部加载图标 merges the same way (mode/image/spin/size).
+    chatLoadLook: normalizeChatLoadLook(opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -113567,6 +113817,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   var CHAT_UI = ${JSON.stringify(chatUi)};
   var HAS_UPDATER = ${JSON.stringify(hasUpdater)};
   var PROBE = ${JSON.stringify(opts.appName === "WorkBuddy" ? "workbuddy-skeleton" : "zcode-body-class")};
+  var IS_WB = PROBE === 'workbuddy-skeleton';
   var VERSION = ${JSON.stringify(VERSION)};
   var REPO_URL = ${JSON.stringify(REPO_URL)};
   var FORK_URL = ${JSON.stringify(FORK_URL)};
@@ -113677,7 +113928,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '.zb-tab[data-active="1"] { background: rgba(122,162,247,.16); opacity: 1; color: #dbe6ff; font-weight: 600; }',
     '.zb-tab[data-active="1"]::before { content: ""; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px;',
       ' border-radius: 2px; background: #7aa2f7; }',
-    '#zb-tab-main.zb-pane-in, #zb-tab-look.zb-pane-in, #zb-tab-chat.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in, #zb-tab-about.zb-pane-in { animation: zb-pane-in 150ms ease; }',
+    '#zb-tab-main.zb-pane-in, #zb-tab-look.zb-pane-in, #zb-tab-chat.zb-pane-in, #zb-tab-components.zb-pane-in, #zb-tab-sched.zb-pane-in, #zb-tab-settings.zb-pane-in, #zb-tab-about.zb-pane-in { animation: zb-pane-in 150ms ease; }',
     '@keyframes zb-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }',
     '#zb-body { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 16px;',
       ' display: flex; flex-direction: column; }',
@@ -113898,6 +114149,37 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       ' background: rgba(0,0,0,.3); color: inherit; font-size: 12px; outline: none; color-scheme: dark; }',
     '.zb-set input[type=time] { width: 80px; }',
     '.zb-set input[type=number] { width: 56px; }',
+    // Custom dropdown (\u4E0B\u62C9\u6846): the native <select> popup is OS-drawn \u2014 system
+    // blue highlight, hard-edged black arrow patch \u2014 and cannot be themed.
+    // The enhancer hides the native control and paints a matching button plus
+    // a fixed-position popup card (same surface language as .zb-wp-pop).
+    'select.zb-dd-src { display: none !important; }',
+    '.zb-dd { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px 4px 10px; border-radius: 8px;',
+      ' border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.3); color: inherit; font-size: 12px;',
+      ' line-height: 1.4; cursor: pointer; outline: none; flex: 0 1 auto;',
+      ' transition: border-color .12s ease, background .12s ease; }',
+    '.zb-dd:hover, .zb-dd:focus-visible { border-color: rgba(122,162,247,.55); background: rgba(0,0,0,.38); }',
+    '.zb-dd[aria-expanded="true"] { border-color: rgba(122,162,247,.8); background: rgba(0,0,0,.42); }',
+    '.zb-dd-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }',
+    '.zb-dd-chev { flex: none; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.5);',
+      ' transition: transform .15s ease, color .12s ease; }',
+    '.zb-dd[aria-expanded="true"] .zb-dd-chev { transform: rotate(180deg); color: #9db8ff; }',
+    '.zb-dd-pop { position: fixed; z-index: 2147483647; max-height: 246px; overflow-y: auto; padding: 4px;',
+      ' border-radius: 10px; border: 1px solid rgba(255,255,255,.13); background: rgba(30,30,38,.97);',
+      ' box-shadow: 0 12px 36px rgba(0,0,0,.5); backdrop-filter: blur(18px);',
+      ' animation: zb-dd-in 120ms ease; }',
+    '.zb-dd-pop[hidden] { display: none; }',
+    '@keyframes zb-dd-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }',
+    '.zb-dd-pop::-webkit-scrollbar { width: 5px; }',
+    '.zb-dd-pop::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }',
+    '.zb-dd-item { position: relative; display: flex; align-items: center; padding: 6px 14px 6px 12px; border-radius: 6px;',
+      ' font-size: 12px; cursor: pointer; white-space: nowrap; color: #d6d9e0; }',
+    '.zb-dd-item:hover, .zb-dd-item[data-kb="1"] { background: rgba(122,162,247,.16); color: #eef1f8; }',
+    '.zb-dd-item[data-cur="1"] { background: rgba(122,162,247,.24); color: #dbe6ff; font-weight: 600; }',
+    '.zb-dd-item[data-cur="1"]::before { content: ""; position: absolute; left: 2px; top: 6px; bottom: 6px; width: 2px;',
+      ' border-radius: 2px; background: #7aa2f7; }',
+    '.zb-dd-item[data-disabled="1"] { opacity: .38; cursor: default; }',
+    '.zb-dd-item[data-disabled="1"]:hover { background: none; color: #d6d9e0; }',
     '.zb-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 8px; }',
     '.zb-cfg-row .zb-btn { flex: 1 1 0; min-width: 0; padding-left: 2px; padding-right: 2px; }',
     '.zb-btn { display: inline-block; padding: 6px 10px; text-align: center; border-radius: 999px; cursor: pointer;',
@@ -114085,6 +114367,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '      <button class="zb-tab" data-tab="main"><span class="zb-ico">\u{1F5BC}</span><span>\u58C1\u7EB8</span></button>' +
     '      <button class="zb-tab" data-tab="look"><span class="zb-ico">\u{1F3A8}</span><span>\u5916\u89C2</span></button>' +
     '      <button class="zb-tab" data-tab="chat"><span class="zb-ico">\u{1F4AC}</span><span>\u804A\u5929</span></button>' +
+    '      <button class="zb-tab" data-tab="components"><span class="zb-ico">\u{1F9E9}</span><span>\u7EC4\u4EF6</span></button>' +
     '      <button class="zb-tab" data-tab="sched"><span class="zb-ico">\u23F1</span><span>\u8F6E\u64AD</span></button>' +
     '      <button class="zb-tab" data-tab="settings"><span class="zb-ico">\u2699</span><span>\u901A\u7528</span></button>' +
     '      <button class="zb-tab" data-tab="about"><span class="zb-ico">\u2139</span><span>\u5173\u4E8E</span></button>' +
@@ -114216,6 +114499,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <input type="range" id="zb-chat-bot" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-bot-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5927\u5BB9\u5668\u504F\u767D</span><span class="zb-set-sub">\u6574\u7A97\u767D\u8272\u8584\u7EB1\u6D53\u5EA6,\u6697\u8272\u58C1\u7EB8\u4E0B\u63D0\u5347\u6587\u5B57\u53EF\u8BFB\u6027</span></div>' +
     '        <input type="range" id="zb-chat-frost" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-frost-val">0.00</span></span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u8F93\u5165\u6846\u900F\u660E\u5EA6</span><span class="zb-set-sub">\u8F93\u5165\u6846\u5E95\u8272\u7684\u900F\u660E\u7A0B\u5EA6:0 = \u4E0D\u900F\u660E\u5B9E\u5E95,100 = \u5168\u900F\u660E;50 \u2248 ZCode \u539F\u751F</span></div>' +
+    '        <input type="range" id="zb-chat-composer" min="0" max="100" step="1" value="50" title="\u8F93\u5165\u6846\u5E95\u8272\u7684\u900F\u660E\u5EA6:0=\u4E0D\u900F\u660E(\u5B9E\u5E95),50\u2248ZCode \u539F\u751F\u534A\u900F\u660E,100=\u5B8C\u5168\u900F\u660E\u9732\u51FA\u58C1\u7EB8;\u6587\u5B57\u4E0E\u8FB9\u6846\u4E0D\u53D7\u5F71\u54CD"><span class="zb-val"><span id="zb-chat-composer-val">50</span>%</span></div>' +
     '      </div>' +
     '    </div>' +
     '    <div class="zb-block">' +
@@ -114267,6 +114552,74 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <label class="zb-sw"><input type="checkbox" id="zb-spinner-spin" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u662F\u5426\u6CBF\u7528\u539F\u751F\u7684\u65CB\u8F6C\u52A8\u753B"></label></div>' +
     '      <div class="zb-set zb-slide" id="zb-spinner-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u56FE\u6807\u5927\u5C0F</span><span class="zb-set-sub">\u539F\u751F\u69FD\u4F4D\u7EA6 16px,\u8FC7\u5927\u53EF\u80FD\u6324\u5230\u884C\u5185\u5176\u4ED6\u5143\u7D20</span></div>' +
     '        <input type="range" id="zb-spinner-size" min="10" max="24" step="1" value="16" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u7684\u663E\u793A\u5C3A\u5BF8(10-24px)"><span class="zb-val"><span id="zb-spinner-size-val">16</span>px</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u56FE\u6807\u6837\u5F0F</span><span class="zb-set-sub">\u5BF9\u8BDD\u4E0B\u65B9"\u5DE5\u4F5C\u4E2D"\u884C\u9996\u7684\u52A0\u8F7D\u56FE\u6807;3.18 \u8D77\u65B0\u7248\u4E3A\u54C1\u724C\u8272\u7C92\u5B50,\u65E7\u7248\u4E3A 3\xD73 \u6CE2\u6D6A\u70B9\u9635</span></div>' +
+    '        <div class="zb-ctrl"><select id="zb-load-mode" title="\u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807:\u65B0\u7248=3.18 \u54C1\u724C\u8272\u7C92\u5B50;\u65E7\u7248\u6CE2\u6D6A=3.18 \u4E4B\u524D\u7684\u50CF\u7D20\u70B9\u9635;\u81EA\u5B9A\u4E49\u56FE\u7247=\u6362\u6210\u56FE\u7247\u6216 GIF \u52A8\u56FE">' +
+    '          <option value="default">\u65B0\u7248(\u539F\u751F)</option>' +
+    '          <option value="classic">\u65E7\u7248\u6CE2\u6D6A</option>' +
+    '          <option value="image">\u81EA\u5B9A\u4E49\u56FE\u7247</option>' +
+    '        </select>' +
+    '        <button class="zb-btn" id="zb-load-pick" title="\u9009\u62E9\u672C\u5730\u56FE\u7247\u6216 GIF \u52A8\u56FE(\u22642MB,\u652F\u6301 gif/png/webp/jpeg/svg)">\u{1F4C1} \u9009\u56FE</button>' +
+    '        <input type="file" id="zb-load-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+    '      <div class="zb-set" id="zb-load-img-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u5F53\u524D\u56FE\u6807</span></div>' +
+    '        <div class="zb-ctrl"><img id="zb-load-preview" alt="\u5F53\u524D\u52A0\u8F7D\u56FE\u6807" title="\u5F53\u524D\u52A0\u8F7D\u56FE\u6807" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+    '        <button class="zb-btn" id="zb-load-clear" title="\u6062\u590D\u65B0\u7248\u539F\u751F\u56FE\u6807">\u2715 \u6062\u590D\u65B0\u7248</button></div></div>' +
+    '      <div class="zb-set" id="zb-load-opts" hidden><div class="zb-set-main"><span class="zb-set-name">\u4FDD\u7559\u65CB\u8F6C</span><span class="zb-set-sub">\u9759\u6001\u56FE\u5EFA\u8BAE\u5F00;GIF \u52A8\u56FE\u5EFA\u8BAE\u5173(\u81EA\u5E26\u52A8\u753B)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-load-spin" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u662F\u5426\u52A0\u65CB\u8F6C\u52A8\u753B"></label></div>' +
+    '      <div class="zb-set zb-slide" id="zb-load-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u56FE\u6807\u5927\u5C0F</span><span class="zb-set-sub">\u539F\u751F\u69FD\u4F4D\u7EA6 16px,\u8FC7\u5927\u53EF\u80FD\u6324\u5230"\u5DE5\u4F5C\u4E2D"\u6587\u5B57</span></div>' +
+    '        <input type="range" id="zb-load-size" min="10" max="28" step="1" value="16" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u7684\u663E\u793A\u5C3A\u5BF8(10-28px)"><span class="zb-val"><span id="zb-load-size-val">16</span>px</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    </div>' +
+    '    <div id="zb-tab-components" hidden>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u7EC4\u4EF6\u7CBE\u4FEE \xB7 WorkBuddy</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u542F\u7528\u7EC4\u4EF6\u7CBE\u4FEE</span><span class="zb-set-sub">\u6309\u4E0B\u65B9\u6570\u503C\u6539\u5199\u4FA7\u680F / \u8F93\u5165\u6846 / \u5DE5\u5177\u5361 / \u901A\u7528\u7EC4\u4EF6;\u5173\u95ED = \u5B8C\u5168\u539F\u751F</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-cp-on" title="\u603B\u5F00\u5173:\u5173\u95ED\u65F6\u4E0D\u6CE8\u5165\u4EFB\u4F55\u7EC4\u4EF6\u8986\u76D6\u89C4\u5219,WorkBuddy \u4FDD\u6301\u539F\u751F\u5916\u89C2"></label></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u4E3A\u4EC0\u4E48\u9700\u8981\u5B83</span><span class="zb-set-sub">\u4FA7\u680F #1f1f1f\u3001\u8F93\u5165\u6846 #1f1f1f / \u8FB9\u6846 #333\u3001\u83DC\u5355\u680F\u6587\u5B57\u90FD\u662F\u5199\u6B7B\u7684\u989C\u8272,\u8BBE\u8BA1\u4EE4\u724C\u6539\u4E0D\u5230;\u53EA\u80FD\u70B9\u540D\u8986\u76D6\u3002\u6570\u503C\u4EC5\u5728\u5F00\u542F\u540E\u751F\u6548</span></div></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u58F3\u5C42</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u4FA7\u680F\u5E95\u8272</span><span class="zb-set-sub">\u4F1A\u8BDD\u4FA7\u680F\u4E0E\u4E3B\u9898\u8868\u9762\u7684\u6DF7\u5408\u6D53\u5EA6;100% \u6700\u5B9E,0% \u5168\u900F\u660E</span></div>' +
+    '        <input type="range" id="zb-cp-sidebar" min="0" max="100" step="1" value="72"><span class="zb-val"><span id="zb-cp-sidebar-val">72</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u83DC\u5355\u680F\u6587\u5B57</span><span class="zb-set-sub">30px \u83DC\u5355\u680F\u300C\u7F16\u8F91 / \u7A97\u53E3 / \u5E2E\u52A9\u300D\u7684\u6587\u5B57\u6D53\u5EA6;\u539F\u751F\u504F\u6DE1(\u7EA6 52%)</span></div>' +
+    '        <input type="range" id="zb-cp-menubar" min="20" max="100" step="1" value="72"><span class="zb-val"><span id="zb-cp-menubar-val">72</span>%</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u8F93\u5165\u6846</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5706\u89D2</span><span class="zb-set-sub">\u8F93\u5165\u5BB9\u5668\u5706\u89D2,\u539F\u751F 24px</span></div>' +
+    '        <input type="range" id="zb-cp-composer-radius" min="8" max="40" step="1" value="24"><span class="zb-val"><span id="zb-cp-composer-radius-val">24</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5E95\u8272</span><span class="zb-set-sub">\u8F93\u5165\u5BB9\u5668\u4E0E\u4E3B\u9898\u5361\u7247\u7684\u6DF7\u5408\u6D53\u5EA6;0% \u5168\u900F\u660E(\u9732\u51FA\u58C1\u7EB8)</span></div>' +
+    '        <input type="range" id="zb-cp-composer-tone" min="0" max="100" step="1" value="72"><span class="zb-val"><span id="zb-cp-composer-tone-val">72</span>%</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u63CF\u8FB9</span><span class="zb-set-sub">\u8F93\u5165\u5BB9\u5668\u8FB9\u6846\u6D53\u5EA6;\u539F\u751F #333,0% \u65E0\u8FB9\u6846</span></div>' +
+    '        <input type="range" id="zb-cp-composer-border" min="0" max="100" step="1" value="55"><span class="zb-val"><span id="zb-cp-composer-border-val">55</span>%</span></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u6D88\u606F\u4E0E\u5DE5\u5177</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5DE5\u5177\u5361\u5706\u89D2</span><span class="zb-set-sub">\u5DE5\u5177\u8C03\u7528\u7ED3\u679C\u5361\u4E0E\u6298\u53E0\u5757\u7684\u5706\u89D2,\u539F\u751F 8px</span></div>' +
+    '        <input type="range" id="zb-cp-tool-radius" min="0" max="20" step="1" value="8"><span class="zb-val"><span id="zb-cp-tool-radius-val">8</span>px</span></div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u4F1A\u8BDD\u6587\u5B57\u8DDF\u968F\u4E3B\u9898</span><span class="zb-set-sub">\u628A\u6D88\u606F\u6E32\u67D3\u5C42\u7684 --cr-* \u6587\u5B57\u8272\u63A5\u5230 --wb-* \u4E0A,\u6D88\u9664\u300C\u534A\u8DDF\u968F\u300D\u8272\u5DEE</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-cp-cr-sync" title="\u6D88\u606F\u6B63\u6587 / \u6B21\u7EA7\u6587\u5B57 / \u94FE\u63A5 / \u6EDA\u52A8\u6761\u6539\u7528\u8BBE\u8BA1\u7CFB\u7EDF\u4EE4\u724C"></label></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u901A\u7528\u7EC4\u4EF6</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u63A7\u4EF6\u5706\u89D2</span><span class="zb-set-sub">\u8F93\u5165\u6846 / \u5361\u7247 / \u6B21\u7EA7\u6309\u94AE\u5171\u7528\u7684 --wb-radius-md/lg,\u539F\u751F 6 / 8px</span></div>' +
+    '        <input type="range" id="zb-cp-control-radius" min="0" max="20" step="1" value="8"><span class="zb-val"><span id="zb-cp-control-radius-val">8</span>px</span></div>' +
+    '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u5F39\u5C42\u5706\u89D2</span><span class="zb-set-sub">\u6A21\u6001\u6846 / \u5BF9\u8BDD\u6846\u5706\u89D2(--wb-modal-radius),\u539F\u751F 24px</span></div>' +
+    '        <input type="range" id="zb-cp-modal-radius" min="8" max="40" step="1" value="24"><span class="zb-val"><span id="zb-cp-modal-radius-val">24</span>px</span></div>' +
     '      </div>' +
     '    </div>' +
     '    </div>' +
@@ -114462,6 +114815,15 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   if (!CHAT_UI) {
     var zbChatTab = root.querySelector('.zb-tab[data-tab="chat"]');
     if (zbChatTab) zbChatTab.remove();
+  }
+  // \u7EC4\u4EF6\u7CBE\u4FEE is bound to WorkBuddy's own shell (.conversation-list /
+  // .cr-input-container / .codebuddy-menubar); ZCode has none of those, so a
+  // tab promising it would be a lie.
+  if (!IS_WB) {
+    var zbCpTab = root.querySelector('.zb-tab[data-tab="components"]');
+    if (zbCpTab) zbCpTab.remove();
+    var zbCpPane = root.querySelector('#zb-tab-components');
+    if (zbCpPane) zbCpPane.remove();
   }
   // No update-status window on the client \u2192 drop the toggle instead of
   // offering a switch that can never do anything.
@@ -114684,9 +115046,11 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
+        setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
+        setComponentUI(c.componentLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
         if (sc) sc.checked = c.startupClean !== false;
@@ -114830,6 +115194,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     var b = document.getElementById('zb-rows-images');
     if (a) a.value = libRows.scenes;
     if (b) b.value = libRows.images;
+    // The fill pass runs AFTER the floors land: it raises the images list to
+    // the leftover pane space when that exceeds the row preference.
+    if (typeof sizeImagesList === 'function') sizeImagesList();
   }
   ['zb-rows-scenes', 'zb-rows-images'].forEach(function (id) {
     var el = document.getElementById(id);
@@ -114868,11 +115235,13 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
     $('zb-chat-frost').value = f; $('zb-chat-frost-val').textContent = (f / 100).toFixed(2);
+    var cfEl = $('zb-chat-composer');
+    if (cfEl) { cfEl.value = cf ?? 50; $('zb-chat-composer-val').textContent = String(cf ?? 50); }
     var perfEl = $('zb-chat-perf');
     if (perfEl) perfEl.checked = perf === 1;
     var decEl = $('zb-chat-elapsed');
@@ -114888,6 +115257,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     rs.removeProperty('--zb-mask-top');
     rs.removeProperty('--zb-mask-bot');
     rs.removeProperty('--zb-frost');
+    rs.removeProperty('--zb-composer-fade');
   }
   // Live preview via the same CSS vars the injected style consumes \u2014 inline
   // vars outrank the :root block, so drags feel instant; the server push
@@ -114913,7 +115283,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           widthInsetRem: widthServerInset,
           perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
           hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0,
-          dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0
+          dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0,
+          composerFade: Number($('zb-chat-composer').value) || 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -114925,6 +115296,14 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       chatPreview(Number($('zb-chat-dim').value), Number($('zb-chat-top').value), Number($('zb-chat-bot').value), Number($('zb-chat-frost').value));
       pushChatLook();
     });
+  });
+  // \u8F93\u5165\u6846\u900F\u660E\u5EA6: instant inline-var preview (same mechanism as the masks),
+  // pushed through the regular chatLook debounce.
+  $('zb-chat-composer').addEventListener('input', function () {
+    var v = Number(this.value) || 0;
+    $('zb-chat-composer-val').textContent = String(v);
+    document.documentElement.style.setProperty('--zb-composer-fade', String(v));
+    pushChatLook();
   });
   // Column width: a gear writes both numbers and pushes immediately. The
   // custom editor is opened by the \u2795 button and only pushes on \u2713 \u5E94\u7528 \u2014
@@ -115178,6 +115557,78 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     reflectSpinnerRows($('zb-spinner-mode').value);
     pushSpinnerLook();
     status('\u5DF2\u6062\u590D\u539F\u751F\u9519\u8BEF\u6807\u5FD7');
+  });
+
+  // --- \u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807 (conversation footer loading icon) --------------------
+  // Mirrors the spinner pipeline (upload slot "loading", /api/config pushes),
+  // plus the "classic" mode that needs no image at all.
+  var loadImageRef = '';
+  function loadUIState() {
+    return {
+      mode: $('zb-load-mode').value,
+      image: loadImageRef,
+      spin: $('zb-load-spin').checked,
+      size: Number($('zb-load-size').value)
+    };
+  }
+  function reflectLoadRows(mode) {
+    var on = mode === 'image' && Boolean(loadImageRef);
+    $('zb-load-img-row').hidden = !on;
+    $('zb-load-opts').hidden = mode !== 'image';
+    $('zb-load-size-row').hidden = mode !== 'image';
+    if (on && lastConfig && lastConfig.chatLoadImageUrl) $('zb-load-preview').src = lastConfig.chatLoadImageUrl;
+  }
+  function setLoadUI(s, url) {
+    s = s || {};
+    var mode = s.mode === 'classic' || s.mode === 'image' ? s.mode : 'default';
+    if (mode === 'image' && !s.image) mode = 'default';
+    loadImageRef = typeof s.image === 'string' ? s.image : '';
+    $('zb-load-mode').value = mode;
+    $('zb-load-spin').checked = s.spin !== false;
+    $('zb-load-size').value = s.size ?? 16;
+    $('zb-load-size-val').textContent = String(s.size ?? 16);
+    reflectLoadRows(mode);
+  }
+  function pushLoadLook() {
+    post('/api/config', { chatLoadLook: loadUIState() }, function (d) { if (d && d.error) status(d.error); });
+  }
+  $('zb-load-mode').addEventListener('change', function () {
+    reflectLoadRows(this.value);
+    pushLoadLook();
+  });
+  $('zb-load-spin').addEventListener('change', pushLoadLook);
+  $('zb-load-size').addEventListener('input', function () {
+    $('zb-load-size-val').textContent = this.value;
+  });
+  $('zb-load-size').addEventListener('change', pushLoadLook);
+  $('zb-load-pick').addEventListener('click', function () {
+    $('zb-load-file').click();
+  });
+  $('zb-load-file').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { status('\u56FE\u7247\u8D85\u8FC7 2MB,\u5C0F\u56FE\u6807\u8BF7\u9009\u5C0F\u4E00\u70B9\u7684\u6587\u4EF6'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      post('/api/spinner', { dataUri: fr.result, name: f.name, slot: 'loading' }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        if (d && d.chatLoadLook && d.chatLoadLook.image) {
+          loadImageRef = d.chatLoadLook.image;
+          lastConfig = d; // resolved preview URL rides on the same payload
+          $('zb-load-mode').value = 'image';
+          reflectLoadRows('image');
+        }
+        status(d && d.windows > 0 ? '\u52A0\u8F7D\u56FE\u6807\u5DF2\u5E94\u7528' : '\u52A0\u8F7D\u56FE\u6807\u5DF2\u4FDD\u5B58(ZCode \u672A\u8FDE\u63A5)');
+      });
+    };
+    fr.readAsDataURL(f);
+  });
+  $('zb-load-clear').addEventListener('click', function () {
+    $('zb-load-mode').value = 'default';
+    reflectLoadRows('default');
+    pushLoadLook();
+    status('\u5DF2\u6062\u590D\u65B0\u7248\u539F\u751F\u52A0\u8F7D\u56FE\u6807');
   });
 
   // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
@@ -116057,6 +116508,57 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   bindFold('zb-card-scenes', 'zcode-beautify:fold-scenes');
   bindFold('zb-card-images', 'zcode-beautify:fold-images');
 
+  // \u58C1\u7EB8\u5E93\xB7\u56FE\u7247 list fill: the images block is the pane's LAST block and the
+  // pane's flex chain stretches the CARD to the bottom of the body \u2014 but the
+  // chain breaks at the card (its content is plain grid/block), so with
+  // \u52A8\u6001/\u6700\u8FD1\u4F7F\u7528 collapsed the card grew tall while the list kept its
+  // \u884C\u6570-preference cap: a tall empty card background under a short list.
+  // Fill instead: size the list to the CARD's live height minus the card's
+  // own chrome (padding/border) and the non-list rows inside (toolbar etc.).
+  // The card's height already accounts for every other block's fold state and
+  // the window size, so no separate pane math is needed. Floor = the user's
+  // \u884C\u6570 preference (applyLibRows) so a busy pane never shows fewer rows.
+  function sizeImagesList() {
+    var card = $('zb-card-images'), list = $('zb-lib-images');
+    if (!card || !list) return;
+    var pane = $('zb-tab-main');
+    if (pane && pane.hidden) return;
+    var cs = getComputedStyle(card);
+    var chromeY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+      + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    var inner = list.parentElement; // .zb-collapse-inner
+    var others = 0;
+    if (inner) {
+      for (var i = 0; i < inner.children.length; i++) {
+        var sib = inner.children[i];
+        if (sib === list) continue;
+        var sc = getComputedStyle(sib);
+        others += sib.offsetHeight + (parseFloat(sc.marginTop) || 0) + (parseFloat(sc.marginBottom) || 0);
+      }
+    }
+    var avail = card.offsetHeight - chromeY - others;
+    var floor = zbRowH * libRows.images;
+    list.style.maxHeight = Math.max(floor, avail) + 'px';
+  }
+  // The 0fr\u21921fr fold animates over 180ms, so measure now (sync), when the
+  // transition lands, and twice mid-flight \u2014 cheap offsetHeight reads.
+  var sizeImagesListSoon = function () {
+    sizeImagesList();
+    requestAnimationFrame(function () { requestAnimationFrame(sizeImagesList); });
+    setTimeout(sizeImagesList, 220);
+  };
+  ['zb-card-history', 'zb-card-scenes', 'zb-card-images'].forEach(function (id) {
+    var wrap = document.getElementById(id) && document.getElementById(id).querySelector('.zb-collapse-wrap');
+    if (wrap) wrap.addEventListener('transitionend', sizeImagesListSoon);
+  });
+  if (window.ResizeObserver) {
+    // Watch the CARD: its height is the fill budget and it moves with folds
+    // (its own and the other blocks') and window resizes alike.
+    new ResizeObserver(sizeImagesList).observe($('zb-card-images'));
+  } else {
+    window.addEventListener('resize', sizeImagesList);
+  }
+
   // Image sort mode (F6): default newest first; toggles to name order.
   var imgSort = 'time';
   var LIB_QUERY = '';
@@ -116088,6 +116590,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           images.innerHTML = '<div class="zb-lib-head">\u6682\u65E0\u56FE\u7247\u58C1\u7EB8 \u2014 \u7528\u4E0A\u65B9\u66F4\u6362\u56FE\u7247</div>';
         }
         if (batchMode) enterBatchMode(false); // re-arm checkboxes on the fresh rows
+        sizeImagesList();
       })
       .catch(function () { /* offline */ });
   }
@@ -116943,6 +117446,79 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     });
   });
 
+  // --- \u7EC4\u4EF6\u7CBE\u4FEE (WorkBuddy-only) -------------------------------------------
+  // Every control mirrors one field of componentLook; the master switch only
+  // decides whether the injected sheet exists, so the sliders are disabled
+  // (not hidden) while it is off \u2014 the values stay visible for tuning.
+  var CP_FIELDS = [
+    ['zb-cp-sidebar', 'sidebarTone', '%'],
+    ['zb-cp-menubar', 'menubarText', '%'],
+    ['zb-cp-composer-radius', 'composerRadius', 'px'],
+    ['zb-cp-composer-tone', 'composerTone', '%'],
+    ['zb-cp-composer-border', 'composerBorder', '%'],
+    ['zb-cp-tool-radius', 'toolRadius', 'px'],
+    ['zb-cp-control-radius', 'controlRadius', 'px'],
+    ['zb-cp-modal-radius', 'modalRadius', 'px']
+  ];
+  function cpSetEnabled(on) {
+    for (var i = 0; i < CP_FIELDS.length; i++) {
+      var el = $(CP_FIELDS[i][0]);
+      if (el) el.disabled = !on;
+    }
+    var sync = $('zb-cp-cr-sync');
+    if (sync) sync.disabled = !on;
+  }
+  function setComponentUI(c) {
+    if (!IS_WB) return;
+    c = c || {};
+    var on = c.enabled === true;
+    $('zb-cp-on').checked = on;
+    for (var i = 0; i < CP_FIELDS.length; i++) {
+      var id = CP_FIELDS[i][0], unit = CP_FIELDS[i][2];
+      var v = c[CP_FIELDS[i][1]];
+      if (typeof v !== 'number') v = 0;
+      var el = $(id);
+      if (el) el.value = v;
+      var lab = $(id + '-val');
+      if (lab) lab.textContent = v + unit;
+    }
+    var syncEl = $('zb-cp-cr-sync');
+    if (syncEl) syncEl.checked = c.syncCrTokens !== false;
+    cpSetEnabled(on);
+  }
+  function componentUIState() {
+    var out = { enabled: $('zb-cp-on').checked };
+    for (var i = 0; i < CP_FIELDS.length; i++) {
+      out[CP_FIELDS[i][1]] = Number($(CP_FIELDS[i][0]).value);
+    }
+    out.syncCrTokens = $('zb-cp-cr-sync').checked;
+    return out;
+  }
+  var cpPushTimer = null;
+  function pushComponentLook() {
+    if (!IS_WB) return;
+    clearTimeout(cpPushTimer);
+    cpPushTimer = setTimeout(function () {
+      post('/api/config', { componentLook: componentUIState() }, function (d) { if (d && d.error) status(d.error); });
+    }, 250);
+  }
+  if (IS_WB) {
+    $('zb-cp-on').addEventListener('change', function () {
+      cpSetEnabled(this.checked);
+      pushComponentLook();
+    });
+    for (var cpi = 0; cpi < CP_FIELDS.length; cpi++) {
+      (function (pair) {
+        $(pair[0]).addEventListener('input', function () {
+          var lab = $(pair[0] + '-val');
+          if (lab) lab.textContent = this.value + pair[2];
+          pushComponentLook();
+        });
+      })(CP_FIELDS[cpi]);
+    }
+    $('zb-cp-cr-sync').addEventListener('change', pushComponentLook);
+  }
+
   // --- tabs (\u58C1\u7EB8 / \u5B9A\u65F6\u64AD\u653E) ------------------------------------------------
   // Library/history rebuilds are DIRTY-driven: re-rendering the lists on
   // every tab switch recreated every <img> and the panel flashed black
@@ -116963,6 +117539,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     setTimeout(function () { if (typeof applyLibRows === 'function') applyLibRows(); }, 350);
   }
   var ZB_TABS = ['main', 'look', 'chat', 'sched', 'settings', 'about'];
+  // WorkBuddy-only pane; added at its visual position (after \u804A\u5929).
+  if (IS_WB) ZB_TABS.splice(3, 0, 'components');
   function switchTab(name) {
     if (ZB_TABS.indexOf(name) < 0) name = 'main';
     var tabs = document.querySelectorAll('.zb-tab');
@@ -116980,6 +117558,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     void pane.offsetWidth;
     pane.classList.add('zb-pane-in');
     try { localStorage.setItem('zcode-beautify:tab', name); } catch (e) {}
+    // Coming back to \u58C1\u7EB8: the pane was display:none (no measurable heights),
+    // so re-fill the images list now that it renders again.
+    if (name === 'main' && typeof sizeImagesListSoon === 'function') sizeImagesListSoon();
     if (name === 'sched') loadRotation();
     else if (name === 'about') { refresh(); updateAbout(); }
     else {
@@ -117203,6 +117784,167 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   $('zb-ab-chlog').addEventListener('click', zbChlogOpen);
   $('zb-chlog-win-close').addEventListener('click', zbChlogClose);
   $('zb-chlog-win-mask').addEventListener('click', zbChlogClose);
+
+  // --- custom dropdowns (\u4E0B\u62C9\u6846) ---------------------------------------------
+  // The native <select> popup is OS-drawn (system blue highlight, hard black
+  // arrow patch) and cannot follow the panel's look. The enhancer keeps every
+  // <select> as the single source of truth \u2014 state, 'change' events, and all
+  // existing listeners stay untouched \u2014 and only swaps the visuals: the
+  // native control is hidden and a themed button + fixed popup card render
+  // in its place. External .value writes (the 4s reflect beat) keep the
+  // button label in sync through a value-property hook; option text edits
+  // (none today, but cheap) through a MutationObserver.
+  function zbEnhanceSelect(sel) {
+    if (sel.getAttribute('data-zb-dd')) return;
+    sel.setAttribute('data-zb-dd', '1');
+    // Pin the button's min-width to the WIDEST option so the row layout
+    // matches the native control (which auto-sizes that way). Canvas text
+    // measurement also works while the tab is display:none; engines without
+    // a 2d context (jsdom) fall back to a per-character estimate.
+    var wmax = 0;
+    var meas = null;
+    try { meas = document.createElement('canvas').getContext('2d'); } catch (e) {}
+    if (meas) meas.font = '12px system-ui, sans-serif';
+    for (var i = 0; i < sel.options.length; i++) {
+      var t = sel.options[i].textContent || '';
+      var w = meas ? meas.measureText(t).width : t.length * 7.5;
+      if (w > wmax) wmax = w;
+    }
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'zb-dd';
+    if (sel.id) btn.id = sel.id + '-dd';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    if (sel.title) btn.title = sel.title;
+    btn.style.minWidth = Math.min(300, Math.max(96, Math.ceil(wmax) + 38)) + 'px';
+    btn.innerHTML = '<span class="zb-dd-val"></span>'
+      + '<span class="zb-dd-chev"><svg width="10" height="10" viewBox="0 0 10 10" fill="none">'
+      + '<path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+    sel.parentNode.insertBefore(btn, sel);
+    sel.classList.add('zb-dd-src');
+    // The popup lives on <body>: #zb-panel is overflow:hidden and would clip
+    // a list that hangs past the panel's edge. Stale popups from earlier
+    // panel generations are swept here (each generation rebuilds its own).
+    var pop = document.createElement('div');
+    pop.className = 'zb-dd-pop';
+    pop.setAttribute('role', 'listbox');
+    pop.hidden = true;
+    document.body.appendChild(pop);
+    var curIdx = -1; // keyboard focus index while open
+    function syncLabel() {
+      var o = sel.options[sel.selectedIndex];
+      btn.querySelector('.zb-dd-val').textContent = o ? o.textContent : '';
+    }
+    function close() {
+      if (pop.hidden) return;
+      pop.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('pointerdown', onDoc, true);
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('scroll', onScrollAway, true);
+      window.removeEventListener('resize', close);
+    }
+    function open() {
+      // Rebuild on every open: labels/current may have moved since last time.
+      pop.innerHTML = '';
+      curIdx = -1;
+      for (var i = 0; i < sel.options.length; i++) {
+        var o = sel.options[i];
+        var it = document.createElement('div');
+        it.className = 'zb-dd-item';
+        it.setAttribute('role', 'option');
+        it.textContent = o.textContent || '';
+        it.dataset.v = o.value;
+        it.dataset.i = String(i);
+        if (o.disabled) it.setAttribute('data-disabled', '1');
+        if (i === sel.selectedIndex) { it.setAttribute('data-cur', '1'); curIdx = i; }
+        pop.appendChild(it);
+      }
+      pop.hidden = false;
+      pop.style.minWidth = btn.offsetWidth + 'px';
+      var r = btn.getBoundingClientRect();
+      var ph = pop.offsetHeight, pw = pop.offsetWidth;
+      var x = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
+      var below = window.innerHeight - r.bottom > ph + 12;
+      pop.style.left = x + 'px';
+      pop.style.top = (below ? r.bottom + 6 : Math.max(8, r.top - ph - 6)) + 'px';
+      btn.setAttribute('aria-expanded', 'true');
+      document.addEventListener('pointerdown', onDoc, true);
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('scroll', onScrollAway, true);
+      window.addEventListener('resize', close);
+      var cur = pop.querySelector('[data-cur="1"]');
+      if (cur) cur.scrollIntoView({ block: 'nearest' });
+    }
+    function pick(idx) {
+      var o = sel.options[idx];
+      if (!o || o.disabled) return;
+      sel.value = o.value; // the hook below keeps the label in sync
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      close();
+    }
+    function onDoc(e) {
+      if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close();
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { close(); btn.focus(); e.stopPropagation(); return; }
+      var items = pop.querySelectorAll('.zb-dd-item:not([data-disabled="1"])');
+      if (!items.length) return;
+      var next = -1;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        var active = pop.querySelector('.zb-dd-item[data-kb="1"]');
+        var list = Array.prototype.slice.call(items);
+        var at = active ? list.indexOf(active) : list.indexOf(pop.querySelector('[data-cur="1"]'));
+        next = e.key === 'ArrowDown' ? (at + 1) % list.length : (at - 1 + list.length) % list.length;
+        for (var j = 0; j < list.length; j++) list[j].removeAttribute('data-kb');
+        list[next].setAttribute('data-kb', '1');
+        list[next].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        var kb = pop.querySelector('.zb-dd-item[data-kb="1"]');
+        e.preventDefault();
+        if (kb) pick(Number(kb.dataset.i));
+        else close();
+      }
+    }
+    function onScrollAway(e) {
+      // Only scroll events OUTSIDE the popup itself detach it from the button.
+      if (!(e.target === pop || (e.target && e.target.contains && pop.contains(e.target)))) close();
+    }
+    btn.addEventListener('click', function () {
+      if (btn.getAttribute('aria-expanded') === 'true') close(); else open();
+    });
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (pop.hidden) open();
+      }
+    });
+    pop.addEventListener('click', function (e) {
+      var it = e.target && e.target.closest ? e.target.closest('.zb-dd-item') : null;
+      if (it && it.getAttribute('data-disabled') !== '1') pick(Number(it.dataset.i));
+    });
+    // Property hook: reflect code paths write select.value directly; route
+    // them through the prototype setter and refresh the label.
+    var desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    try {
+      Object.defineProperty(sel, 'value', {
+        get: function () { return desc.get.call(sel); },
+        set: function (v) { desc.set.call(sel, v); syncLabel(); },
+        configurable: true,
+      });
+    } catch (e) { /* exotic engine: label sync falls back to the MO below */ }
+    var mo = new MutationObserver(syncLabel);
+    mo.observe(sel, { childList: true, subtree: true, characterData: true });
+    syncLabel();
+  }
+  (function zbEnhanceSelects() {
+    // Sweep popups orphaned by previous panel generations before rebuilding.
+    document.querySelectorAll('body > .zb-dd-pop').forEach(function (n) { n.remove(); });
+    var sels = root.querySelectorAll('select');
+    for (var i = 0; i < sels.length; i++) zbEnhanceSelect(sels[i]);
+  })();
 
   $('zb-fab').addEventListener('click', function () {
     var p = $('zb-panel');
@@ -117779,6 +118521,8 @@ function publicConfig(config) {
     dayNight: config.dayNight ?? null,
     chatLook: normalizeChatLook(config.chatLook),
     bubbleLook: normalizeBubbleLook(config.bubbleLook),
+    // 组件精修 (WorkBuddy-only): normalized look for the panel's 组件 tab.
+    componentLook: normalizeComponentLook(config.componentLook),
     // 运行中图标: normalized look plus the RESOLVED paint URL so the panel can
     // preview exactly what the sidebar will show ("" = stock spinner). The
     // 完成未读 / 出错 slots get their own resolved preview URLs.
@@ -117786,6 +118530,9 @@ function publicConfig(config) {
     spinnerImageUrl: normalizeTaskSpinnerLook(config.taskSpinnerLook).mode === "image" ? resolveSpinnerImageRef(config.taskSpinnerLook?.image ?? "", config.apiPort ?? target().apiPort, mediaToken) : "",
     spinnerUnreadUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.unreadImage ?? "", config.apiPort ?? target().apiPort, mediaToken),
     spinnerErrorUrl: resolveSpinnerImageRef(config.taskSpinnerLook?.errorImage ?? "", config.apiPort ?? target().apiPort, mediaToken),
+    // 会话底部加载图标: normalized look + resolved paint URL for the preview.
+    chatLoadLook: normalizeChatLoadLook(config.chatLoadLook),
+    chatLoadImageUrl: normalizeChatLoadLook(config.chatLoadLook).mode === "image" ? resolveSpinnerImageRef(config.chatLoadLook?.image ?? "", config.apiPort ?? target().apiPort, mediaToken) : "",
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -117850,14 +118597,21 @@ function sanitize(body) {
       widthInsetRem: capOn > 0 ? typeof cl.widthInsetRem === "number" && Number.isFinite(cl.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(cl.widthInsetRem))) : 12 : 0,
       perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
       hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0,
-      dragResize: cl.dragResize === 1 || cl.dragResize === true ? 1 : 0
+      dragResize: cl.dragResize === 1 || cl.dragResize === true ? 1 : 0,
+      composerFade: pct(cl.composerFade) ?? 50
     };
   }
   if (body?.bubbleLook && typeof body.bubbleLook === "object") {
     out.bubbleLook = normalizeBubbleLook(body.bubbleLook);
   }
+  if (body?.componentLook && typeof body.componentLook === "object") {
+    out.componentLook = normalizeComponentLook(body.componentLook);
+  }
   if (body?.taskSpinnerLook && typeof body.taskSpinnerLook === "object") {
     out.taskSpinnerLook = normalizeTaskSpinnerLook(body.taskSpinnerLook);
+  }
+  if (body?.chatLoadLook && typeof body.chatLoadLook === "object") {
+    out.chatLoadLook = normalizeChatLoadLook(body.chatLoadLook);
   }
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const dn = body?.dayNight;
@@ -117934,6 +118688,7 @@ async function holdSession(target2, config, apiPort, opts = {}) {
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
+    chatLoadLook: payload.chatLoadLook,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe
@@ -117977,6 +118732,7 @@ async function pushConfigToSessions(config) {
     chatLook: payload.chatLook,
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
+    chatLoadLook: payload.chatLoadLook,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe
@@ -118303,7 +119059,7 @@ async function startServe(opts) {
       }
       if (req.method === "POST" && url.pathname === "/api/spinner") {
         const body = JSON.parse(await readBody(req));
-        const slot = body?.slot === "unread" || body?.slot === "error" ? body.slot : "running";
+        const slot = body?.slot === "unread" || body?.slot === "error" || body?.slot === "loading" ? body.slot : "running";
         const dataUri = typeof body?.dataUri === "string" ? body.dataUri : "";
         const m = /^data:(image\/(?:gif|png|webp|jpeg|bmp|svg\+xml));base64,(.+)$/.exec(dataUri);
         if (!m)
@@ -118325,6 +119081,17 @@ async function startServe(opts) {
         }
         fs13.writeFileSync(dest, bytes);
         const config = runtimeConfig();
+        if (slot === "loading") {
+          const look2 = normalizeChatLoadLook(config.chatLoadLook);
+          const nextCfg2 = {
+            ...config,
+            chatLoadLook: { ...look2, mode: "image", image: dest }
+          };
+          saveConfig(persisted(nextCfg2));
+          const windows2 = await pushConfigToSessions(nextCfg2).catch(() => 0);
+          sendJson(res, 200, { ok: true, windows: windows2, ...publicConfig(nextCfg2) });
+          return;
+        }
         const look = normalizeTaskSpinnerLook(config.taskSpinnerLook);
         const nextCfg = {
           ...config,
@@ -119426,6 +120193,7 @@ var init_server = __esm({
     "use strict";
     init_cdp();
     init_inject();
+    init_componentLook();
     init_monet();
     init_material_color_utilities();
     init_panelScript();

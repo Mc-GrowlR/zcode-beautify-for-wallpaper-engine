@@ -5,6 +5,7 @@
 
 import { CdpConnection, injectIntoTarget, isUpdaterTarget, listTargets, pickRendererTargets, buildBootstrapScript, buildResetScript } from "./cdp.js";
 import { sanitizeCustomBubbleCss } from "./bubbleRecipes.js";
+import { normalizeComponentLook, workbuddyComponentCss, type ComponentLookConfig } from "./componentLook.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
 import { target } from "./target.js";
@@ -122,6 +123,14 @@ export interface ChatLookConfig {
    * exactly, so enabling the toggle changes nothing visually.
    */
   dragResize: number;
+  /**
+   * 输入框透明度 (composer transparency), 0-100: the composer background's
+   * transparency — 0 = solid, 100 = invisible, 50 ≈ the stock look (ZCode
+   * 3.18 ships --color-input at .5 alpha; the rule REPLACES the token's own
+   * alpha with the slider's). Absent/invalid fields default to 50, so
+   * pre-6.1.1 configs keep the stock appearance.
+   */
+  composerFade: number;
 }
 
 /** Stock wide-tier constants, for reference/tests: 72rem cap, 24rem inset. */
@@ -155,6 +164,9 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
     hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
     dragResize: drag === 1 || drag === true ? 1 : 0,
+    composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade)
+      ? pct(raw.composerFade)
+      : 50,
   };
 }
 
@@ -256,6 +268,50 @@ export function normalizeTaskSpinnerLook(raw?: Partial<TaskSpinnerLookConfig>): 
 
 /** A pasted data URI larger than this is almost certainly a mistake at 16px. */
 export const SPINNER_REF_MAX_CHARS = 500_000;
+
+/**
+ * 会话底部加载图标 (chat-loading icon): ZCode 3.18 replaced the conversation
+ * footer's 3×3 pixel-wave dots with a brand-colored orbit SVG
+ * ([data-testid="chat-loading"] > [data-chat-loading-icon] > svg). "default"
+ * injects nothing; "classic" repaints the pre-3.18 wave (nine dots in a 13px
+ * grid, clockwise pulse, foreground color) over the new glyph; "image" paints
+ * a user picture (same slot contract as taskSpinnerLook).
+ */
+export type ChatLoadMode = "default" | "classic" | "image";
+
+export interface ChatLoadLookConfig {
+  mode: ChatLoadMode;
+  /** Image reference — same resolution rules as taskSpinnerLook.image. */
+  image: string;
+  /** Keep a CSS rotation on the replaced icon (static images want it on). */
+  spin: boolean;
+  /** Icon size in px (stock slot is 16; the classic grid is fixed 13). */
+  size: number;
+}
+
+export const DEFAULT_CHAT_LOAD_LOOK: ChatLoadLookConfig = {
+  mode: "default",
+  image: "",
+  spin: true,
+  size: 16,
+};
+
+/** Clamp a partial chat-load look over the defaults (mirrors the spinner). */
+export function normalizeChatLoadLook(raw?: Partial<ChatLoadLookConfig>): ChatLoadLookConfig {
+  const mode: ChatLoadMode = raw?.mode === "classic" || raw?.mode === "image" ? raw.mode : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size)
+    ? Math.max(10, Math.min(28, Math.round(raw.size)))
+    : DEFAULT_CHAT_LOAD_LOOK.size;
+  const ref = (v: unknown): string =>
+    typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode: mode === "image" && !ref(raw?.image) ? "default" : mode,
+    image: ref(raw?.image),
+    spin: raw?.spin !== false,
+    size,
+  };
+}
+
 /** Inline fallback cap for local files outside the data dir. */
 export const SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -393,8 +449,12 @@ export interface BeautifyConfig {
   chatLook?: Partial<ChatLookConfig>;
   /** User message bubble look (聊天气泡); absent = stock ZCode bubble. */
   bubbleLook?: Partial<BubbleLookConfig>;
+  /** WorkBuddy-only component look (组件精修); absent = stock WorkBuddy. */
+  componentLook?: Partial<ComponentLookConfig>;
   /** Session-list running indicator look (运行中图标); absent = stock spinner. */
   taskSpinnerLook?: Partial<TaskSpinnerLookConfig>;
+  /** Conversation-footer loading icon (会话底部加载图标); absent = stock. */
+  chatLoadLook?: Partial<ChatLoadLookConfig>;
   /** Hide wallpaper+panel during ZCode's startup screen (default true). */
   startupClean?: boolean;
   /** Beautify ZCode's update-status window too (default false — stays stock). */
@@ -445,10 +505,20 @@ export interface BuiltPayload {
   /** User message bubble look (聊天气泡), normalized; preset default = stock. */
   bubbleLook?: BubbleLookConfig;
   /**
+   * WorkBuddy component look (组件精修), normalized; `enabled: false` means
+   * nothing was injected. Always populated (ZCode gets the disabled default).
+   */
+  componentLook: ComponentLookConfig;
+  /**
    * Session-list running indicator look (运行中图标); `image` here is the
    * RESOLVED paint URL (media endpoint / data URI), "" = stock spinner.
    */
   taskSpinnerLook?: TaskSpinnerLookConfig;
+  /**
+   * Conversation-footer loading icon (会话底部加载图标); `image` is the
+   * RESOLVED paint URL (media endpoint / data URI), "" = stock glyph.
+   */
+  chatLoadLook?: ChatLoadLookConfig;
   /** Defer mounting until the ZCode startup screen is gone (default true). */
   startupClean?: boolean;
   /** False when the target client has no chat-area extras wired yet. */
@@ -583,6 +653,17 @@ ${rootSelector} { background: transparent !important; }
       parts.push(buildTransparencyOverrides({ dim: config.dim }));
     }
   }
+  // 组件精修 (WorkBuddy only): explicit overrides for the shell containers the
+  // design system cannot reach — the sidebar, menubar labels and composer are
+  // painted with literal colors — plus an optional bridge that makes the
+  // conversation renderer's --cr-* family follow --wb-*. Appended AFTER the
+  // token block so the component rules win the cascade.
+  const componentLook = app.tokens === "wb"
+    ? normalizeComponentLook(config.componentLook)
+    : normalizeComponentLook(undefined);
+  if (app.tokens === "wb" && componentLook.enabled) {
+    parts.push(workbuddyComponentCss(componentLook));
+  }
   // Library images stream over the serve media endpoint instead of a base64
   // data URI: a multi-MB payload means a huge CDP evaluate + a second decode
   // in the renderer, while the browser caches by URL — switching is far
@@ -618,6 +699,12 @@ ${rootSelector} { background: transparent !important; }
   if (spinnerLook.errorImage) {
     spinnerLook.errorImage = resolveSpinnerImageRef(spinnerLook.errorImage, config.apiPort ?? target().apiPort, mediaToken);
   }
+  // 会话底部加载图标: same resolution path as the spinner slots.
+  const chatLoadLook = normalizeChatLoadLook(config.chatLoadLook);
+  if (chatLoadLook.image) {
+    chatLoadLook.image = resolveSpinnerImageRef(chatLoadLook.image, config.apiPort ?? target().apiPort, mediaToken);
+    if (!chatLoadLook.image) chatLoadLook.mode = "default";
+  }
 
   return {
     css: parts.join("\n"),
@@ -634,7 +721,9 @@ ${rootSelector} { background: transparent !important; }
     // copied from ZCode can never inject rules for elements that do not exist.
     chatLook: chatUi ? normalizeChatLook(config.chatLook) : normalizeChatLook(undefined),
     bubbleLook: chatUi ? normalizeBubbleLook(config.bubbleLook) : normalizeBubbleLook(undefined),
+    componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(undefined),
+    chatLoadLook: chatUi ? chatLoadLook : normalizeChatLoadLook(undefined),
     startupClean: config.startupClean !== false,
     chatUi,
     startupProbe: app.startupProbe,
