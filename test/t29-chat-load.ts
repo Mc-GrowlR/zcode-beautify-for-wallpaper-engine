@@ -38,6 +38,7 @@ function read(p: string): string {
 process.env.ZCODE_BEAUTIFY_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "zb-t29-"));
 const dataDirPath = process.env.ZCODE_BEAUTIFY_DATA_DIR;
 
+const sleep = (ms:number) => new Promise(r => setTimeout(r, ms));
 const PNG_1PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
 // --- part A: normalize -------------------------------------------------------
@@ -112,10 +113,17 @@ const PNG_1PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     runScripts: "outside-only",
   }).window;
 
-  // D1: classic mode — the wave CSS is built at RUNTIME by applyLoadLook, so
-  // assert on the style element's actual textContent, not the bootstrap source.
+  // D1: classic mode — a faithful port of upstream's ChatLoadingPixels: the
+  // CSS lives in the style element and the nine dots are REAL injected DOM
+  // (an rAF-coalesced MutationObserver re-mounts them after React rebuilds
+  // the row). Seed a live icon slot in jsdom and assert on both layers.
   {
     const w = makeWindow();
+    w.document.documentElement.className = "dark theme-zai-dark";
+    const slot = w.document.createElement("span");
+    slot.setAttribute("data-chat-loading-icon", "true");
+    slot.appendChild(w.document.createElement("svg"));
+    w.document.body.appendChild(slot);
     w.eval(buildBootstrapScript({
       css: "",
       chatLoadLook: { mode: "classic", image: "", spin: true, size: 16 },
@@ -124,18 +132,34 @@ const PNG_1PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     const st = w.document.getElementById("zcode-beautify-load-style");
     check("classic mounts the -load-style element", !!st);
     const css = st?.textContent ?? "";
-    check("classic registers all eight @property drivers",
-      Array.from({ length: 8 }, (_, i) => `@property --zb-ld-p${i}{syntax:"<number>";inherits:false;initial-value:0}`).every((s) => css.includes(s)));
-    check("classic uses ONE comma-listed staggered animation",
-      css.includes("animation:zb-ld-w0 950ms linear infinite 0ms,zb-ld-w1 950ms linear infinite 110ms,")
-      && css.includes("zb-ld-w7 950ms linear infinite 770ms!important"));
-    check("classic anchors the 3.18 loading row",
-      css.includes('[data-chat-loading-icon="true"]') && css.includes("width:13px!important;height:13px!important"));
-    check("classic hides the stock glyph", css.includes("[data-chat-loading-icon=\"true\"]>*{display:none!important}"));
-    check("classic paints nine gradient tiles incl. the static center",
-      (css.match(/radial-gradient\(circle,/g) || []).length === 9 && css.includes("/ .07) 0 62%"));
-    check("classic guards relative-color support", css.includes("@supports (color: rgb(from red r g b / 50%))"));
+    // Upstream keyframes (zai-org/ZCode styles.css): peak at 35%, scale pop.
+    check("classic uses upstream's real keyframes (35% peak + scale 1.08)",
+      css.includes("@keyframes zcode-beautify-ld-on{0%,100%{opacity:.15;transform:scale(1)}35%{opacity:1;transform:scale(1.08)}}"),
+      css.slice(Math.max(0, css.indexOf("@keyframes")), css.indexOf("@keyframes") + 170));
+    check("classic dark theme peaks at full opacity", css.includes("35%{opacity:1;"));
+    check("classic grid matches the 13px/1.3px-gap geometry",
+      css.includes("gap:1.3px!important") && css.includes("width:13px!important;height:13px!important"));
+    check("classic ring delays follow ORBIT_ORDER × 110ms",
+      css.includes(":nth-child(4){animation-delay:770ms}") && css.includes(":nth-child(6){animation-delay:330ms}")
+      && css.includes(":nth-child(7){animation-delay:660ms}") && css.includes(":nth-child(8){animation-delay:550ms}")
+      && css.includes(":nth-child(9){animation-delay:440ms}"));
+    check("classic hides the stock glyph but not the grid",
+      css.includes('>*:not(.zcode-beautify-ld-grid){display:none!important}'));
     check("classic colors ride the foreground token", css.includes("var(--color-foreground"));
+    // The injected DOM layer.
+    const grid = slot.querySelector(".zcode-beautify-ld-grid");
+    check("classic mounts the 9-dot grid into the live icon slot", !!grid);
+    const dots = grid ? grid.querySelectorAll(".zcode-beautify-ld-dot") : [];
+    check("grid carries nine dots", dots.length === 9);
+    check("center dot is static (fifth child)",
+      dots.length === 9 && dots[4].className.includes("zb-ld-center"));
+    check("grid is aria-hidden like upstream", grid?.getAttribute("aria-hidden") === "true");
+    // React-clobber resilience: wipe the grid, let the MO remount it.
+    if (grid) grid.remove();
+    await sleep(120);
+    check("MutationObserver re-mounts a wiped grid",
+      !!slot.querySelector(".zcode-beautify-ld-grid"));
+    check("observer slot is registered", !!(w as any).__zcodeBeautify?.loadObs);
 
     // D1b: composer fade rule in the chatlook style — the token's OWN alpha is
     // stripped (rgb(from …)) so the slider is the single source of truth.
@@ -165,22 +189,29 @@ const PNG_1PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     check("spin=true adds the rotation rule", css.includes("zb-ld-rot 1s linear infinite!important"));
   }
 
-  // D3: default mode injects nothing (and removes a stale style element).
+  // D3: default mode sweeps everything — style element, injected grids, observer.
   {
     const w = makeWindow();
+    const slot = w.document.createElement("span");
+    slot.setAttribute("data-chat-loading-icon", "true");
+    w.document.body.appendChild(slot);
     w.eval(buildBootstrapScript({ css: "", chatLoadLook: { mode: "classic", image: "", spin: true, size: 16 } }));
-    check("D3 setup: classic style present", !!w.document.getElementById("zcode-beautify-load-style"));
+    check("D3 setup: classic style + grid present",
+      !!w.document.getElementById("zcode-beautify-load-style") && !!slot.querySelector(".zcode-beautify-ld-grid"));
     w.eval(buildBootstrapScript({ css: "", chatLoadLook: { mode: "default", image: "", spin: true, size: 16 } }));
-    check("default mode removes the style element (fast path)",
-      !w.document.getElementById("zcode-beautify-load-style"));
+    await sleep(80);
+    check("default mode removes style + grid + observer (fast path)",
+      !w.document.getElementById("zcode-beautify-load-style")
+      && !slot.querySelector(".zcode-beautify-ld-grid")
+      && !(w as any).__zcodeBeautify?.loadObs);
   }
 }
 
 // --- part E: reset ----------------------------------------------------------
 {
   const reset = buildResetScript();
-  check("reset removes -load-style and clears loadKey",
-    reset.includes("'-load-style'") && reset.includes("loadKey = null"));
+  check("reset removes -load-style, sweeps ld-grids and clears loadKey/observer",
+    reset.includes("'-load-style'") && reset.includes("-ld-grid") && reset.includes("loadKey = null") && reset.includes("loadObs"));
 }
 
 // --- part F: panel ----------------------------------------------------------

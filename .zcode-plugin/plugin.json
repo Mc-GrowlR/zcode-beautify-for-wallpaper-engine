@@ -1,6 +1,6 @@
 {
   "name": "zcode-beautify",
-  "version": "6.1.2",
+  "version": "6.1.3",
   "description": "Beautify the ZCode desktop client: import a background wallpaper and adapt the UI colors with Material Design 3 (Monet) dynamic color. Experimental CDP injection is explicit opt-in (disabled by default).",
   "author": {
     "name": "Mc-GrowlR"

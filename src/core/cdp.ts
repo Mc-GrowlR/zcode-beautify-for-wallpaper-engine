@@ -1419,6 +1419,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     if (mode === 'image' && !L.image) mode = 'default';
     if (mode === 'default') {
       if (st) st.remove();
+      var stale = document.querySelectorAll('.' + MARKER + '-ld-grid');
+      for (var si = 0; si < stale.length; si++) stale[si].remove();
+      if (window.__zcodeBeautify.loadObs) {
+        try { window.__zcodeBeautify.loadObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.loadObs = null;
+      }
       return;
     }
     if (!st) {
@@ -1429,37 +1435,57 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     var ICON = '[data-chat-loading-icon="true"]';
     var size = Math.max(10, Math.min(28, Math.round(L.size || 16)));
     var css = '';
+    // Sweep any injected pixel grids from a previous classic run first —
+    // the default/image styles below must not coexist with them.
+    var grids = document.querySelectorAll('.' + MARKER + '-ld-grid');
+    for (var gi = 0; gi < grids.length; gi++) grids[gi].remove();
     if (mode === 'classic') {
-      // Fallback-safe foreground: --color-foreground is ZCode's own token
-      // (and ours when Monet is on); the gray keeps the dots visible if a
-      // future build drops the token.
-      var FG = 'var(--color-foreground, rgba(200,200,205,.9))';
-      var dot = function(p) {
-        return 'radial-gradient(circle, rgb(from ' + FG + ' r g b / calc(.15 + var(--zb-ld-p' + p + ',0)*.85)) 0 62%, transparent 64%)';
-      };
-      // @property registration is required BEFORE the browser will animate a
-      // custom property; register all eight, then ONE comma-listed animation
-      // (each entry animates its own dot's keyframes with its own delay —
-      // separate animation properties would override each other).
-      var anims = '';
-      for (var pi = 0; pi < 8; pi++) {
-        css += '@property --zb-ld-p' + pi + '{syntax:"<number>";inherits:false;initial-value:0}';
-        css += '@keyframes zb-ld-w' + pi + '{0%,100%{--zb-ld-p' + pi + ':0}50%{--zb-ld-p' + pi + ':1}}';
-        anims += (pi ? ',' : '') + 'zb-ld-w' + pi + ' 950ms linear infinite ' + (pi * 110) + 'ms';
+      // Faithful port of upstream's pre-3.18 ChatLoadingPixels (zai-org/ZCode,
+      // sync a60ba6a7): a 13px 3×3 grid of nine rounded dots, ring order
+      // [0,1,2,5,8,7,6,3] each pulsing with a 110ms-per-step stagger (950ms
+      // cycle, ease-in-out, peak at 35% with a 1.08 scale pop, dark themes
+      // peak at full opacity), center dot static at .07. The 6.1.1 attempt
+      // faked this with @property-driven gradient layers — dots rendered dim
+      // and mushy; the real one is nine ELEMENTS animating opacity+transform,
+      // so that is what we mount (a MutationObserver re-mounts after React
+      // rebuilds the row).
+      var isDark = /(^|\\s)(dark|theme-zai-dark)(\\s|$)/.test(document.documentElement.className || '');
+      css += '.' + MARKER + '-ld-grid{display:grid!important;grid-template-columns:repeat(3,1fr)!important;'
+        + 'grid-template-rows:repeat(3,1fr)!important;gap:1.3px!important;width:13px!important;height:13px!important;'
+        + 'flex:none!important;color:var(--color-foreground,rgba(200,200,205,.9))!important}'
+        + '.' + MARKER + '-ld-dot{width:100%!important;height:100%!important;border-radius:1px!important;'
+        + 'background:currentColor!important;opacity:.15!important;'
+        + 'animation:' + MARKER + '-ld-on 950ms ease-in-out infinite!important}'
+        + '.' + MARKER + '-ld-dot.zb-ld-center{opacity:.07!important;animation:none!important}'
+        + '@keyframes ' + MARKER + '-ld-on{0%,100%{opacity:.15;transform:scale(1)}'
+        + '35%{opacity:' + (isDark ? '1' : '.75') + ';transform:scale(1.08)}}'
+        // Ring delays: child index → ORBIT position × 110ms (center = child 5).
+        + '.' + MARKER + '-ld-dot:nth-child(1){animation-delay:0ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(2){animation-delay:110ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(3){animation-delay:220ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(4){animation-delay:770ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(6){animation-delay:330ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(7){animation-delay:660ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(8){animation-delay:550ms}'
+        + '.' + MARKER + '-ld-dot:nth-child(9){animation-delay:440ms}'
+        // Hide the stock 3.18 glyph; our grid is a flex child of its slot.
+        + ICON + '>*:not(.' + MARKER + '-ld-grid){display:none!important}';
+      zbLdMount();
+      if (!window.__zcodeBeautify.loadObs) {
+        var ldPend = false;
+        var ldObs = new MutationObserver(function() {
+          if (ldPend) return;
+          ldPend = true;
+          requestAnimationFrame(function() { ldPend = false; zbLdMount(); });
+        });
+        ldObs.observe(document.documentElement, { childList: true, subtree: true });
+        window.__zcodeBeautify.loadObs = ldObs;
       }
-      // Guarded by relative-color support: on an engine without rgb(from …)
-      // the whole block drops and the stock 3.18 glyph simply stays.
-      css += '@supports (color: rgb(from red r g b / 50%)) {'
-        + ICON + '>*{display:none!important}'
-        + ICON + '{width:13px!important;height:13px!important;'
-        + 'background-repeat:no-repeat!important;background-size:33.4% 33.4%!important;'
-        // ring order 0,1,2 / 5 / 8,7,6 / 3 → delays 0..7*110ms; center static .07
-        + 'background-image:' + dot(0) + ',' + dot(1) + ',' + dot(2) + ',' + dot(3) + ',' + dot(4) + ',' + dot(5) + ',' + dot(6) + ',' + dot(7) + ','
-        + 'radial-gradient(circle, rgb(from ' + FG + ' r g b / .07) 0 62%, transparent 64%)!important;'
-        + 'background-position:0 0,50% 0,100% 0,100% 50%,100% 100%,50% 100%,0 100%,0 50%,50% 50%!important;'
-        + 'animation:' + anims + '!important}'
-        + '}';
     } else {
+      if (window.__zcodeBeautify.loadObs) {
+        try { window.__zcodeBeautify.loadObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.loadObs = null;
+      }
       css += ICON + '>*{display:none!important}'
         + ICON + '{width:' + size + 'px!important;height:' + size + 'px!important;'
         + 'background:url("' + L.image + '") center/contain no-repeat!important}';
@@ -1469,6 +1495,26 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       }
     }
     st.textContent = css;
+  }
+
+  // Mounts the classic pixel grid into every live chat-loading icon slot that
+  // does not carry one yet. Idempotent; called on every applyLoadLook pass and
+  // from the rAF-coalesced MutationObserver (React recreates the row per turn).
+  function zbLdMount() {
+    var icons = document.querySelectorAll('[data-chat-loading-icon="true"]');
+    for (var ii = 0; ii < icons.length; ii++) {
+      var host = icons[ii];
+      if (host.querySelector('.' + MARKER + '-ld-grid')) continue;
+      var g = document.createElement('span');
+      g.className = MARKER + '-ld-grid';
+      g.setAttribute('aria-hidden', 'true');
+      for (var k = 0; k < 9; k++) {
+        var d = document.createElement('i');
+        d.className = MARKER + '-ld-dot' + (k === 4 ? ' zb-ld-center' : '');
+        g.appendChild(d);
+      }
+      host.appendChild(g);
+    }
   }
 
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
@@ -1563,6 +1609,7 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-load-style')?.remove();
+  document.querySelectorAll('.' + ${JSON.stringify(marker)} + '-ld-grid').forEach(function(n){n.remove()});
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
@@ -1583,6 +1630,10 @@ export function buildResetScript(marker = "zcode-beautify"): string {
     if (window.__zcodeBeautify.elapsedObs) {
       try { window.__zcodeBeautify.elapsedObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.elapsedObs = null;
+    }
+    if (window.__zcodeBeautify.loadObs) {
+      try { window.__zcodeBeautify.loadObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.loadObs = null;
     }
   }
 })();`;
