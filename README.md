@@ -23,6 +23,7 @@ Beautify the **ZCode desktop client**: use any image — or any **video / Wallpa
 ### Chat-area restyling
 
 - **Chat bubbles** — five presets for your own message bubbles (`accent` tint, `glass` blur, `outline`, `flat`, or stock `default`), plus tint strength, corner radius, width and alignment controls, a bubble style editor with a saved personal style library, and custom CSS support. Colors reference live theme tokens, so a Monet re-theme restyles the bubbles too.
+- **Bubble Studio** (气泡工坊, ZCode 3.16+) — an interactive gallery page built on ZCode's MCP Apps UI: whenever the agent changes your bubble look, the tool result opens an in-conversation studio where every recipe previews side by side; click one to try it on (the live chat restyles instantly), fine-tune tint / radius / width / alignment / custom CSS, and save your own named recipes (kept in `bubble-recipes.json`, up to 50). It is also available as a persistent side-pane surface; on hosts without UI-plugin support everything gracefully falls back to the plain text card.
 - **Conversation width** — widen or narrow the message column: stock / wide tiers / three narrow tiers / fully custom (cap + inset in rem). Injected as a **formula** (rem cap + `calc()` inset) rather than a fixed width, so it keeps following window resizes exactly like the native layout and never overflows into the input bar.
 - **Drag-to-resize handles** (off by default) — two hidden vertical strips hugging the conversation column edges: hover reveals a 3px accent line, dragging resizes the column symmetrically (DeepSeek-style), double-click resets to the width tier, Esc cancels a drag. The dragged width persists locally and outranks the tiers; before the first drag the layout is pixel-identical to stock.
 - **Large-session smooth mode** (off by default) — message rows far outside the viewport are measured first, then skipped for layout and painting (`content-visibility:auto` with accurate `contain-intrinsic-size`). On a 51 MB session clone this cut first-open time by **~41%** with zero scrollbar distortion; long chats scroll smoother.
@@ -35,7 +36,7 @@ Beautify the **ZCode desktop client**: use any image — or any **video / Wallpa
 - **Live settings panel** — a draggable panel inside ZCode with three tabs: **Wallpaper** (grouped library, import with progress and dependency guidance, current look), **Rotation** (playlists), and **Settings** — blur/dim sliders, framing modes, Monet and wallpaper-visibility toggles, chat-area masks (dim / gradient / veil), day-night eye care, recording resolution, config export/import, recent history, and reset. Changes preview instantly and persist.
 - **Zero-touch serve** — the MCP server starts the background service automatically when ZCode launches, so the panel is simply always there.
 - **Self-healing launch entries** — while `serve` runs, every ZCode launch entry (desktop / start-menu / taskbar shortcuts — OneDrive-redirected folders included — plus the `zcode://` protocol handler and Explorer context-menu verbs) is kept carrying `--remote-debugging-port` automatically, so the theme survives ZCode restarts *and* updater-rebuilt shortcuts. `repair-launchers` scans and fixes them on demand with a structured report (machine-wide entries are reported, not modified). The theme itself also survives renderer reloads, and the last look is cached in `localStorage` as a fallback.
-- **Conversation control** — bundled slash commands `/beautify` and `/bubble`, plus MCP tools (`set_background`, `import_scene_wallpaper`, `apply_options`, `repair_launchers`, …), let the ZCode agent set the wallpaper, tune the theme, or restyle your chat bubbles from a plain-language description.
+- **Conversation control** — bundled slash commands `/beautify` and `/bubble`, plus MCP tools (`set_background`, `import_scene_wallpaper`, `apply_options`, `repair_launchers`, …), let the ZCode agent set the wallpaper, tune the theme, or restyle your chat bubbles from a plain-language description — bubble changes additionally open the interactive Bubble Studio gallery on ZCode 3.16+.
 
 ## How it works
 
@@ -148,7 +149,10 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 |---|---|
 | `set_background` | Set wallpaper (image or scene) + Monet colors |
 | `import_scene_wallpaper` | Import a WE scene / video wallpaper end-to-end |
-| `apply_options` | Tune blur/dim/monet/visibility/framing, chat width, bubble look — without re-sending the image |
+| `apply_options` | Tune blur/dim/monet/visibility/framing, chat width, bubble look — without re-sending the image. Bubble changes open the Bubble Studio gallery (ZCode 3.16+) |
+| `bubble_studio_state` | Snapshot for the Bubble Studio page: active look, matching recipe id, built-in presets, saved recipes |
+| `save_bubble_recipe` | Save (or update) a named bubble recipe — defaults to the currently applied look |
+| `delete_bubble_recipe` | Delete a saved recipe by id (built-ins are protected) |
 | `refresh_theme` | Re-inject the stored theme after a restart |
 | `reset_appearance` | Remove wallpaper and overrides |
 | `beautify_status` | Show the stored config |

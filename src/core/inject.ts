@@ -131,6 +131,28 @@ export interface ChatLookConfig {
    * pre-6.1.1 configs keep the stock appearance.
    */
   composerFade: number;
+  /**
+   * 会话概览悬停卡 (session hover preview): 0 = off, 1 = hovering a sidebar
+   * session row opens a preview card listing that conversation's real user
+   * prompts (served from ZCode's local session db via the serve daemon's
+   * /api/session-preview; a DOM-title fallback shows when serve is down).
+   * While on, ZCode's own workspace hover card (task-row-details) is hidden
+   * so the two never stack.
+   */
+  sessionHover: number;
+  /**
+   * 会话概览悬停卡 — 侧栏行锚点开关: 1 (default) = hovering a LEFT task-list
+   * session row also opens the card; 0 = only the conversation's turn ticks
+   * (对话概要标示) trigger it — the sidebar keeps ZCode's own workspace
+   * hover card, which the 1 state hides.
+   */
+  sessionHoverSide: number;
+  /**
+   * 会话概览悬停卡 — 最多可见行数 (1-60, default 10): the list grows up to
+   * this many prompt rows; beyond that it stays this tall and the excess
+   * rows live in the scrollable area (the list auto-lands on the newest).
+   */
+  sessionHoverMax: number;
 }
 
 /** Stock wide-tier constants, for reference/tests: 72rem cap, 24rem inset. */
@@ -154,6 +176,9 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
     : 0;
   const dec = raw?.hideElapsedDecimal as unknown;
   const drag = raw?.dragResize as unknown;
+  const hover = raw?.sessionHover as unknown;
+  const hoverSide = raw?.sessionHoverSide as unknown;
+  const hoverMax = raw?.sessionHoverMax as unknown;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -164,6 +189,13 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
     hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
     dragResize: drag === 1 || drag === true ? 1 : 0,
+    sessionHover: hover === 1 || hover === true ? 1 : 0,
+    // absent = 1: existing configs predate the side toggle and expect rows on
+    sessionHoverSide: hoverSide === 0 || hoverSide === false ? 0 : 1,
+    sessionHoverMax:
+      typeof hoverMax === "number" && Number.isFinite(hoverMax) && hoverMax >= 1
+        ? Math.min(60, Math.round(hoverMax))
+        : 10,
     composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade)
       ? pct(raw.composerFade)
       : 50,
@@ -525,6 +557,13 @@ export interface BuiltPayload {
   chatUi?: boolean;
   /** How the bootstrap recognises the client's startup screen. */
   startupProbe?: "zcode-body-class" | "workbuddy-skeleton";
+  /**
+   * 会话概览悬停卡 data source: full URL of the serve endpoint INCLUDING the
+   * per-start token (`http://127.0.0.1:<port>/api/session-preview?t=…`).
+   * Empty when the feature is off / the target has no chat UI — the bootstrap
+   * then never mounts the hover card.
+   */
+  previewApi?: string;
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -727,6 +766,11 @@ ${rootSelector} { background: transparent !important; }
     startupClean: config.startupClean !== false,
     chatUi,
     startupProbe: app.startupProbe,
+    // 会话概览悬停卡: only ZCode rows carry session ids, and only when the
+    // toggle is on does the bootstrap need the (token-bearing) endpoint.
+    previewApi: chatUi && normalizeChatLook(config.chatLook).sessionHover === 1
+      ? tok(`http://127.0.0.1:${config.apiPort ?? target().apiPort}/api/session-preview`)
+      : "",
   };
 }
 

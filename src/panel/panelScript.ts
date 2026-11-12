@@ -87,6 +87,12 @@ export function buildPanelScript(
   // next openWePop.
   var stalePops = document.querySelectorAll('body > .zb-we-pop');
   for (var spi = 0; spi < stalePops.length; spi++) stalePops[spi].remove();
+  // Same for the elapsed-decimal TEST WIDGET row: its interval dies with the
+  // __zbTimers sweep below, but the row itself lives on document.body and
+  // would otherwise linger as a frozen "工作中" ghost.
+  var staleDemo = document.querySelectorAll('[data-zb-elapsed-demo="true"]');
+  for (var sdi = 0; sdi < staleDemo.length; sdi++) staleDemo[sdi].remove();
+  window.__zbElapsedDemo = null;
   // Kill the PREVIOUS panel generation's intervals: every serve restart
   // re-evaluates this script, and old closures kept polling forever with
   // their dead tokens — each 401 body parsed as data and fought the new
@@ -714,7 +720,8 @@ export function buildPanelScript(
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">大会话流畅模式</span><span class="zb-set-sub">消息行屏外跳过渲染(官方仅分享视图有此优化);大上下文会话的打开与滚动更省,首次渲染可能轻微高度跳动</span></div>' +
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="给消息行注入 content-visibility:auto:视口外的行跳过绘制与布局,滚入时再渲染;行高记忆上次实测值,不影响虚拟滚动"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">耗时秒数去小数</span><span class="zb-set-sub">对话下方"工作中"耗时的秒数不带小数位(53.4 秒 → 53 秒)</span></div>' +
-      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="隐藏对话下方运行耗时的秒数小数:实时改写渲染文本,只保留整秒;关闭后恢复原生显示"></label></div>' +
+      '        <div class="zb-ctrl"><label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="隐藏对话下方运行耗时的秒数小数:实时改写渲染文本,只保留整秒;关闭后恢复原生显示"></label>' +
+      '          <button class="zb-btn" id="zb-chat-elapsed-test" title="测试部件:在对话区种一行仿真「工作中」耗时行(每秒跳动、秒数带小数,仿 3.18 前原生格式)。开着本开关小数会被实时吃掉,关掉则下个跳动恢复小数——用于直观验证改写链路;再点一次移除">▶ 测试</button></div></div>' +
       '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">聊天区暗度</span><span class="zb-set-sub">对话列背后的额外压暗,消息文字浮在其上不受影响</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">遮罩上端</span><span class="zb-set-sub">窗口顶部向下渐隐遮罩的浓度</span></div>' +
@@ -794,12 +801,24 @@ export function buildPanelScript(
     '        <button class="zb-btn" id="zb-load-clear" title="恢复新版原生图标">✕ 恢复新版</button></div></div>' +
     '      <div class="zb-set" id="zb-load-opts" hidden><div class="zb-set-main"><span class="zb-set-name">保留旋转</span><span class="zb-set-sub">静态图建议开;GIF 动图建议关(自带动画)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-load-spin" title="自定义图标是否加旋转动画"></label></div>' +
-    '      <div class="zb-set zb-slide" id="zb-load-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">图标大小</span><span class="zb-set-sub">原生槽位约 16px,过大可能挤到"工作中"文字</span></div>' +
-    '        <input type="range" id="zb-load-size" min="10" max="28" step="1" value="16" title="自定义图标的显示尺寸(10-28px)"><span class="zb-val"><span id="zb-load-size-val">16</span>px</span></div>' +
-    '      </div>' +
-    '    </div>' +
-    '    </div>' +
-    '    <div id="zb-tab-components" hidden>' +
+      '      <div class="zb-set zb-slide" id="zb-load-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">图标大小</span><span class="zb-set-sub">原生槽位约 16px,过大可能挤到"工作中"文字</span></div>' +
+      '        <input type="range" id="zb-load-size" min="10" max="28" step="1" value="16" title="自定义图标的显示尺寸(10-28px)"><span class="zb-val"><span id="zb-load-size-val">16</span>px</span></div>' +
+      '      </div>' +
+      '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">会话概览</div>' +
+    '      <div class="zb-card">' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">悬停概览卡</span><span class="zb-set-sub">鼠标停在侧边栏会话行、或对话区左缘的提问刻度条上约 0.3 秒,弹出该会话的全部提问列表(最新一条加粗);开启后替换官方的两处悬停卡</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover" title="悬停侧边栏会话行或对话区左侧提问刻度(v4-turn-navigator)时弹出概览卡:列出该会话你发过的每条提问(旧→新,最新加粗),数据来自本机 ZCode 会话库;开启期间隐藏官方悬停信息卡(工作区信息卡与单条提问预览卡),关闭即恢复"></label></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">侧栏标题悬停</span><span class="zb-set-sub">左侧任务列表的会话标题是否弹出概览卡;关闭后侧栏恢复官方的工作区悬停卡,对话区提问刻度条不受影响</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover-side" title="是否在左侧任务列表的会话标题上弹出概览卡:开=侧栏会话行悬停弹卡(隐藏官方工作区信息卡),关=侧栏恢复官方悬停卡,仅对话区提问刻度条弹卡"></label></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">最多显示</span><span class="zb-set-sub">概览卡只列出最新的几条提问(1-60),更早的不显示;最新一条加粗</span></div>' +
+      '        <div class="zb-ctrl"><input type="number" id="zb-chat-hover-max" min="1" max="60" step="1" title="概览卡列出的提问行数:只显示最新的 N 条,更早的不进入列表(1-60,默认10)"><span style="opacity:.6">条</span></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">数据来源</span><span class="zb-set-sub">读取本机 ZCode 会话库(~/.zcode/cli/db),仅在你悬停时查询;美化服务未运行时降级为显示完整会话标题</span></div></div>' +
+      '      </div>' +
+      '    </div>' +
+      '    </div>' +
+      '    <div id="zb-tab-components" hidden>' +
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">组件精修 · WorkBuddy</div>' +
     '      <div class="zb-card">' +
@@ -1222,7 +1241,7 @@ export function buildPanelScript(
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
       $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
-      setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0);
+      setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -1270,7 +1289,7 @@ export function buildPanelScript(
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0, cl.sessionHover ?? 0, cl.sessionHoverSide ?? 1, cl.sessionHoverMax ?? 10);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
@@ -1459,7 +1478,7 @@ export function buildPanelScript(
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf, hov, side, hmax) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
@@ -1472,6 +1491,12 @@ export function buildPanelScript(
     if (decEl) decEl.checked = dec === 1;
     var dragEl = $('zb-chat-drag');
     if (dragEl) dragEl.checked = drag === 1;
+    var hovEl = $('zb-chat-hover');
+    if (hovEl) hovEl.checked = hov === 1;
+    var hovSideEl = $('zb-chat-hover-side');
+    if (hovSideEl) hovSideEl.checked = side !== 0;
+    var hovMaxEl = $('zb-chat-hover-max');
+    if (hovMaxEl) hovMaxEl.value = String(hmax && hmax >= 1 ? hmax : 10);
     reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again — inline
@@ -1508,6 +1533,9 @@ export function buildPanelScript(
           perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
           hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0,
           dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0,
+          sessionHover: $('zb-chat-hover') && $('zb-chat-hover').checked ? 1 : 0,
+          sessionHoverSide: $('zb-chat-hover-side') && $('zb-chat-hover-side').checked ? 1 : 0,
+          sessionHoverMax: Math.max(1, Math.min(60, Math.round(Number($('zb-chat-hover-max') && $('zb-chat-hover-max').value) || 10))),
           composerFade: Number($('zb-chat-composer').value) || 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
@@ -1569,6 +1597,10 @@ export function buildPanelScript(
   $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
   $('zb-chat-elapsed') && $('zb-chat-elapsed').addEventListener('change', pushChatLook);
   $('zb-chat-drag') && $('zb-chat-drag').addEventListener('change', pushChatLook);
+  $('zb-chat-hover') && $('zb-chat-hover').addEventListener('change', pushChatLook);
+  // 会话概览的两个新档位: 侧栏标题是否弹卡(开关) / 最多可见行数(数字,1-60)
+  $('zb-chat-hover-side') && $('zb-chat-hover-side').addEventListener('change', pushChatLook);
+  $('zb-chat-hover-max') && $('zb-chat-hover-max').addEventListener('input', pushChatLook);
   ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
     $(id).addEventListener('change', function () {
       var max = id === 'zb-chat-width-cap' ? 120 : 24;

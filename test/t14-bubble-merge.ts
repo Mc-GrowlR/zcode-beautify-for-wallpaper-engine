@@ -97,8 +97,11 @@ const stored: Partial<BeautifyConfig> = { ...DEFAULT_CONFIG, blur: 7, dim: 40, b
   check("custom_css is capped at the shared 8000-char limit", src.includes("z.string().max(8000)"));
   // The handler must forward ONLY the fields the caller sent — an explicit
   // undefined from MCP's zod parse would otherwise clobber the stored look.
-  check("handler drops undefined fields before sending",
-    src.includes("Object.entries(bubble).filter(([, v]) => v !== undefined)"));
+  // bubbleLookPatchFromTool builds the patch key-by-key (undefined keys are
+  // simply never set; behavior asserted in t31 C9b) and also maps
+  // custom_css → customCss.
+  check("handler routes the bubble patch through bubbleLookPatchFromTool",
+    src.includes("bubbleLookPatchFromTool(bubble"));
   check("bubble omitted → bubbleLook omitted (no empty patch sent)",
     src.includes("bubble === undefined"));
 }

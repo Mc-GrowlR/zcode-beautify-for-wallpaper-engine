@@ -38,6 +38,7 @@ import { listWeWallpapers, resolveWePreview, weDirForPath, weTitleForPath } from
 import { getInstallGuide, checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
 import { scenesCacheRoot } from "./cacheManager.js";
+import { readSessionPreview } from "./sessionStore.js";
 
 const MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
 const MAX_BODY_BYTES = MAX_WALLPAPER_BYTES + 1024 * 1024;
@@ -370,6 +371,12 @@ function sanitize(body: any): Partial<BeautifyConfig> {
       perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
       hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0,
       dragResize: cl.dragResize === 1 || cl.dragResize === true ? 1 : 0,
+      sessionHover: cl.sessionHover === 1 || cl.sessionHover === true ? 1 : 0,
+      sessionHoverSide: cl.sessionHoverSide === 0 || cl.sessionHoverSide === false ? 0 : 1,
+      sessionHoverMax:
+        typeof cl.sessionHoverMax === "number" && Number.isFinite(cl.sessionHoverMax) && cl.sessionHoverMax >= 1
+          ? Math.min(60, Math.round(cl.sessionHoverMax))
+          : 10,
       composerFade: pct(cl.composerFade) ?? 50,
     };
   }
@@ -525,6 +532,7 @@ async function holdSession(
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
+    previewApi: payload.previewApi,
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -580,6 +588,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
+    previewApi: payload.previewApi,
   });
   let ok = 0;
   for (const [id, session] of held) {
@@ -1190,6 +1199,25 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         const body = await checkLatestRelease();
         updateCheckCache = { at: Date.now(), body };
         sendJson(res, 200, body);
+        return;
+      }
+
+      // --- 会话概览悬停卡 data (sidebar session hover preview) ------------------
+      // The injected hover card fetches this with the ?t= token (same auth as
+      // media URLs). Reads ZCode's own session db read-only; see
+      // core/sessionStore.ts for the format and the real-user filtering.
+      if (req.method === "GET" && url.pathname === "/api/session-preview") {
+        const session = String(url.searchParams.get("session") ?? "");
+        const result = await readSessionPreview(session);
+        if (result.ok) {
+          sendJson(res, 200, { ok: true, ...result.data });
+        } else if (result.reason === "not-found") {
+          sendJson(res, 404, { ok: false, error: "session not found" });
+        } else if (result.reason === "bad-id") {
+          sendJson(res, 400, { ok: false, error: "bad session id" });
+        } else {
+          sendJson(res, 503, { ok: false, error: "session store unavailable" });
+        }
         return;
       }
 

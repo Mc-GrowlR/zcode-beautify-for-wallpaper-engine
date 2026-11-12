@@ -47,8 +47,10 @@ function config(extra: Partial<BeautifyConfig> = {}): BeautifyConfig {
   check("sidebar dim uses WorkBuddy's sidebar anchor", payload.css.includes("[data-sidebar-motion]"));
   check("dim variable still drives the wallpaper scrim", payload.css.includes("--zcode-beautify-dim:"));
 
-  // Chat extras must be forced to stock, not merely ignored.
-  check("chat look forced to stock", JSON.stringify(payload.chatLook) === JSON.stringify({ chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 50 }));
+  // Chat extras must be forced to stock, not merely ignored. sessionHover
+  // (会话概览悬停卡) joins the normalized set — WorkBuddy forces it off too
+  // (the side/max dials ride along as inert defaults: 1 / 10).
+  check("chat look forced to stock", JSON.stringify(payload.chatLook) === JSON.stringify({ chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10, composerFade: 50 }));
   check("bubble look forced to stock", payload.bubbleLook?.preset === "default");
   check("spinner look forced to stock", payload.taskSpinnerLook?.mode === "default");
   check("chat-load look forced to stock", payload.chatLoadLook?.mode === "default");

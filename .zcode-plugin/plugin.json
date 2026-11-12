@@ -1,6 +1,6 @@
 {
   "name": "zcode-beautify",
-  "version": "6.1.4",
+  "version": "6.2.0",
   "description": "Beautify the ZCode desktop client: import a background wallpaper and adapt the UI colors with Material Design 3 (Monet) dynamic color. Experimental CDP injection is explicit opt-in (disabled by default).",
   "author": {
     "name": "Mc-GrowlR"
@@ -19,6 +19,17 @@
         "ZCODE_BEAUTIFY_DATA_DIR": "${ZCODE_PLUGIN_DATA}"
       }
     }
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "bubble-studio",
+        "title": { "en": "Bubble Studio", "zh-CN": "气泡工坊" },
+        "server": "zcode-beautify",
+        "resourceUri": "ui://zcode-beautify/bubble-studio.html",
+        "availability": "session"
+      }
+    ]
   },
   "category": "themes"
 }

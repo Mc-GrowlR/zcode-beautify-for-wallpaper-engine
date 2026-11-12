@@ -402,7 +402,19 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10 }))};
+  // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: the serve endpoint (token included) the hover card
+  // fetches its prompt list from; empty = the feature stays unmounted.
+  // A serve restart rotates the token while css/chat stay identical \u2014 the
+  // identity checks below would then early-return this eval and leave EARLIER
+  // generations' hover listeners bound. The slot below is refreshed by every
+  // eval (this line runs before any fast path), so those listeners keep
+  // reading the FRESHEST endpoint; PREV_API additionally feeds the final
+  // identity check so a token rotation re-runs the full apply (same
+  // semantics as a wallpaper URL rotation re-running the transition).
+  var PREVIEW_API = ${JSON.stringify(payload.previewApi ?? "")};
+  var PREV_API = window.__zcodeBeautify.previewApi;
+  window.__zcodeBeautify.previewApi = PREVIEW_API;
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
@@ -413,6 +425,22 @@ function buildBootstrapScript(payload) {
   // bootstrap silently).
   var BUB = '[data-v4-user-input-bubble]';
   var BUB_ROW = '[class~="group/user-row"]';
+  // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361 state \u2014 initialized HERE, above the fast paths, for the
+  // same reason as BUB/RECIPES below: applyChatLook (\u2192 zbHoverApply, which
+  // binds listeners closing over these) is reachable from the volume/chat
+  // fast paths at the top of this body, and a generation that takes a fast
+  // path NEVER executes the var initializers further down \u2014 its listeners
+  // would then read undefined forever (live hit: toggling the panel switch
+  // rebound with zbHoverCache undefined; every hover threw and the card
+  // stayed empty).
+  var zbHoverTimer = 0;
+  var zbHoverCloseTimer = 0;
+  var zbHoverCur = '';
+  var zbHoverPend = '';
+  var zbHoverCache = {};
+  var zbHoverRowEl = null;
+  var zbHoverRectTop = 0;
+  var zbHoverRectLeft = 0;
   // --zb-bubble-tint holds 0-1; the mixes scale it back to a percentage.
   // Recipes + custom CSS are baked serve-side from core/bubbleRecipes.ts so
   // this table and the panel preview share one source of truth. The custom
@@ -534,7 +562,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && PREV_API === PREVIEW_API && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -835,6 +863,20 @@ function buildBootstrapScript(payload) {
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: needs the serve endpoint; without it the toggle is a
+    // no-op (nothing mounts, the native hover card stays).
+    var hoverOn = Number(C.sessionHover) === 1 && typeof PREVIEW_API === 'string' && PREVIEW_API.length > 0;
+    // \u4F1A\u8BDD\u6982\u89C8 two dials, published to SLOTS so every listener generation
+    // (including stale closures from older bootstrap registrations) reads the
+    // CURRENT config at event/fill time \u2014 same pattern as previewApi.
+    //   hoverSide: 0 = the LEFT task-list rows stop opening the card (the
+    //              sidebar keeps ZCode's own workspace hover card).
+    //   hoverMax:  visible-row cap; excess prompts live in the scroll area.
+    if (window.__zcodeBeautify) {
+      window.__zcodeBeautify.hoverSide = Number(C.sessionHoverSide) === 0 ? 0 : 1;
+      var hm = Math.round(Number(C.sessionHoverMax));
+      window.__zcodeBeautify.hoverMax = Number.isFinite(hm) && hm >= 1 ? Math.min(60, hm) : 10;
+    }
     // \u8F93\u5165\u6846\u900F\u660E\u5EA6: T is the composer background's transparency in %. The
     // token's OWN alpha is REPLACED by the slider's (rgb(from \u2026 r g b) strips
     // it, then color-mix scales toward transparent) \u2014 ZCode 3.18 ships
@@ -861,6 +903,7 @@ function buildBootstrapScript(payload) {
       }
       zbGripClean();
     }
+    if (!hoverOn) zbHoverClean();
     if (!st) {
       st = document.createElement('style');
       st.id = MARKER + '-chatlook-style';
@@ -1090,6 +1133,469 @@ function buildBootstrapScript(payload) {
     } else {
       zbGripClean();
     }
+    // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: idempotent mount/unmount riding the chat-look push.
+    zbHoverApply(hoverOn);
+  }
+
+  // --- \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361 (session hover preview) ---------------------------------
+  // TWO anchors open the card after a 300ms hover:
+  //   \xB7 sidebar session rows  \u2014 [data-testid^="task-item-"] (both renderers)
+  //   \xB7 conversation turn ticks \u2014 [data-testid^="v4-turn-navigator-item-"],
+  //     the \u5BF9\u8BDD\u6982\u8981\u6807\u793A strip at the conversation's left edge; a tick shows
+  //     the OPEN conversation's list (resolved via the sidebar's selected row)
+  // Card look follows the user's reference image: a HEADLESS flat dark panel
+  // holding nothing but the session's real user prompts as left-aligned
+  // single-line rows (ZCode's list is on the LEFT, so the content faces the
+  // list: dash-led lines flush left, long ones ellipsized at the right end),
+  // the newest row bold + near-white.
+  // While mounted, ZCode's own hover cards for both surfaces are hidden
+  // ([data-testid="task-row-details"] workspace info + the per-turn
+  // v4-turn-navigator-tooltip preview); turning the feature off restores
+  // them. Prompt data comes from the serve daemon's /api/session-preview
+  // (ZCode's local session db). All timing is setTimeout-based: rAF throttles
+  // to zero in occluded renderers (measured \u2014 see the grip sync note) and
+  // would swallow the open delay entirely. Prompt text is user data \u2014 every
+  // node is built through textContent, never innerHTML.
+  function zbHoverRow(el) {
+    if (!el || el.nodeType !== 1 || !el.closest) return null;
+    var hit = el.closest('[data-testid^="task-item-"],[data-testid^="v4-turn-navigator-item-"]');
+    if (!hit) return null;
+    // sessionHoverSide=0 (\u8BBE\u7F6E: \u4FA7\u680F\u6807\u9898\u4E0D\u5F39\u5361): the LEFT task-list rows are
+    // not anchors \u2014 only the conversation's turn ticks keep opening the card.
+    // Read the SLOT, not a closure var: older listener generations must see
+    // the current config too.
+    if ((hit.getAttribute('data-testid') || '').indexOf('task-item-') === 0
+        && window.__zcodeBeautify && window.__zcodeBeautify.hoverSide === 0) return null;
+    return hit;
+  }
+  function zbHoverSessionId(anchor) {
+    var tid = anchor && anchor.getAttribute('data-testid') || '';
+    if (tid.indexOf('task-item-') === 0) return tid.slice('task-item-'.length);
+    if (tid.indexOf('v4-turn-navigator-item-') === 0) {
+      // The tick belongs to the OPEN conversation; its testid carries a
+      // message row id, not a session id \u2014 resolve through the sidebar's
+      // selected row (bg-selected), falling back to the running one.
+      var run = document.querySelector('[data-testid^="task-item-"] .animate-spin');
+      var act = document.querySelector('[data-testid^="task-item-"].bg-selected')
+        || (run && run.closest ? run.closest('[data-testid^="task-item-"]') : null);
+      if (!act) return '';
+      var atid = act.getAttribute('data-testid') || '';
+      return atid.indexOf('task-item-') === 0 ? atid.slice('task-item-'.length) : '';
+    }
+    return '';
+  }
+  function zbHoverCardEl() {
+    return document.getElementById(MARKER + '-hover-card');
+  }
+  function zbHoverClose() {
+    clearTimeout(zbHoverCloseTimer);
+    var card = zbHoverCardEl();
+    if (card) card.remove();
+    zbHoverCur = '';
+    zbHoverPend = '';
+    zbHoverRowEl = null;
+  }
+  function zbHoverScheduleClose() {
+    clearTimeout(zbHoverTimer);
+    zbHoverPend = '';
+    clearTimeout(zbHoverCloseTimer);
+    // Grace window: crossing the gap row \u2192 card must not blink it away.
+    zbHoverCloseTimer = setTimeout(zbHoverClose, 180);
+  }
+  function zbHoverOver(e) {
+    var card = zbHoverCardEl();
+    if (card && card.contains(e.target)) { clearTimeout(zbHoverCloseTimer); return; }
+    var row = zbHoverRow(e.target);
+    if (!row) return;
+    var id = zbHoverSessionId(row);
+    if (!id) return;
+    clearTimeout(zbHoverCloseTimer);
+    if (zbHoverCur === id && card) return;
+    // mouseover also fires when crossing INTO nested children of the row \u2014
+    // the pending delay tracks the session, not the element, so crossing
+    // children never restarts the 300ms timer from zero.
+    if (zbHoverPend === id) return;
+    clearTimeout(zbHoverTimer);
+    zbHoverPend = id;
+    zbHoverRowEl = row;
+    var hrc = row.getBoundingClientRect();
+    zbHoverRectTop = hrc.top; zbHoverRectLeft = hrc.left;
+    zbHoverTimer = setTimeout(function() { zbHoverPend = ''; zbHoverOpen(row, id); }, 300);
+  }
+  function zbHoverOut(e) {
+    var card = zbHoverCardEl();
+    if (card && card.contains(e.target)) {
+      // leaving the card: close unless the pointer moved onto the row/card gap
+      if (card.contains(e.relatedTarget)) return;
+      zbHoverScheduleClose();
+      return;
+    }
+    var row = zbHoverRow(e.target);
+    if (!row) return;
+    if (zbHoverRow(e.relatedTarget) === row) return; // still inside the row
+    if (card && card.contains(e.relatedTarget)) return; // onto the card
+    zbHoverScheduleClose();
+  }
+  function zbHoverData(id, cb) {
+    var hit = zbHoverCache[id];
+    if (hit && Date.now() - hit.at < 15000) return cb(hit.data);
+    // Read the SLOT, not the closure var: this listener may belong to an
+    // earlier bootstrap generation, and the slot always carries the newest
+    // endpoint/token (see the PREVIEW_API note at the top of the body).
+    var api = (window.__zcodeBeautify && window.__zcodeBeautify.previewApi) || PREVIEW_API;
+    if (!api) return cb(null);
+    var sep = api.indexOf('?') >= 0 ? '&' : '?';
+    fetch(api + sep + 'session=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(j) {
+        var data = j && j.ok === true ? j : null;
+        if (data) zbHoverCache[id] = { at: Date.now(), data: data };
+        cb(data);
+      })
+      .catch(function() { cb(null); });
+  }
+  function zbHoverText(t) {
+    return String(t == null ? '' : t).replace(/\\s+/g, ' ').trim();
+  }
+  function zbHoverFill(card, id, row) {
+    var list = card.querySelector('.' + MARKER + '-hov-list');
+    if (!list) return;
+    zbHoverData(id, function(data) {
+      if (zbHoverCur !== id) return; // switched rows / closed meanwhile
+      list.textContent = '';
+      // re-seat the sliding indicator (the wipe above detached it)
+      var ind2 = document.createElement('div');
+      ind2.id = MARKER + '-hover-ind';
+      list.appendChild(ind2);
+      if (!data) {
+        // serve down / token stale / db unreadable: still useful \u2014 the row's
+        // marquee carries the FULL untruncated title (tick anchors fall back
+        // to the selected sidebar row's marquee).
+        var fbSrc = (row.querySelector('[data-task-title-copy="original"]') || {}).textContent
+          || (document.querySelector('[data-testid^="task-item-"].bg-selected [data-task-title-copy="original"]') || {}).textContent
+          || '';
+        if (fbSrc) {
+          var fb = document.createElement('div');
+          fb.className = MARKER + '-hov-row';
+          fb.textContent = zbHoverText(fbSrc);
+          list.appendChild(fb);
+        }
+        var hint = document.createElement('div');
+        hint.className = MARKER + '-hov-hint';
+        hint.textContent = '\u4F1A\u8BDD\u6982\u89C8\u670D\u52A1\u4E0D\u53EF\u7528(\u7F8E\u5316\u670D\u52A1\u672A\u8FD0\u884C)' + (fbSrc ? ',\u4EC5\u663E\u793A\u5B8C\u6574\u6807\u9898' : '');
+        list.appendChild(hint);
+        return;
+      }
+      var ps = data.prompts || [];
+      if (!ps.length) {
+        var empty = document.createElement('div');
+        empty.className = MARKER + '-hov-hint';
+        empty.textContent = '(\u8FD8\u6CA1\u6709\u7528\u6237\u63D0\u95EE)';
+        list.appendChild(empty);
+        return;
+      }
+      // \u6700\u591A\u663E\u793A\u884C\u6570 (sessionHoverMax): the card lists EXACTLY the newest N
+      // prompts \u2014 a short, naturally-ending list (reference design), not a
+      // tall scroll area carrying the whole history. Older prompts are simply
+      // not listed; the CSS max-height below stays only as a viewport guard
+      // for very large N.
+      var cap = window.__zcodeBeautify ? Number(window.__zcodeBeautify.hoverMax) : NaN;
+      cap = Number.isFinite(cap) && cap >= 1 ? Math.min(60, Math.round(cap)) : 10;
+      if (ps.length > cap) ps = ps.slice(ps.length - cap);
+      for (var i = 0; i < ps.length; i++) {
+        var r = document.createElement('div');
+        r.className = MARKER + '-hov-row' + (i === ps.length - 1 ? ' ' + MARKER + '-hov-last' : '');
+        r.textContent = zbHoverText(ps[i].text);
+        if (ps[i].mid) r.setAttribute('data-mid', ps[i].mid);
+        list.appendChild(r);
+      }
+      // Newest sits at the bottom (image spec) \u2014 land the scroll there
+      // (only relevant when a very large N overflows the CSS max-height).
+      list.scrollTop = list.scrollHeight;
+    });
+  }
+  // Place the card beside the anchor rect: to its right, flipping left when
+  // the window runs out of room, clamped into the viewport. Shared by the
+  // open path and the scroll-follow reposition.
+  function zbHoverPlace(card, rc) {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var cw = card.offsetWidth || 420, ch = card.offsetHeight || 200;
+    var left = rc.right + 8;
+    if (left + cw > vw - 8) left = Math.max(8, rc.left - cw - 8);
+    var top = rc.top - 6;
+    if (top + ch > vh - 8) top = Math.max(8, vh - 8 - ch);
+    card.style.left = Math.round(left) + 'px';
+    card.style.top = Math.round(top) + 'px';
+  }
+  function zbHoverOpen(row, id) {
+    var rc = row.getBoundingClientRect();
+    if (rc.width === 0 && rc.height === 0) return; // recycled/virtualized away
+    zbHoverClose();
+    // Anchor the moved-check at the CURRENT rect (the schedule-time snapshot
+    // may predate a tiny layout drift; only real movement should close).
+    zbHoverRowEl = row;
+    zbHoverRectTop = rc.top; zbHoverRectLeft = rc.left;
+    var card = document.createElement('div');
+    card.id = MARKER + '-hover-card';
+    card.setAttribute('role', 'tooltip');
+    // Reference design: a HEADLESS card \u2014 no title row, no meta line, just
+    // the right-aligned prompt list (the hovered row itself names the session).
+    var list = document.createElement('div');
+    list.className = MARKER + '-hov-list';
+    card.appendChild(list);
+    var loading = document.createElement('div');
+    loading.className = MARKER + '-hov-hint';
+    loading.textContent = '\u6B63\u5728\u8BFB\u53D6\u4F1A\u8BDD\u2026';
+    list.appendChild(loading);
+    // Sliding hover indicator (see the CSS block): one bar under the row the
+    // pointer is on, top animating between rows as the pointer crosses them.
+    // It lives INSIDE the scrolling list (positions via row offsetTop) and is
+    // re-created by the fill passes (their textContent wipe detaches it);
+    // the listeners ride the list element itself, which survives the wipes.
+    var ind = document.createElement('div');
+    ind.id = MARKER + '-hover-ind';
+    list.appendChild(ind);
+    list.addEventListener('mouseover', function(e2) {
+      var rr = e2.target && e2.target.closest ? e2.target.closest('.' + MARKER + '-hov-row') : null;
+      var bar = document.getElementById(MARKER + '-hover-ind');
+      if (!bar) return;
+      if (!rr) { bar.style.opacity = '0'; return; }
+      bar.style.top = (rr.offsetTop + rr.offsetHeight - 2) + 'px';
+      bar.style.opacity = '1';
+    });
+    list.addEventListener('mouseleave', function() {
+      var bar = document.getElementById(MARKER + '-hover-ind');
+      if (bar) bar.style.opacity = '0';
+    });
+    // Click-to-jump (reference behavior): clicking a prompt row lands ON that
+    // prompt \u2014 not just on the session's tail \u2014 and the card STAYS OPEN (the
+    // user asked for it: keep reading / clicking other prompts after a jump;
+    // the card still closes via the normal paths \u2014 pointer leaves it, Esc,
+    // click elsewhere). ZCode's turn-navigator tick for a user message carries
+    // that message's id on data-turn-id, and the tick is itself a native
+    // button that scrolls the conversation to its turn; clicking the tick is
+    // the whole mechanism. For the OPEN conversation (tick anchor / selected
+    // row) that click is immediate; a DIFFERENT session opens first (sidebar
+    // row's native click \u2192 onSelectTask) and a short poll lands on the turn
+    // once its strip mounts. Delegated on the card so re-fills need no
+    // rebinding; hint rows carry no -hov-row and stay inert. Both ids are
+    // re-whitelisted before entering a selector.
+    card.addEventListener('click', function(e) {
+      var hit = e.target && e.target.closest ? e.target.closest('.' + MARKER + '-hov-row') : null;
+      if (!hit) return;
+      var mid = hit.getAttribute('data-mid') || '';
+      if (!/^[A-Za-z0-9_-]{6,96}$/.test(id)) return;
+      if (!/^msg_[A-Za-z0-9_-]{1,120}$/.test(mid)) mid = '';
+      var tickOf = function() {
+        return mid ? document.querySelector('[data-turn-id="' + mid + '"]') : null;
+      };
+      var sel = document.querySelector('[data-testid^="task-item-"].bg-selected');
+      if (sel && (sel.getAttribute('data-testid') || '') === 'task-item-' + id) {
+        var tk = tickOf();
+        if (tk) tk.click();
+        return;
+      }
+      var rowEl = document.querySelector('[data-testid="task-item-' + id + '"]');
+      if (rowEl) rowEl.click();
+      if (mid) {
+        // Landing self-heal: a freshly-opened session's virtualizer mounts
+        // with ESTIMATED row heights; the first tick click (scrollToIndex)
+        // can therefore land the viewport off the mounted window \u2014 a blank
+        // conversation (measured live: scrollHeight re-measured 2326\u21925942
+        // only BECAUSE of the jump). So: click only once content rows are
+        // mounted, then VERIFY rows are actually in the viewport; while not,
+        // re-click the tick \u2014 the second scrollToIndex runs against real
+        // measurements and lands correctly. Max 3 clicks, ~12s ceiling.
+        var landed = function() {
+          var ok = false;
+          var vh = window.innerHeight;
+          document.querySelectorAll('[data-row-id]').forEach(function(rr) {
+            var b = rr.getBoundingClientRect();
+            // small margins only \u2014 enough to tell "a row intersects the
+            // viewport" from "landed off the mounted window (\xB1thousands px)"
+            if (b.top < vh - 24 && b.bottom > 24) ok = true;
+          });
+          return ok;
+        };
+        var tries = 0, clicked = 0;
+        var timer = setInterval(function() {
+          tries++;
+          var tk2 = tickOf();
+          var sc = document.querySelector('.zb-chat-col,div[class*="scrollbar-gutter:stable"]');
+          var mounted = sc && sc.querySelector('[data-row-id]');
+          if (!tk2 || !mounted) {
+            if (tries > 24) clearInterval(timer); // strip/content never came
+            return;
+          }
+          if (clicked > 0 && landed()) {
+            // Stay ARMED for ~10s after landing: ZCode's scroll-memory
+            // restore can fire very late (~8s live-measured on a big
+            // session) and clobber the jump with a stale saved position,
+            // re-blanking the viewport. Only leave the loop once the landing
+            // has held past that window. (clicked > 0 \u2014 the jump itself must
+            // happen even when the restore already left content visible.)
+            if (tries >= 20) clearInterval(timer);
+            return;
+          }
+          if (clicked >= 4 || tries > 24) { clearInterval(timer); return; }
+          tk2.click();
+          clicked++;
+        }, 500);
+      }
+    });
+    // Measure invisibly first (the CSS max-height caps it), then place.
+    card.style.visibility = 'hidden';
+    document.documentElement.appendChild(card);
+    zbHoverPlace(card, rc);
+    card.style.visibility = '';
+    zbHoverCur = id;
+    zbHoverFill(card, id, row);
+  }
+  function zbHoverOnKey(e) {
+    if (e.key === 'Escape') { clearTimeout(zbHoverTimer); zbHoverClose(); }
+  }
+  function zbHoverOnDown(e) {
+    var card = zbHoverCardEl();
+    if (card && card.contains(e.target)) return;
+    clearTimeout(zbHoverTimer);
+    zbHoverClose();
+  }
+  function zbHoverOnScroll(e) {
+    var card = zbHoverCardEl();
+    if (card && card.contains(e.target)) return; // scrolling the card's own list
+    if (!zbHoverRowEl) return; // nothing pending/open
+    // A jump keeps the card OPEN; if its anchor row got recycled by the
+    // post-open re-render (detached \u2014 rect all zeros), following it would
+    // fling the card to the viewport corner. A dead anchor closes instead.
+    if (!zbHoverRowEl.isConnected) { zbHoverClose(); return; }
+    // Streaming sessions fire scroll STORMS from scrollers that never
+    // actually move \u2014 measured live: the sidebar list's own overflow layer
+    // emitted 47 scroll events in 12s (scrollTop pinned at 0) while a
+    // session streamed, killing every hover attempt. Only a scroll that
+    // MOVES the anchor matters: while OPEN the card follows the anchor
+    // (native-popper behaviour \u2014 turn ticks scroll with streaming content);
+    // while still PENDING a moved anchor means the user is scrolling, so
+    // the open is cancelled.
+    var rc = zbHoverRowEl.getBoundingClientRect();
+    var moved = Math.abs(rc.top - zbHoverRectTop) >= 2 || Math.abs(rc.left - zbHoverRectLeft) >= 2;
+    if (!moved) return;
+    if (card) {
+      zbHoverPlace(card, rc);
+      zbHoverRectTop = rc.top; zbHoverRectLeft = rc.left;
+      return;
+    }
+    clearTimeout(zbHoverTimer);
+    zbHoverPend = '';
+    zbHoverRowEl = null;
+  }
+  function zbHoverUnbind() {
+    var s = window.__zcodeBeautify;
+    if (s && s.hoverListeners) {
+      document.removeEventListener('mouseover', s.hoverListeners[0], true);
+      document.removeEventListener('mouseout', s.hoverListeners[1], true);
+      document.removeEventListener('keydown', s.hoverListeners[2], true);
+      document.removeEventListener('pointerdown', s.hoverListeners[3], true);
+      document.removeEventListener('scroll', s.hoverListeners[4], true);
+      s.hoverListeners = null;
+    }
+  }
+  function zbHoverClean() {
+    zbHoverUnbind();
+    var s = window.__zcodeBeautify;
+    if (s) s.hoverTeardown = null;
+    var st = document.getElementById(MARKER + '-hover-style');
+    if (st) st.remove();
+    var card = zbHoverCardEl();
+    if (card) card.remove();
+    clearTimeout(zbHoverTimer);
+    clearTimeout(zbHoverCloseTimer);
+    zbHoverCur = '';
+    zbHoverCache = {};
+  }
+  function zbHoverApply(on) {
+    var s = window.__zcodeBeautify;
+    // Generation hand-off (same trap as the grip strips): every evaluation of
+    // this bootstrap \u2014 a fresh injection AND every replay of older
+    // addScriptToEvaluateOnNewDocument registrations after a reload \u2014 carries
+    // its own closure with its own PREVIEW_API. The LAST evaluation to run
+    // must own the hover bindings; an earlier closure left behind would keep
+    // answering hovers with a STALE token (401 forever after a serve
+    // restart). Evict any foreign binding, then (re)bind this closure's.
+    if (s.hoverTeardown && s.hoverTeardown !== zbHoverClean) {
+      try { s.hoverTeardown(); } catch (e) {}
+    }
+    if (!on) { zbHoverClean(); return; }
+    var st = document.getElementById(MARKER + '-hover-style');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = MARKER + '-hover-style';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    // Card paint per the user's reference: a flat, near-black, borderless
+    // panel with a big radius. It still RIDES ZCode's popover tokens (a Monet
+    // re-theme restyles it) but color-mix pulls them 16% toward near-black so
+    // the card stays dark and quiet even under a light theme.
+    // task-row-details is the SIDEBAR rows' own native workspace card \u2014 hide
+    // it only while OUR card answers sidebar hovers (sessionHoverSide=1);
+    // with the side anchor off, the sidebar keeps ZCode's stock hover card.
+    var sideOn = !(window.__zcodeBeautify && window.__zcodeBeautify.hoverSide === 0);
+    st.textContent = ''
+      + (sideOn ? '[data-testid="task-row-details"]{display:none!important}' : '')
+      + '[data-testid^="v4-turn-navigator-tooltip-"]{display:none!important}'
+      + '#' + MARKER + '-hover-card{position:fixed;z-index:60;width:420px;max-width:calc(100vw - 16px);'
+      + 'background:color-mix(in srgb,var(--color-menu,var(--color-popover,#1e1e27)) 84%,#06060a);'
+      + 'color:var(--color-popover-foreground,#e7e7ee);'
+      + 'border-radius:16px;box-shadow:0 14px 40px rgba(0,0,0,.5);'
+      + 'font-size:12.5px;line-height:1.55;padding:12px 0;pointer-events:auto;'
+      + 'animation:' + MARKER + '-hov-in .16s ease-out}'
+      + '@keyframes ' + MARKER + '-hov-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}'
+      + '.' + MARKER + '-hov-list{max-height:min(56vh,470px);overflow-y:auto;padding:2px 20px 4px;position:relative}'
+      + '.' + MARKER + '-hov-list::-webkit-scrollbar{width:8px}'
+      + '.' + MARKER + '-hov-list::-webkit-scrollbar-thumb{background:rgba(127,127,127,.3);border-radius:4px;'
+      + 'border:2px solid transparent;background-clip:content-box}'
+      // Rows face the LIST side, mirroring the reference app (its list sits
+      // on the RIGHT, so its rows hug the card's right edge). ZCode's list is
+      // on the LEFT: rows hug the left \u2014 text flush left with the small gray
+      // dash leading the line, overflowing ones cutting with an ellipsis at
+      // the right end.
+      + '.' + MARKER + '-hov-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;'
+      + 'padding:4px 2px 4px 18px;position:relative;color:var(--color-foreground-subtle,#a4a4b0);'
+      + 'cursor:pointer;transition:color .12s ease-out}'
+      // Hover motion per the reference: no background slab \u2014 the row's text
+      // brightens AND a short underline indicator slides under it (see the
+      // -hover-ind rule below), while the session's CURRENT row keeps a
+      // LONGER permanent underline (the reference's hovered bar is shorter
+      // than the current one's).
+      + '.' + MARKER + '-hov-row:hover{color:var(--color-foreground,#f4f4f8)}'
+      + '.' + MARKER + '-hov-row::before{content:"\u2013";position:absolute;left:0;top:4px;color:rgba(127,127,142,.55)}'
+      + '.' + MARKER + '-hov-last{font-weight:700;color:var(--color-foreground,#f7f7fb)}'
+      + '.' + MARKER + '-hov-last::before{color:rgba(200,200,214,.7)}'
+      // the CURRENT row's long indicator \u2014 full content width
+      + '.' + MARKER + '-hov-last::after{content:"";position:absolute;left:18px;right:2px;bottom:2px;'
+      + 'height:1.5px;background:rgba(200,200,214,.4);border-radius:1px}'
+      // the sliding HOVER indicator \u2014 shorter than the current row's bar,
+      // transitions its top as the pointer crosses rows (the "motion")
+      + '#' + MARKER + '-hover-ind{position:absolute;left:20px;width:78%;height:1.5px;'
+      + 'background:var(--color-foreground,#e9e9f0);border-radius:1px;opacity:0;pointer-events:none;'
+      + 'transition:top .14s ease-out,width .14s ease-out,opacity .12s ease-out}'
+      + '.' + MARKER + '-hov-hint{padding:5px 2px 3px 18px;text-align:left;font-size:11.5px;'
+      + 'color:var(--color-foreground-subtle,#8a8a96)}';
+    // NOTE: deliberately NO prefers-reduced-motion opt-out here. Measured on
+    // the user's machine: the OS ships animations OFF (the media query
+    // matches), and honoring it silently swallowed every motion this card
+    // ships \u2014 the user asked for these effects explicitly. They are tiny
+    // (\u2264160ms fades/slides on a hover overlay), so they stay unconditional.
+    if (s.hoverTeardown === zbHoverClean) return; // this closure already owns the page
+    // CAPTURE phase throughout: ZCode's React root sits between the sidebar
+    // and document and can stopPropagation on bubbled mouseover/mouseout \u2014
+    // capture runs top-down and cannot be cut off by anything below document.
+    document.addEventListener('mouseover', zbHoverOver, true);
+    document.addEventListener('mouseout', zbHoverOut, true);
+    document.addEventListener('keydown', zbHoverOnKey, true);
+    document.addEventListener('pointerdown', zbHoverOnDown, true);
+    document.addEventListener('scroll', zbHoverOnScroll, true);
+    s.hoverTeardown = zbHoverClean;
+    s.hoverListeners = [zbHoverOver, zbHoverOut, zbHoverOnKey, zbHoverOnDown, zbHoverOnScroll];
   }
   // The duration span is a direct child of the loading row (verified in
   // ZCode's bundle: aria-hidden + font-mono next to the zcode-loading-label).
@@ -1128,18 +1634,36 @@ function buildBootstrapScript(payload) {
   function perfApply() {
     var rows = document.querySelectorAll('.history-message, [class~="group/assistant-turn"]');
     if (!rows.length) return;
+    // v2 lifecycle (rebuilt after the 6.2.0 "unrendered stretches" bug):
+    // the old engine only ever ADDED marks \u2014 baked contain-intrinsic-size
+    // went stale on rows that keep growing while skipped, and the (3.18 v4)
+    // virtualizer reads those placeholders as real heights \u2014 the total
+    // height oscillated 8x in one scroll (86762\u219410346 px measured). Now:
+    //   \xB7 NO new marks while a turn is streaming (chat-loading present) and
+    //     the LAST row is never marked (it is where the next turn grows);
+    //   \xB7 rows returning near the viewport are unmarked, so the measurer
+    //     always sees live layout where it looks;
+    //   \xB7 marks only bake heights of STATIC rows (finished content), so the
+    //     placeholder the virtualizer reads stays the truth.
+    var streaming = !!document.querySelector('[data-testid="chat-loading"]');
     var vh = window.innerHeight || 800;
     // First read flushes any pending layout once; the rest read cached values.
     for (var i = 0; i < rows.length; i++) {
       var el = rows[i];
+      if (el.querySelector('[data-testid="chat-loading"]')) continue;
       var r = el.getBoundingClientRect();
       // Well outside the viewport (a full viewport of slack both ways).
       if (r.bottom < -vh || r.top > 2 * vh) {
-        if (el.getAttribute('data-zb-cv') !== '1') {
+        if (!streaming && i < rows.length - 1 && el.getAttribute('data-zb-cv') !== '1') {
           el.setAttribute('data-zb-cv', '1');
           el.style.containIntrinsicSize = Math.round(r.width) + 'px ' + Math.round(r.height) + 'px';
           el.style.contentVisibility = 'auto';
         }
+      } else if (el.getAttribute('data-zb-cv') === '1') {
+        // back near the viewport: drop the marker + placeholder
+        el.style.contentVisibility = '';
+        el.style.containIntrinsicSize = '';
+        el.removeAttribute('data-zb-cv');
       }
     }
   }
@@ -7766,7 +8290,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs15 = __require("fs");
+    var fs16 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -7881,14 +8405,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports.write = function(path15, frames, spec, encoder) {
+    exports.write = function(path16, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path15.match(/\.[a-zA-Z]+$/);
+      const matches = path16.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path15}' has an unexpected suffix`);
+        throw new Error(`GIF '${path16}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path15, gif2.buffer).then(() => {
+        return _writeBinary(path16, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -7960,9 +8484,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path15) {
+    function _readBinary(path16) {
       return new Promise((resolve, reject) => {
-        fs15.readFile(path15, (err, buffer) => {
+        fs16.readFile(path16, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -7970,9 +8494,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path15, buffer) {
+    function _writeBinary(path16, buffer) {
       return new Promise((resolve, reject) => {
-        fs15.writeFile(path15, buffer, (err) => {
+        fs16.writeFile(path16, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -9983,9 +10507,9 @@ var require_decoder = __commonJS({
         return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
       }
       constructor.prototype = {
-        load: function load(path15) {
+        load: function load(path16) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path15, true);
+          xhr.open("GET", path16, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -20888,8 +21412,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -21197,11 +21721,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -25014,8 +25538,8 @@ var init_parseUtil2 = __esm({
     init_errors2();
     init_en2();
     makeIssue2 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -25323,11 +25847,11 @@ var init_types3 = __esm({
     init_parseUtil2();
     init_util2();
     ParseInputLazyPath2 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -29925,8 +30449,8 @@ var init_parseUtil3 = __esm({
     init_errors3();
     init_en3();
     makeIssue3 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -30234,11 +30758,11 @@ var init_types4 = __esm({
     init_parseUtil3();
     init_util3();
     ParseInputLazyPath3 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -34079,8 +34603,8 @@ var init_parseUtil4 = __esm({
     init_errors4();
     init_en4();
     makeIssue4 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -34388,11 +34912,11 @@ var init_types5 = __esm({
     init_parseUtil4();
     init_util4();
     ParseInputLazyPath4 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -38515,11 +39039,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path15) {
-      path15 = String(path15);
-      let last = path15.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path16) {
+      path16 = String(path16);
+      let last = path16.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path15.length;
+      let hasPath = last.length < path16.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -45057,8 +45581,8 @@ function isTokenizerStreamBoundsError(error) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error.stack);
 }
-async function fileTypeFromFile(path15, options) {
-  return new FileTypeParser2(options).fromFile(path15, options);
+async function fileTypeFromFile(path16, options) {
+  return new FileTypeParser2(options).fromFile(path16, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -45089,9 +45613,9 @@ var init_file_type = __esm({
           }
         }
       }
-      async fromFile(path15) {
+      async fromFile(path16) {
         this.options.signal?.throwIfAborted();
-        const fileHandle = await fs3.open(path15, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+        const fileHandle = await fs3.open(path16, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
         const fileStat = await fileHandle.stat();
         if (!fileStat.isFile()) {
           await fileHandle.close();
@@ -45100,7 +45624,7 @@ var init_file_type = __esm({
         const tokenizer = new FileTokenizer(fileHandle, {
           ...this.getTokenizerOptions(),
           fileInfo: {
-            path: path15,
+            path: path16,
             size: fileStat.size
           }
         });
@@ -45435,9 +45959,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path15, options) {
-      const mimeType = import_lite.default.getType(path15);
-      await writeFile(path15, await this.getBuffer(mimeType, options));
+    async write(path16, options) {
+      const mimeType = import_lite.default.getType(path16);
+      await writeFile(path16, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -46086,8 +46610,8 @@ var init_parseUtil5 = __esm({
     init_errors5();
     init_en5();
     makeIssue5 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -46395,11 +46919,11 @@ var init_types6 = __esm({
     init_parseUtil5();
     init_util6();
     ParseInputLazyPath5 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -50844,8 +51368,8 @@ var init_parseUtil6 = __esm({
     init_errors6();
     init_en6();
     makeIssue6 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -51153,11 +51677,11 @@ var init_types7 = __esm({
     init_parseUtil6();
     init_util7();
     ParseInputLazyPath6 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -55011,8 +55535,8 @@ var init_parseUtil7 = __esm({
     init_errors7();
     init_en7();
     makeIssue7 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -55320,11 +55844,11 @@ var init_types8 = __esm({
     init_parseUtil7();
     init_util8();
     ParseInputLazyPath7 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -59305,8 +59829,8 @@ var init_parseUtil8 = __esm({
     init_errors8();
     init_en8();
     makeIssue8 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -59614,11 +60138,11 @@ var init_types9 = __esm({
     init_parseUtil8();
     init_util9();
     ParseInputLazyPath8 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -63467,8 +63991,8 @@ var init_parseUtil9 = __esm({
     init_errors9();
     init_en9();
     makeIssue9 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -63776,11 +64300,11 @@ var init_types10 = __esm({
     init_parseUtil9();
     init_util10();
     ParseInputLazyPath9 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -67666,8 +68190,8 @@ var init_parseUtil10 = __esm({
     init_errors10();
     init_en10();
     makeIssue10 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -67975,11 +68499,11 @@ var init_types11 = __esm({
     init_parseUtil10();
     init_util11();
     ParseInputLazyPath10 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -71817,8 +72341,8 @@ var init_parseUtil11 = __esm({
     init_errors11();
     init_en11();
     makeIssue11 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -72126,11 +72650,11 @@ var init_types12 = __esm({
     init_parseUtil11();
     init_util12();
     ParseInputLazyPath11 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -76203,8 +76727,8 @@ var init_parseUtil12 = __esm({
     init_errors12();
     init_en12();
     makeIssue12 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -76512,11 +77036,11 @@ var init_types13 = __esm({
     init_parseUtil12();
     init_util13();
     ParseInputLazyPath12 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -80373,8 +80897,8 @@ var init_parseUtil13 = __esm({
     init_errors13();
     init_en13();
     makeIssue13 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -80682,11 +81206,11 @@ var init_types14 = __esm({
     init_parseUtil13();
     init_util14();
     ParseInputLazyPath13 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -84700,8 +85224,8 @@ var init_parseUtil14 = __esm({
     init_errors14();
     init_en14();
     makeIssue14 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -85009,11 +85533,11 @@ var init_types16 = __esm({
     init_parseUtil14();
     init_util15();
     ParseInputLazyPath14 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -88977,8 +89501,8 @@ var init_parseUtil15 = __esm({
     init_errors15();
     init_en15();
     makeIssue15 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -89286,11 +89810,11 @@ var init_types17 = __esm({
     init_parseUtil15();
     init_util16();
     ParseInputLazyPath15 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -96027,8 +96551,8 @@ var init_parseUtil16 = __esm({
     init_errors16();
     init_en16();
     makeIssue16 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -96336,11 +96860,11 @@ var init_types18 = __esm({
     init_parseUtil16();
     init_util17();
     ParseInputLazyPath16 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -111703,7 +112227,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.1.4";
+    VERSION = "6.2.0";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -111920,6 +112444,9 @@ function normalizeChatLook(raw) {
   const inset = capOn > 0 ? typeof raw?.widthInsetRem === "number" && Number.isFinite(raw.widthInsetRem) ? Math.max(0, Math.min(24, Math.round(raw.widthInsetRem))) : CHAT_WIDTH_INSET_DEFAULT : 0;
   const dec = raw?.hideElapsedDecimal;
   const drag = raw?.dragResize;
+  const hover = raw?.sessionHover;
+  const hoverSide = raw?.sessionHoverSide;
+  const hoverMax = raw?.sessionHoverMax;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -111930,6 +112457,10 @@ function normalizeChatLook(raw) {
     perfSmooth: raw?.perfSmooth === 1 ? 1 : 0,
     hideElapsedDecimal: dec === 1 || dec === true ? 1 : 0,
     dragResize: drag === 1 || drag === true ? 1 : 0,
+    sessionHover: hover === 1 || hover === true ? 1 : 0,
+    // absent = 1: existing configs predate the side toggle and expect rows on
+    sessionHoverSide: hoverSide === 0 || hoverSide === false ? 0 : 1,
+    sessionHoverMax: typeof hoverMax === "number" && Number.isFinite(hoverMax) && hoverMax >= 1 ? Math.min(60, Math.round(hoverMax)) : 10,
     composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade) ? pct(raw.composerFade) : 50
   };
 }
@@ -112151,7 +112682,10 @@ ${rootSelector} { background: transparent !important; }
     chatLoadLook: chatUi ? chatLoadLook : normalizeChatLoadLook(void 0),
     startupClean: config.startupClean !== false,
     chatUi,
-    startupProbe: app.startupProbe
+    startupProbe: app.startupProbe,
+    // 会话概览悬停卡: only ZCode rows carry session ids, and only when the
+    // toggle is on does the bootstrap need the (token-bearing) endpoint.
+    previewApi: chatUi && normalizeChatLook(config.chatLook).sessionHover === 1 ? tok(`http://127.0.0.1:${config.apiPort ?? target().apiPort}/api/session-preview`) : ""
   };
 }
 async function applyToZCode(config, payload) {
@@ -113918,6 +114452,12 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   // next openWePop.
   var stalePops = document.querySelectorAll('body > .zb-we-pop');
   for (var spi = 0; spi < stalePops.length; spi++) stalePops[spi].remove();
+  // Same for the elapsed-decimal TEST WIDGET row: its interval dies with the
+  // __zbTimers sweep below, but the row itself lives on document.body and
+  // would otherwise linger as a frozen "\u5DE5\u4F5C\u4E2D" ghost.
+  var staleDemo = document.querySelectorAll('[data-zb-elapsed-demo="true"]');
+  for (var sdi = 0; sdi < staleDemo.length; sdi++) staleDemo[sdi].remove();
+  window.__zbElapsedDemo = null;
   // Kill the PREVIOUS panel generation's intervals: every serve restart
   // re-evaluates this script, and old closures kept polling forever with
   // their dead tokens \u2014 each 401 body parsed as data and fought the new
@@ -114545,7 +115085,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u5927\u4F1A\u8BDD\u6D41\u7545\u6A21\u5F0F</span><span class="zb-set-sub">\u6D88\u606F\u884C\u5C4F\u5916\u8DF3\u8FC7\u6E32\u67D3(\u5B98\u65B9\u4EC5\u5206\u4EAB\u89C6\u56FE\u6709\u6B64\u4F18\u5316);\u5927\u4E0A\u4E0B\u6587\u4F1A\u8BDD\u7684\u6253\u5F00\u4E0E\u6EDA\u52A8\u66F4\u7701,\u9996\u6B21\u6E32\u67D3\u53EF\u80FD\u8F7B\u5FAE\u9AD8\u5EA6\u8DF3\u52A8</span></div>' +
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-perf" title="\u7ED9\u6D88\u606F\u884C\u6CE8\u5165 content-visibility:auto:\u89C6\u53E3\u5916\u7684\u884C\u8DF3\u8FC7\u7ED8\u5236\u4E0E\u5E03\u5C40,\u6EDA\u5165\u65F6\u518D\u6E32\u67D3;\u884C\u9AD8\u8BB0\u5FC6\u4E0A\u6B21\u5B9E\u6D4B\u503C,\u4E0D\u5F71\u54CD\u865A\u62DF\u6EDA\u52A8"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u8017\u65F6\u79D2\u6570\u53BB\u5C0F\u6570</span><span class="zb-set-sub">\u5BF9\u8BDD\u4E0B\u65B9"\u5DE5\u4F5C\u4E2D"\u8017\u65F6\u7684\u79D2\u6570\u4E0D\u5E26\u5C0F\u6570\u4F4D(53.4 \u79D2 \u2192 53 \u79D2)</span></div>' +
-      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="\u9690\u85CF\u5BF9\u8BDD\u4E0B\u65B9\u8FD0\u884C\u8017\u65F6\u7684\u79D2\u6570\u5C0F\u6570:\u5B9E\u65F6\u6539\u5199\u6E32\u67D3\u6587\u672C,\u53EA\u4FDD\u7559\u6574\u79D2;\u5173\u95ED\u540E\u6062\u590D\u539F\u751F\u663E\u793A"></label></div>' +
+      '        <div class="zb-ctrl"><label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="\u9690\u85CF\u5BF9\u8BDD\u4E0B\u65B9\u8FD0\u884C\u8017\u65F6\u7684\u79D2\u6570\u5C0F\u6570:\u5B9E\u65F6\u6539\u5199\u6E32\u67D3\u6587\u672C,\u53EA\u4FDD\u7559\u6574\u79D2;\u5173\u95ED\u540E\u6062\u590D\u539F\u751F\u663E\u793A"></label>' +
+      '          <button class="zb-btn" id="zb-chat-elapsed-test" title="\u6D4B\u8BD5\u90E8\u4EF6:\u5728\u5BF9\u8BDD\u533A\u79CD\u4E00\u884C\u4EFF\u771F\u300C\u5DE5\u4F5C\u4E2D\u300D\u8017\u65F6\u884C(\u6BCF\u79D2\u8DF3\u52A8\u3001\u79D2\u6570\u5E26\u5C0F\u6570,\u4EFF 3.18 \u524D\u539F\u751F\u683C\u5F0F)\u3002\u5F00\u7740\u672C\u5F00\u5173\u5C0F\u6570\u4F1A\u88AB\u5B9E\u65F6\u5403\u6389,\u5173\u6389\u5219\u4E0B\u4E2A\u8DF3\u52A8\u6062\u590D\u5C0F\u6570\u2014\u2014\u7528\u4E8E\u76F4\u89C2\u9A8C\u8BC1\u6539\u5199\u94FE\u8DEF;\u518D\u70B9\u4E00\u6B21\u79FB\u9664">\u25B6 \u6D4B\u8BD5</button></div></div>' +
       '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u804A\u5929\u533A\u6697\u5EA6</span><span class="zb-set-sub">\u5BF9\u8BDD\u5217\u80CC\u540E\u7684\u989D\u5916\u538B\u6697,\u6D88\u606F\u6587\u5B57\u6D6E\u5728\u5176\u4E0A\u4E0D\u53D7\u5F71\u54CD</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">\u906E\u7F69\u4E0A\u7AEF</span><span class="zb-set-sub">\u7A97\u53E3\u9876\u90E8\u5411\u4E0B\u6E10\u9690\u906E\u7F69\u7684\u6D53\u5EA6</span></div>' +
@@ -114625,12 +115166,24 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <button class="zb-btn" id="zb-load-clear" title="\u6062\u590D\u65B0\u7248\u539F\u751F\u56FE\u6807">\u2715 \u6062\u590D\u65B0\u7248</button></div></div>' +
     '      <div class="zb-set" id="zb-load-opts" hidden><div class="zb-set-main"><span class="zb-set-name">\u4FDD\u7559\u65CB\u8F6C</span><span class="zb-set-sub">\u9759\u6001\u56FE\u5EFA\u8BAE\u5F00;GIF \u52A8\u56FE\u5EFA\u8BAE\u5173(\u81EA\u5E26\u52A8\u753B)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-load-spin" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u662F\u5426\u52A0\u65CB\u8F6C\u52A8\u753B"></label></div>' +
-    '      <div class="zb-set zb-slide" id="zb-load-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u56FE\u6807\u5927\u5C0F</span><span class="zb-set-sub">\u539F\u751F\u69FD\u4F4D\u7EA6 16px,\u8FC7\u5927\u53EF\u80FD\u6324\u5230"\u5DE5\u4F5C\u4E2D"\u6587\u5B57</span></div>' +
-    '        <input type="range" id="zb-load-size" min="10" max="28" step="1" value="16" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u7684\u663E\u793A\u5C3A\u5BF8(10-28px)"><span class="zb-val"><span id="zb-load-size-val">16</span>px</span></div>' +
-    '      </div>' +
-    '    </div>' +
-    '    </div>' +
-    '    <div id="zb-tab-components" hidden>' +
+      '      <div class="zb-set zb-slide" id="zb-load-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u56FE\u6807\u5927\u5C0F</span><span class="zb-set-sub">\u539F\u751F\u69FD\u4F4D\u7EA6 16px,\u8FC7\u5927\u53EF\u80FD\u6324\u5230"\u5DE5\u4F5C\u4E2D"\u6587\u5B57</span></div>' +
+      '        <input type="range" id="zb-load-size" min="10" max="28" step="1" value="16" title="\u81EA\u5B9A\u4E49\u56FE\u6807\u7684\u663E\u793A\u5C3A\u5BF8(10-28px)"><span class="zb-val"><span id="zb-load-size-val">16</span>px</span></div>' +
+      '      </div>' +
+      '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u4F1A\u8BDD\u6982\u89C8</div>' +
+    '      <div class="zb-card">' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u60AC\u505C\u6982\u89C8\u5361</span><span class="zb-set-sub">\u9F20\u6807\u505C\u5728\u4FA7\u8FB9\u680F\u4F1A\u8BDD\u884C\u3001\u6216\u5BF9\u8BDD\u533A\u5DE6\u7F18\u7684\u63D0\u95EE\u523B\u5EA6\u6761\u4E0A\u7EA6 0.3 \u79D2,\u5F39\u51FA\u8BE5\u4F1A\u8BDD\u7684\u5168\u90E8\u63D0\u95EE\u5217\u8868(\u6700\u65B0\u4E00\u6761\u52A0\u7C97);\u5F00\u542F\u540E\u66FF\u6362\u5B98\u65B9\u7684\u4E24\u5904\u60AC\u505C\u5361</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover" title="\u60AC\u505C\u4FA7\u8FB9\u680F\u4F1A\u8BDD\u884C\u6216\u5BF9\u8BDD\u533A\u5DE6\u4FA7\u63D0\u95EE\u523B\u5EA6(v4-turn-navigator)\u65F6\u5F39\u51FA\u6982\u89C8\u5361:\u5217\u51FA\u8BE5\u4F1A\u8BDD\u4F60\u53D1\u8FC7\u7684\u6BCF\u6761\u63D0\u95EE(\u65E7\u2192\u65B0,\u6700\u65B0\u52A0\u7C97),\u6570\u636E\u6765\u81EA\u672C\u673A ZCode \u4F1A\u8BDD\u5E93;\u5F00\u542F\u671F\u95F4\u9690\u85CF\u5B98\u65B9\u60AC\u505C\u4FE1\u606F\u5361(\u5DE5\u4F5C\u533A\u4FE1\u606F\u5361\u4E0E\u5355\u6761\u63D0\u95EE\u9884\u89C8\u5361),\u5173\u95ED\u5373\u6062\u590D"></label></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u4FA7\u680F\u6807\u9898\u60AC\u505C</span><span class="zb-set-sub">\u5DE6\u4FA7\u4EFB\u52A1\u5217\u8868\u7684\u4F1A\u8BDD\u6807\u9898\u662F\u5426\u5F39\u51FA\u6982\u89C8\u5361;\u5173\u95ED\u540E\u4FA7\u680F\u6062\u590D\u5B98\u65B9\u7684\u5DE5\u4F5C\u533A\u60AC\u505C\u5361,\u5BF9\u8BDD\u533A\u63D0\u95EE\u523B\u5EA6\u6761\u4E0D\u53D7\u5F71\u54CD</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover-side" title="\u662F\u5426\u5728\u5DE6\u4FA7\u4EFB\u52A1\u5217\u8868\u7684\u4F1A\u8BDD\u6807\u9898\u4E0A\u5F39\u51FA\u6982\u89C8\u5361:\u5F00=\u4FA7\u680F\u4F1A\u8BDD\u884C\u60AC\u505C\u5F39\u5361(\u9690\u85CF\u5B98\u65B9\u5DE5\u4F5C\u533A\u4FE1\u606F\u5361),\u5173=\u4FA7\u680F\u6062\u590D\u5B98\u65B9\u60AC\u505C\u5361,\u4EC5\u5BF9\u8BDD\u533A\u63D0\u95EE\u523B\u5EA6\u6761\u5F39\u5361"></label></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6700\u591A\u663E\u793A</span><span class="zb-set-sub">\u6982\u89C8\u5361\u53EA\u5217\u51FA\u6700\u65B0\u7684\u51E0\u6761\u63D0\u95EE(1-60),\u66F4\u65E9\u7684\u4E0D\u663E\u793A;\u6700\u65B0\u4E00\u6761\u52A0\u7C97</span></div>' +
+      '        <div class="zb-ctrl"><input type="number" id="zb-chat-hover-max" min="1" max="60" step="1" title="\u6982\u89C8\u5361\u5217\u51FA\u7684\u63D0\u95EE\u884C\u6570:\u53EA\u663E\u793A\u6700\u65B0\u7684 N \u6761,\u66F4\u65E9\u7684\u4E0D\u8FDB\u5165\u5217\u8868(1-60,\u9ED8\u8BA410)"><span style="opacity:.6">\u6761</span></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6570\u636E\u6765\u6E90</span><span class="zb-set-sub">\u8BFB\u53D6\u672C\u673A ZCode \u4F1A\u8BDD\u5E93(~/.zcode/cli/db),\u4EC5\u5728\u4F60\u60AC\u505C\u65F6\u67E5\u8BE2;\u7F8E\u5316\u670D\u52A1\u672A\u8FD0\u884C\u65F6\u964D\u7EA7\u4E3A\u663E\u793A\u5B8C\u6574\u4F1A\u8BDD\u6807\u9898</span></div></div>' +
+      '      </div>' +
+      '    </div>' +
+      '    </div>' +
+      '    <div id="zb-tab-components" hidden>' +
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">\u7EC4\u4EF6\u7CBE\u4FEE \xB7 WorkBuddy</div>' +
     '      <div class="zb-card">' +
@@ -115053,7 +115606,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       $('zb-blur').value = 0; $('zb-blur-val').textContent = '0';
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
       $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
-      setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0);
+      setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -115101,7 +115654,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0, cl.sessionHover ?? 0, cl.sessionHoverSide ?? 1, cl.sessionHoverMax ?? 10);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
@@ -115290,7 +115843,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf, hov, side, hmax) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
@@ -115303,6 +115856,12 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     if (decEl) decEl.checked = dec === 1;
     var dragEl = $('zb-chat-drag');
     if (dragEl) dragEl.checked = drag === 1;
+    var hovEl = $('zb-chat-hover');
+    if (hovEl) hovEl.checked = hov === 1;
+    var hovSideEl = $('zb-chat-hover-side');
+    if (hovSideEl) hovSideEl.checked = side !== 0;
+    var hovMaxEl = $('zb-chat-hover-max');
+    if (hovMaxEl) hovMaxEl.value = String(hmax && hmax >= 1 ? hmax : 10);
     reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again \u2014 inline
@@ -115339,6 +115898,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           perfSmooth: $('zb-chat-perf') && $('zb-chat-perf').checked ? 1 : 0,
           hideElapsedDecimal: $('zb-chat-elapsed') && $('zb-chat-elapsed').checked ? 1 : 0,
           dragResize: $('zb-chat-drag') && $('zb-chat-drag').checked ? 1 : 0,
+          sessionHover: $('zb-chat-hover') && $('zb-chat-hover').checked ? 1 : 0,
+          sessionHoverSide: $('zb-chat-hover-side') && $('zb-chat-hover-side').checked ? 1 : 0,
+          sessionHoverMax: Math.max(1, Math.min(60, Math.round(Number($('zb-chat-hover-max') && $('zb-chat-hover-max').value) || 10))),
           composerFade: Number($('zb-chat-composer').value) || 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
@@ -115400,6 +115962,10 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   $('zb-chat-perf') && $('zb-chat-perf').addEventListener('change', pushChatLook);
   $('zb-chat-elapsed') && $('zb-chat-elapsed').addEventListener('change', pushChatLook);
   $('zb-chat-drag') && $('zb-chat-drag').addEventListener('change', pushChatLook);
+  $('zb-chat-hover') && $('zb-chat-hover').addEventListener('change', pushChatLook);
+  // \u4F1A\u8BDD\u6982\u89C8\u7684\u4E24\u4E2A\u65B0\u6863\u4F4D: \u4FA7\u680F\u6807\u9898\u662F\u5426\u5F39\u5361(\u5F00\u5173) / \u6700\u591A\u53EF\u89C1\u884C\u6570(\u6570\u5B57,1-60)
+  $('zb-chat-hover-side') && $('zb-chat-hover-side').addEventListener('change', pushChatLook);
+  $('zb-chat-hover-max') && $('zb-chat-hover-max').addEventListener('input', pushChatLook);
   ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
     $(id).addEventListener('change', function () {
       var max = id === 'zb-chat-width-cap' ? 120 : 24;
@@ -118384,6 +118950,113 @@ var init_weLibrary = __esm({
   }
 });
 
+// dist/core/sessionStore.js
+import fs13 from "node:fs";
+import os2 from "node:os";
+import path13 from "node:path";
+function sessionDbPath(homeDir = os2.homedir()) {
+  return path13.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+}
+async function loadSqlite() {
+  if (sqliteMod !== void 0)
+    return sqliteMod;
+  try {
+    sqliteMod = await import("node:sqlite");
+  } catch {
+    sqliteMod = null;
+  }
+  return sqliteMod;
+}
+function isRealUserPrompt(md, pd) {
+  if (md?.role !== "user")
+    return false;
+  if (pd?.type !== "text")
+    return false;
+  if (pd.synthetic === true)
+    return false;
+  const pm = pd.metadata;
+  if (pm && (pm.runtimeMessage || pm.visibility === "model-only" || pm.source === "model"))
+    return false;
+  const mm = md.metadata;
+  if (mm && (mm.runtimeMessage || mm.visibility === "model-only"))
+    return false;
+  return typeof pd.text === "string" && pd.text.trim().length > 0;
+}
+async function readSessionPreview(sessionId, homeDir = os2.homedir()) {
+  if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId))
+    return { ok: false, reason: "bad-id" };
+  const dbPath = sessionDbPath(homeDir);
+  if (!fs13.existsSync(dbPath))
+    return { ok: false, reason: "unavailable" };
+  const sqlite = await loadSqlite();
+  if (!sqlite)
+    return { ok: false, reason: "unavailable" };
+  let db;
+  try {
+    db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+    try {
+      db.exec("PRAGMA busy_timeout = 400");
+    } catch {
+    }
+    const sess = db.prepare("SELECT title, time_updated FROM session WHERE id = ?").get(sessionId);
+    if (!sess)
+      return { ok: false, reason: "not-found" };
+    const rows = db.prepare(`SELECT m.data AS mdata, p.data AS pdata, m.time_created AS at, m.id AS mid
+       FROM message m JOIN part p ON p.message_id = m.id
+       WHERE m.session_id = ?
+         AND m.data LIKE '%"role":"user"%'
+         AND p.data LIKE '%"type":"text"%'
+         AND p.data NOT LIKE '%"synthetic":true%'
+         AND p.data NOT LIKE '%"runtimeMessage"%'
+         AND p.data NOT LIKE '%"visibility":"model-only"%'
+       ORDER BY m.sequence`).all(sessionId);
+    const prompts = [];
+    for (const row of rows) {
+      let md, pd;
+      try {
+        md = JSON.parse(row.mdata);
+        pd = JSON.parse(row.pdata);
+      } catch {
+        continue;
+      }
+      if (!isRealUserPrompt(md, pd))
+        continue;
+      prompts.push({
+        at: Number(pd?.time?.start ?? md?.time?.created ?? row.at ?? 0) || 0,
+        text: String(pd.text).trim().slice(0, MAX_PROMPT_CHARS),
+        mid: typeof row.mid === "string" && /^msg_[A-Za-z0-9_-]{1,120}$/.test(row.mid) ? row.mid : ""
+      });
+    }
+    const omitted = Math.max(0, prompts.length - MAX_PROMPTS);
+    return {
+      ok: true,
+      data: {
+        id: sessionId,
+        title: typeof sess.title === "string" ? sess.title.slice(0, 400) : "",
+        updatedAt: Number(sess.time_updated) || 0,
+        prompts: prompts.slice(-MAX_PROMPTS),
+        omitted
+      }
+    };
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  } finally {
+    try {
+      db?.close();
+    } catch {
+    }
+  }
+}
+var SESSION_ID_RE, MAX_PROMPTS, MAX_PROMPT_CHARS, sqliteMod;
+var init_sessionStore = __esm({
+  "dist/core/sessionStore.js"() {
+    "use strict";
+    SESSION_ID_RE = /^[A-Za-z0-9_-]{6,96}$/;
+    MAX_PROMPTS = 60;
+    MAX_PROMPT_CHARS = 240;
+  }
+});
+
 // dist/core/server.js
 var server_exports = {};
 __export(server_exports, {
@@ -118391,8 +119064,8 @@ __export(server_exports, {
   startServe: () => startServe
 });
 import http from "node:http";
-import fs13 from "node:fs";
-import path13 from "node:path";
+import fs14 from "node:fs";
+import path14 from "node:path";
 import crypto2 from "node:crypto";
 import { execFile as execFile4, spawn as spawn4 } from "node:child_process";
 import { promisify as promisify4 } from "node:util";
@@ -118411,21 +119084,21 @@ async function ffmpegPath() {
   return ffmpegPathCache || void 0;
 }
 function thumbDir() {
-  return path13.join(dataDir(), "thumbs");
+  return path14.join(dataDir(), "thumbs");
 }
 async function themeThumbFor(source) {
   if (!isInsideDataDir(source))
     return source;
-  const thumb = path13.join(thumbDir(), path13.basename(source) + ".jpg");
+  const thumb = path14.join(thumbDir(), path14.basename(source) + ".jpg");
   try {
-    if (!fs13.existsSync(thumb)) {
+    if (!fs14.existsSync(thumb)) {
       const exe = await ffmpegPath();
       if (!exe)
         return source;
-      fs13.mkdirSync(thumbDir(), { recursive: true });
+      fs14.mkdirSync(thumbDir(), { recursive: true });
       await execFileP(exe, ["-y", "-hide_banner", "-loglevel", "error", "-i", source, "-vf", "scale=160:-2", "-frames:v", "1", "-q:v", "4", thumb], { timeout: 2e4 });
     }
-    return fs13.existsSync(thumb) ? thumb : source;
+    return fs14.existsSync(thumb) ? thumb : source;
   } catch {
     return source;
   }
@@ -118441,12 +119114,12 @@ function withPinnedTheme(assets, config) {
 }
 async function getAssets(config) {
   const wallpaperPath = config.wallpaperPath;
-  if (!wallpaperPath || !fs13.existsSync(wallpaperPath))
+  if (!wallpaperPath || !fs14.existsSync(wallpaperPath))
     return void 0;
-  const sourcePath = config.mediaType === "video" ? path13.join(path13.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
-  if (!fs13.existsSync(sourcePath))
+  const sourcePath = config.mediaType === "video" ? path14.join(path14.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
+  if (!fs14.existsSync(sourcePath))
     return void 0;
-  const mtimeMs = fs13.statSync(sourcePath).mtimeMs;
+  const mtimeMs = fs14.statSync(sourcePath).mtimeMs;
   const cached = assetsCache.get(sourcePath);
   if (cached?.mtimeMs === mtimeMs) {
     assetsCache.delete(sourcePath);
@@ -118465,33 +119138,33 @@ function currentConfig() {
   return { ...DEFAULT_CONFIG, ...loadConfig() };
 }
 function backupFile() {
-  return path13.join(dataDir(), "config.backup.json");
+  return path14.join(dataDir(), "config.backup.json");
 }
 function hasBackup() {
-  return fs13.existsSync(backupFile());
+  return fs14.existsSync(backupFile());
 }
 function weImportsFile() {
-  return path13.join(dataDir(), "we-imports.json");
+  return path14.join(dataDir(), "we-imports.json");
 }
 function loadWeImports() {
   try {
-    return JSON.parse(fs13.readFileSync(weImportsFile(), "utf8"));
+    return JSON.parse(fs14.readFileSync(weImportsFile(), "utf8"));
   } catch {
     return {};
   }
 }
 function saveWeImports(map) {
   try {
-    fs13.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
+    fs14.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
   } catch {
   }
 }
 function cachedSceneNames() {
   const names3 = /* @__PURE__ */ new Map();
   try {
-    for (const d of fs13.readdirSync(scenesCacheRoot())) {
+    for (const d of fs14.readdirSync(scenesCacheRoot())) {
       try {
-        const name = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+        const name = JSON.parse(fs14.readFileSync(path14.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
         if (name && !/^[0-9a-f]{8}$/.test(name)) {
           names3.set(name, [...names3.get(name) ?? [], d]);
         }
@@ -118538,10 +119211,10 @@ function readChangelog() {
     return changelogCache;
   let markdown = null;
   try {
-    const here = path13.dirname(fileURLToPath(import.meta.url));
-    for (const dir of [path13.resolve(here, ".."), path13.resolve(here, "..", ".."), process.cwd()]) {
+    const here = path14.dirname(fileURLToPath(import.meta.url));
+    for (const dir of [path14.resolve(here, ".."), path14.resolve(here, "..", ".."), process.cwd()]) {
       try {
-        markdown = fs13.readFileSync(path13.join(dir, "CHANGES.md"), "utf8");
+        markdown = fs14.readFileSync(path14.join(dir, "CHANGES.md"), "utf8");
         break;
       } catch {
       }
@@ -118592,7 +119265,7 @@ function publicConfig(config) {
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
     fit: config.fit,
-    wallpaperSet: Boolean(config.wallpaperPath && fs13.existsSync(config.wallpaperPath)),
+    wallpaperSet: Boolean(config.wallpaperPath && fs14.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
     cdpPort: config.port,
     mediaType: config.mediaType ?? "image",
@@ -118653,6 +119326,9 @@ function sanitize(body) {
       perfSmooth: cl.perfSmooth === 1 || cl.perfSmooth === true ? 1 : 0,
       hideElapsedDecimal: cl.hideElapsedDecimal === 1 || cl.hideElapsedDecimal === true ? 1 : 0,
       dragResize: cl.dragResize === 1 || cl.dragResize === true ? 1 : 0,
+      sessionHover: cl.sessionHover === 1 || cl.sessionHover === true ? 1 : 0,
+      sessionHoverSide: cl.sessionHoverSide === 0 || cl.sessionHoverSide === false ? 0 : 1,
+      sessionHoverMax: typeof cl.sessionHoverMax === "number" && Number.isFinite(cl.sessionHoverMax) && cl.sessionHoverMax >= 1 ? Math.min(60, Math.round(cl.sessionHoverMax)) : 10,
       composerFade: pct(cl.composerFade) ?? 50
     };
   }
@@ -118746,7 +119422,8 @@ async function holdSession(target2, config, apiPort, opts = {}) {
     chatLoadLook: payload.chatLoadLook,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
-    startupProbe: payload.startupProbe
+    startupProbe: payload.startupProbe,
+    previewApi: payload.previewApi
   });
   const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap
@@ -118790,7 +119467,8 @@ async function pushConfigToSessions(config) {
     chatLoadLook: payload.chatLoadLook,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
-    startupProbe: payload.startupProbe
+    startupProbe: payload.startupProbe,
+    previewApi: payload.previewApi
   });
   let ok = 0;
   for (const [id, session] of held) {
@@ -118922,24 +119600,24 @@ function readBody(req) {
 }
 function migrateLegacySpinnerFiles() {
   try {
-    fs13.mkdirSync(spinnerDir(), { recursive: true });
+    fs14.mkdirSync(spinnerDir(), { recursive: true });
     let moved = false;
     for (const ext of [".gif", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".svg"]) {
-      const legacy = path13.join(dataDir(), "spinner" + ext);
-      if (!fs13.existsSync(legacy))
+      const legacy = path14.join(dataDir(), "spinner" + ext);
+      if (!fs14.existsSync(legacy))
         continue;
-      const dest = path13.join(spinnerDir(), "spinner" + ext);
-      fs13.rmSync(dest, { force: true });
-      fs13.renameSync(legacy, dest);
+      const dest = path14.join(spinnerDir(), "spinner" + ext);
+      fs14.rmSync(dest, { force: true });
+      fs14.renameSync(legacy, dest);
       moved = true;
-      console.log(`serve: migrated spinner icon ${path13.basename(legacy)} \u2192 spinner/`);
+      console.log(`serve: migrated spinner icon ${path14.basename(legacy)} \u2192 spinner/`);
     }
     if (!moved)
       return;
     const stored = loadConfig();
     const img = stored.taskSpinnerLook?.image;
-    if (typeof img === "string" && SPINNER_FILE_RE.test(path13.basename(img)) && path13.dirname(path13.resolve(img)).toLowerCase() === path13.resolve(dataDir()).toLowerCase()) {
-      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path13.join(spinnerDir(), path13.basename(img)) };
+    if (typeof img === "string" && SPINNER_FILE_RE.test(path14.basename(img)) && path14.dirname(path14.resolve(img)).toLowerCase() === path14.resolve(dataDir()).toLowerCase()) {
+      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path14.join(spinnerDir(), path14.basename(img)) };
       saveConfig(stored);
     }
   } catch (err) {
@@ -118951,15 +119629,15 @@ async function startServe(opts) {
   const startedAt = Date.now();
   mediaToken = crypto2.randomBytes(24).toString("hex");
   try {
-    fs13.mkdirSync(dataDir(), { recursive: true });
-    fs13.writeFileSync(path13.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
+    fs14.mkdirSync(dataDir(), { recursive: true });
+    fs14.writeFileSync(path14.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
   } catch {
   }
   migrateLegacySpinnerFiles();
-  const historyFile = () => path13.join(dataDir(), "history.json");
+  const historyFile = () => path14.join(dataDir(), "history.json");
   function readHistory() {
     try {
-      return JSON.parse(fs13.readFileSync(historyFile(), "utf8"));
+      return JSON.parse(fs14.readFileSync(historyFile(), "utf8"));
     } catch {
       return [];
     }
@@ -118968,7 +119646,7 @@ async function startServe(opts) {
     try {
       const list = readHistory().filter((e2) => e2.hash !== entry.hash || e2.path !== entry.path);
       list.unshift({ at: Date.now(), ...entry });
-      fs13.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
+      fs14.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
     } catch {
     }
   }
@@ -118980,12 +119658,12 @@ async function startServe(opts) {
   const applyRef = async (ref) => {
     const config = runtimeConfig();
     if (typeof ref.hash === "string") {
-      const loopPath = path13.join(scenesCacheRoot(), ref.hash, "loop.mp4");
-      if (!fs13.existsSync(loopPath))
+      const loopPath = path14.join(scenesCacheRoot(), ref.hash, "loop.mp4");
+      if (!fs14.existsSync(loopPath))
         throw new Error("unknown scene hash");
       let label = ref.hash.slice(0, 8);
       try {
-        label = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
+        label = JSON.parse(fs14.readFileSync(path14.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
       } catch {
       }
       const next = {
@@ -119000,7 +119678,7 @@ async function startServe(opts) {
       recordHistory({ label, kind: "video", hash: ref.hash, thumbUrl: `http://127.0.0.1:${apiPort}/media/poster/${ref.hash}.jpg` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
-    if (typeof ref.path === "string" && fs13.existsSync(ref.path)) {
+    if (typeof ref.path === "string" && fs14.existsSync(ref.path)) {
       const next = {
         ...config,
         wallpaperPath: ref.path,
@@ -119009,7 +119687,7 @@ async function startServe(opts) {
         sceneVideoUrl: void 0
       };
       saveConfig(persisted(next));
-      recordHistory({ label: path13.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path13.basename(ref.path))}` });
+      recordHistory({ label: path14.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path14.basename(ref.path))}` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
     throw new Error("provide hash or existing path");
@@ -119089,16 +119767,16 @@ async function startServe(opts) {
           throw new Error(`image too large (max ${MAX_WALLPAPER_BYTES / 1024 / 1024} MB)`);
         }
         const config = runtimeConfig();
-        fs13.mkdirSync(dataDir(), { recursive: true });
+        fs14.mkdirSync(dataDir(), { recursive: true });
         const ext = IMAGE_EXT[m[1]];
-        const safeBase = (typeof body?.name === "string" ? path13.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
-        let dest = path13.join(dataDir(), safeBase + ext);
-        for (let i2 = 2; fs13.existsSync(dest); i2++) {
-          dest = path13.join(dataDir(), `${safeBase}(${i2})${ext}`);
+        const safeBase = (typeof body?.name === "string" ? path14.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
+        let dest = path14.join(dataDir(), safeBase + ext);
+        for (let i2 = 2; fs14.existsSync(dest); i2++) {
+          dest = path14.join(dataDir(), `${safeBase}(${i2})${ext}`);
         }
-        fs13.writeFileSync(dest, bytes);
+        fs14.writeFileSync(dest, bytes);
         const themeSrc = await themeThumbFor(dest);
-        rememberAssets(themeSrc, fs13.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
+        rememberAssets(themeSrc, fs14.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
         const nextCfg = {
           ...config,
           wallpaperPath: dest,
@@ -119107,7 +119785,7 @@ async function startServe(opts) {
           sceneVideoUrl: void 0
         };
         saveConfig(persisted(nextCfg));
-        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path13.basename(dest))}` });
+        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path14.basename(dest))}` });
         const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
         sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
         return;
@@ -119125,16 +119803,16 @@ async function startServe(opts) {
         }
         const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
         const base = slot === "running" ? "spinner" : "spinner-" + slot;
-        const dest = path13.join(spinnerDir(), base + ext);
-        fs13.mkdirSync(spinnerDir(), { recursive: true });
+        const dest = path14.join(spinnerDir(), base + ext);
+        fs14.mkdirSync(spinnerDir(), { recursive: true });
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
           if (old !== ext)
-            fs13.rmSync(path13.join(spinnerDir(), base + old), { force: true });
+            fs14.rmSync(path14.join(spinnerDir(), base + old), { force: true });
         }
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
-          fs13.rmSync(path13.join(dataDir(), base + old), { force: true });
+          fs14.rmSync(path14.join(dataDir(), base + old), { force: true });
         }
-        fs13.writeFileSync(dest, bytes);
+        fs14.writeFileSync(dest, bytes);
         const config = runtimeConfig();
         if (slot === "loading") {
           const look2 = normalizeChatLoadLook(config.chatLoadLook);
@@ -119162,9 +119840,9 @@ async function startServe(opts) {
       }
       if (req.method === "POST" && url.pathname === "/api/reset") {
         const stored = loadConfig();
-        if (stored.wallpaperPath && fs13.existsSync(stored.wallpaperPath)) {
-          fs13.mkdirSync(dataDir(), { recursive: true });
-          fs13.writeFileSync(backupFile(), JSON.stringify(stored));
+        if (stored.wallpaperPath && fs14.existsSync(stored.wallpaperPath)) {
+          fs14.mkdirSync(dataDir(), { recursive: true });
+          fs14.writeFileSync(backupFile(), JSON.stringify(stored));
         }
         for (const [id, session] of held) {
           try {
@@ -119198,7 +119876,7 @@ async function startServe(opts) {
       if (req.method === "POST" && url.pathname === "/api/restore") {
         let saved;
         try {
-          saved = JSON.parse(fs13.readFileSync(backupFile(), "utf8"));
+          saved = JSON.parse(fs14.readFileSync(backupFile(), "utf8"));
         } catch {
           throw new Error("no wallpaper backup available");
         }
@@ -119256,6 +119934,20 @@ async function startServe(opts) {
         sendJson(res, 200, body);
         return;
       }
+      if (req.method === "GET" && url.pathname === "/api/session-preview") {
+        const session = String(url.searchParams.get("session") ?? "");
+        const result = await readSessionPreview(session);
+        if (result.ok) {
+          sendJson(res, 200, { ok: true, ...result.data });
+        } else if (result.reason === "not-found") {
+          sendJson(res, 404, { ok: false, error: "session not found" });
+        } else if (result.reason === "bad-id") {
+          sendJson(res, 400, { ok: false, error: "bad session id" });
+        } else {
+          sendJson(res, 503, { ok: false, error: "session store unavailable" });
+        }
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/api/changelog") {
         sendJson(res, 200, readChangelog());
         return;
@@ -119288,12 +119980,12 @@ async function startServe(opts) {
           } else {
             const dir = (() => {
               try {
-                return fs13.statSync(scenePath).isDirectory() ? scenePath : path13.dirname(scenePath);
+                return fs14.statSync(scenePath).isDirectory() ? scenePath : path14.dirname(scenePath);
               } catch {
                 return scenePath;
               }
             })();
-            const probe = JSON.parse(fs13.readFileSync(path13.join(dir, "project.json"), "utf8"));
+            const probe = JSON.parse(fs14.readFileSync(path14.join(dir, "project.json"), "utf8"));
             const w = Number(probe?.general?.properties?.width);
             const h = Number(probe?.general?.properties?.height);
             if (w >= 256 && w <= 3840)
@@ -119330,16 +120022,16 @@ async function startServe(opts) {
           let label = result.hash.slice(0, 8);
           let named = false;
           try {
-            label = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
+            label = JSON.parse(fs14.readFileSync(path14.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
             named = true;
           } catch {
           }
           if (!named) {
-            const fallback = weTitleForPath(scenePath) ?? (path13.extname(scenePath) ? path13.basename(scenePath).replace(/\.[^.]+$/, "") : void 0);
+            const fallback = weTitleForPath(scenePath) ?? (path14.extname(scenePath) ? path14.basename(scenePath).replace(/\.[^.]+$/, "") : void 0);
             if (fallback) {
               label = fallback;
               try {
-                fs13.writeFileSync(path13.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
+                fs14.writeFileSync(path14.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
               } catch {
               }
             }
@@ -119391,15 +120083,15 @@ async function startServe(opts) {
       if (req.method === "GET" && url.pathname === "/api/library") {
         let fav = { hashes: [], paths: [] };
         try {
-          fav = JSON.parse(fs13.readFileSync(path13.join(dataDir(), "favorites.json"), "utf8"));
+          fav = JSON.parse(fs14.readFileSync(path14.join(dataDir(), "favorites.json"), "utf8"));
         } catch {
         }
         const images = [];
-        for (const f2 of fs13.readdirSync(dataDir())) {
+        for (const f2 of fs14.readdirSync(dataDir())) {
           if (/\.(jpe?g|png|webp|bmp)$/i.test(f2)) {
             try {
-              const p2 = path13.join(dataDir(), f2);
-              images.push({ name: f2, path: p2, mtimeMs: fs13.statSync(p2).mtimeMs, favorite: fav.paths.includes(path13.resolve(p2)) });
+              const p2 = path14.join(dataDir(), f2);
+              images.push({ name: f2, path: p2, mtimeMs: fs14.statSync(p2).mtimeMs, favorite: fav.paths.includes(path14.resolve(p2)) });
             } catch {
             }
           }
@@ -119412,13 +120104,13 @@ async function startServe(opts) {
         }
         const scenes = [];
         try {
-          for (const d of fs13.readdirSync(scenesCacheRoot())) {
-            const loop = path13.join(scenesCacheRoot(), d, "loop.mp4");
+          for (const d of fs14.readdirSync(scenesCacheRoot())) {
+            const loop = path14.join(scenesCacheRoot(), d, "loop.mp4");
             try {
-              const st = fs13.statSync(loop);
+              const st = fs14.statSync(loop);
               let name;
               try {
-                name = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs14.readFileSync(path14.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               scenes.push({ hash: d, name, sizeBytes: st.size, mtimeMs: st.mtimeMs, favorite: fav.hashes.includes(d) });
@@ -119439,18 +120131,18 @@ async function startServe(opts) {
         if (name.includes("/") || name.includes("\\") || name.includes(".."))
           throw new Error("invalid name");
         if (body?.kind === "scene" && typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
-          const dir = path13.join(scenesCacheRoot(), body.hash);
-          if (!fs13.existsSync(dir))
+          const dir = path14.join(scenesCacheRoot(), body.hash);
+          if (!fs14.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs13.writeFileSync(path13.join(dir, "name.json"), JSON.stringify({ name }));
+          fs14.writeFileSync(path14.join(dir, "name.json"), JSON.stringify({ name }));
           sendJson(res, 200, { ok: true });
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
-          const oldPath = path13.resolve(body.path);
+          const oldPath = path14.resolve(body.path);
           const renamed = renameLibraryImage(oldPath, name);
           const cfg = runtimeConfig();
-          if (cfg.wallpaperPath && path13.resolve(cfg.wallpaperPath) === oldPath) {
+          if (cfg.wallpaperPath && path14.resolve(cfg.wallpaperPath) === oldPath) {
             saveConfig(persisted({ ...cfg, wallpaperPath: renamed }));
           }
           sendJson(res, 200, { ok: true, path: renamed });
@@ -119481,27 +120173,27 @@ async function startServe(opts) {
           if (config.sceneHash === body.hash) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
-          const dir = path13.join(scenesCacheRoot(), body.hash);
-          if (!fs13.existsSync(dir))
+          const dir = path14.join(scenesCacheRoot(), body.hash);
+          if (!fs14.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs13.rmSync(dir, { recursive: true, force: true });
+          fs14.rmSync(dir, { recursive: true, force: true });
           dropFromPlans((e2) => e2.hash === body.hash);
           sendJson(res, 200, { ok: true });
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
-          const target2 = path13.resolve(body.path);
-          if (config.wallpaperPath && path13.resolve(config.wallpaperPath) === target2) {
+          const target2 = path14.resolve(body.path);
+          if (config.wallpaperPath && path14.resolve(config.wallpaperPath) === target2) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
           if (!isInsideDataDir(target2) || !/\.(jpe?g|png|webp|bmp)$/i.test(target2)) {
             throw new Error("only plugin-managed wallpapers can be deleted here");
           }
-          fs13.rmSync(target2, { force: true });
-          const thumb = path13.join(thumbDir(), path13.basename(target2) + ".jpg");
+          fs14.rmSync(target2, { force: true });
+          const thumb = path14.join(thumbDir(), path14.basename(target2) + ".jpg");
           if (isInsideDataDir(thumb))
-            fs13.rmSync(thumb, { force: true });
-          dropFromPlans((e2) => Boolean(e2.path && path13.resolve(e2.path) === target2));
+            fs14.rmSync(thumb, { force: true });
+          dropFromPlans((e2) => Boolean(e2.path && path14.resolve(e2.path) === target2));
           sendJson(res, 200, { ok: true });
           return;
         }
@@ -119569,26 +120261,26 @@ async function startServe(opts) {
         let scenesBytes = 0;
         const entries = [];
         try {
-          for (const d of fs13.readdirSync(scenesCacheRoot())) {
+          for (const d of fs14.readdirSync(scenesCacheRoot())) {
             try {
               let size = 0;
               const walk = (dir) => {
-                for (const f2 of fs13.readdirSync(dir, { withFileTypes: true })) {
-                  const p2 = path13.join(dir, f2.name);
+                for (const f2 of fs14.readdirSync(dir, { withFileTypes: true })) {
+                  const p2 = path14.join(dir, f2.name);
                   if (f2.isDirectory())
                     walk(p2);
                   else {
                     try {
-                      size += fs13.statSync(p2).size;
+                      size += fs14.statSync(p2).size;
                     } catch {
                     }
                   }
                 }
               };
-              walk(path13.join(scenesCacheRoot(), d));
+              walk(path14.join(scenesCacheRoot(), d));
               let name;
               try {
-                name = JSON.parse(fs13.readFileSync(path13.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs14.readFileSync(path14.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               entries.push({ hash: d, name, sizeBytes: size });
@@ -119600,9 +120292,9 @@ async function startServe(opts) {
         }
         let thumbsBytes = 0;
         try {
-          for (const f2 of fs13.readdirSync(thumbDir())) {
+          for (const f2 of fs14.readdirSync(thumbDir())) {
             try {
-              thumbsBytes += fs13.statSync(path13.join(thumbDir(), f2)).size;
+              thumbsBytes += fs14.statSync(path14.join(thumbDir(), f2)).size;
             } catch {
             }
           }
@@ -119620,16 +120312,16 @@ async function startServe(opts) {
         let skipped = 0;
         let savedBytes = 0;
         try {
-          for (const d of fs13.readdirSync(scenesCacheRoot())) {
-            const loop = path13.join(scenesCacheRoot(), d, "loop.mp4");
+          for (const d of fs14.readdirSync(scenesCacheRoot())) {
+            const loop = path14.join(scenesCacheRoot(), d, "loop.mp4");
             try {
-              if (!fs13.statSync(loop).isFile())
+              if (!fs14.statSync(loop).isFile())
                 continue;
               if (config.sceneHash === d) {
                 skipped++;
                 continue;
               }
-              const before = fs13.statSync(loop).size;
+              const before = fs14.statSync(loop).size;
               const tmp = `${loop}.cmp-${process.pid}.mp4`;
               await execFileP(ff, [
                 "-y",
@@ -119655,13 +120347,13 @@ async function startServe(opts) {
                 "-an",
                 tmp
               ], { timeout: 3e5 });
-              const after = fs13.statSync(tmp).size;
+              const after = fs14.statSync(tmp).size;
               if (after > 0 && after < before) {
-                fs13.renameSync(tmp, loop);
+                fs14.renameSync(tmp, loop);
                 done++;
                 savedBytes += before - after;
               } else {
-                fs13.rmSync(tmp, { force: true });
+                fs14.rmSync(tmp, { force: true });
               }
             } catch {
             }
@@ -119675,11 +120367,11 @@ async function startServe(opts) {
         const config = runtimeConfig();
         let removed = 0;
         try {
-          for (const d of fs13.readdirSync(scenesCacheRoot())) {
+          for (const d of fs14.readdirSync(scenesCacheRoot())) {
             if (config.sceneHash === d)
               continue;
             try {
-              fs13.rmSync(path13.join(scenesCacheRoot(), d), { recursive: true, force: true });
+              fs14.rmSync(path14.join(scenesCacheRoot(), d), { recursive: true, force: true });
               removed++;
             } catch {
             }
@@ -119689,7 +120381,7 @@ async function startServe(opts) {
         if (removed) {
           const rot = normalizeRotation(runtimeConfig().rotation);
           for (const plan of rot.plans)
-            plan.entries = plan.entries.filter((e2) => !e2.hash || fs13.existsSync(path13.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
+            plan.entries = plan.entries.filter((e2) => !e2.hash || fs14.existsSync(path14.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
           saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
           if (rot.enabled)
             startRotation(true);
@@ -119726,11 +120418,11 @@ async function startServe(opts) {
         const incoming = body.config;
         const patch = sanitize(incoming);
         const withWp = { ...runtimeConfig(), ...patch };
-        if (typeof incoming.wallpaperPath === "string" && fs13.existsSync(incoming.wallpaperPath)) {
+        if (typeof incoming.wallpaperPath === "string" && fs14.existsSync(incoming.wallpaperPath)) {
           withWp.wallpaperPath = incoming.wallpaperPath;
           withWp.mediaType = incoming.mediaType === "video" ? "video" : "image";
           withWp.sceneHash = typeof incoming.sceneHash === "string" ? incoming.sceneHash : void 0;
-          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs13.existsSync(path13.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
+          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs14.existsSync(path14.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
             withWp.sceneHash = void 0;
             withWp.mediaType = "image";
           }
@@ -119747,7 +120439,7 @@ async function startServe(opts) {
       if (req.method === "POST" && url.pathname === "/api/open-folder") {
         const body = JSON.parse(await readBody(req));
         const target2 = body?.target === "scenes" ? scenesCacheRoot() : body?.target === "thumbs" ? thumbDir() : dataDir();
-        fs13.mkdirSync(target2, { recursive: true });
+        fs14.mkdirSync(target2, { recursive: true });
         spawn4("explorer", [target2], { detached: true, stdio: "ignore" }).unref();
         sendJson(res, 200, { ok: true, path: target2 });
         return;
@@ -119772,10 +120464,10 @@ async function startServe(opts) {
         sendJson(res, 200, { items: top });
         return;
       }
-      const favoritesFile = () => path13.join(dataDir(), "favorites.json");
+      const favoritesFile = () => path14.join(dataDir(), "favorites.json");
       const readFavorites = () => {
         try {
-          return JSON.parse(fs13.readFileSync(favoritesFile(), "utf8"));
+          return JSON.parse(fs14.readFileSync(favoritesFile(), "utf8"));
         } catch {
           return { hashes: [], paths: [] };
         }
@@ -119793,19 +120485,19 @@ async function startServe(opts) {
         if (typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
           toggle(fav.hashes, body.hash, body.on === true);
         } else if (typeof body?.path === "string") {
-          toggle(fav.paths, path13.resolve(body.path), body.on === true);
+          toggle(fav.paths, path14.resolve(body.path), body.on === true);
         } else {
           throw new Error("hash or path required");
         }
-        fs13.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
+        fs14.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
         sendJson(res, 200, { ok: true });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/palette") {
         const config = runtimeConfig();
-        const sourcePath = config.mediaType === "video" && config.sceneHash ? path13.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
+        const sourcePath = config.mediaType === "video" && config.sceneHash ? path14.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
         let colors = [];
-        if (sourcePath && fs13.existsSync(sourcePath)) {
+        if (sourcePath && fs14.existsSync(sourcePath)) {
           try {
             colors = await extractPalette(sourcePath);
           } catch {
@@ -119846,10 +120538,10 @@ async function startServe(opts) {
             type: it.type,
             dir: it.dir,
             importable: it.importable,
-            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs13.existsSync(path13.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
+            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs14.existsSync(path14.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
             source: it.source,
             folder: it.folder ?? null,
-            videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path13.basename(it.videoFile))}` : null,
+            videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path14.basename(it.videoFile))}` : null,
             previewUrl: it.previewName ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}` : null
           }))
         });
@@ -119875,7 +120567,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad scene media path" });
           return;
         }
-        const file = path13.join(scenesCacheRoot(), hash, "loop.mp4");
+        const file = path14.join(scenesCacheRoot(), hash, "loop.mp4");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "scene media not found" });
         }
@@ -119887,7 +120579,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad poster path" });
           return;
         }
-        const file = path13.join(scenesCacheRoot(), hash, "poster.jpg");
+        const file = path14.join(scenesCacheRoot(), hash, "poster.jpg");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "poster not found" });
         }
@@ -119899,7 +120591,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad library media path" });
           return;
         }
-        const file = path13.join(dataDir(), name);
+        const file = path14.join(dataDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "library media not found" });
         }
@@ -119911,7 +120603,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad spinner media path" });
           return;
         }
-        const file = path13.join(spinnerDir(), name);
+        const file = path14.join(spinnerDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "spinner media not found" });
         }
@@ -120136,7 +120828,7 @@ function validPlanEntries(mode, raw) {
     if (!e2 || typeof e2 !== "object")
       continue;
     const { seconds, time, hash, path: imgPath } = e2;
-    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs13.existsSync(path13.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs13.existsSync(imgPath) ? { path: imgPath } : void 0;
+    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs14.existsSync(path14.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs14.existsSync(imgPath) ? { path: imgPath } : void 0;
     if (!ref)
       continue;
     if (mode === "schedule") {
@@ -120218,28 +120910,28 @@ function renameLibraryImage(oldPath, name) {
   if (!isInsideDataDir(oldPath) || !/\.(jpe?g|png|webp|bmp)$/i.test(oldPath)) {
     throw new Error("only plugin-managed wallpapers can be renamed here");
   }
-  const ext = path13.extname(oldPath);
+  const ext = path14.extname(oldPath);
   const safe = name.replace(/[\/:*?"<>|]/g, "").trim() || "wallpaper";
-  let newPath = path13.join(path13.dirname(oldPath), safe + ext);
-  if (path13.resolve(newPath) !== path13.resolve(oldPath)) {
-    if (newPath.toLowerCase() !== path13.resolve(oldPath).toLowerCase()) {
-      for (let i2 = 2; fs13.existsSync(newPath); i2++) {
-        newPath = path13.join(path13.dirname(oldPath), `${safe}(${i2})${ext}`);
+  let newPath = path14.join(path14.dirname(oldPath), safe + ext);
+  if (path14.resolve(newPath) !== path14.resolve(oldPath)) {
+    if (newPath.toLowerCase() !== path14.resolve(oldPath).toLowerCase()) {
+      for (let i2 = 2; fs14.existsSync(newPath); i2++) {
+        newPath = path14.join(path14.dirname(oldPath), `${safe}(${i2})${ext}`);
       }
     }
-    fs13.renameSync(oldPath, newPath);
+    fs14.renameSync(oldPath, newPath);
   }
-  const oldThumb = path13.join(thumbDir(), path13.basename(oldPath) + ".jpg");
-  if (fs13.existsSync(oldThumb)) {
+  const oldThumb = path14.join(thumbDir(), path14.basename(oldPath) + ".jpg");
+  if (fs14.existsSync(oldThumb)) {
     try {
-      fs13.renameSync(oldThumb, path13.join(thumbDir(), path13.basename(newPath) + ".jpg"));
+      fs14.renameSync(oldThumb, path14.join(thumbDir(), path14.basename(newPath) + ".jpg"));
     } catch {
     }
   }
   return newPath;
 }
 function isInsideDataDir(target2) {
-  const rel = path13.relative(path13.resolve(dataDir()), path13.resolve(target2));
+  const rel = path14.relative(path14.resolve(dataDir()), path14.resolve(target2));
   return rel !== "" && !rel.startsWith("..");
 }
 var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, assetsCache, ffmpegPathCache, updateCheckCache, changelogCache, importJob, held, scrubbedUpdaters, mediaToken, IMAGE_EXT, spinnerDir, SPINNER_FILE_RE;
@@ -120261,6 +120953,7 @@ var init_server = __esm({
     init_dependencyCheck();
     init_exec();
     init_cacheManager();
+    init_sessionStore();
     MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
     MAX_BODY_BYTES = MAX_WALLPAPER_BYTES + 1024 * 1024;
     POLL_MS = 1500;
@@ -120278,7 +120971,7 @@ var init_server = __esm({
       "image/gif": ".gif",
       "image/bmp": ".bmp"
     };
-    spinnerDir = () => path13.join(dataDir(), "spinner");
+    spinnerDir = () => path14.join(dataDir(), "spinner");
     SPINNER_FILE_RE = /^spinner\.(gif|png|webp|jpe?g|bmp|svg)$/i;
   }
 });
@@ -120288,8 +120981,8 @@ init_inject();
 init_launch();
 init_session();
 init_target();
-import fs14 from "node:fs";
-import path14 from "node:path";
+import fs15 from "node:fs";
+import path15 from "node:path";
 var USAGE = `zcode-beautify <command> [options]
 
 Global:
@@ -120551,12 +121244,12 @@ async function startServeDetached(cdpPort, apiPort) {
   if (already !== void 0) {
     throw new Error(`a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) \u2014 open its panel, or stop that process first`);
   }
-  fs14.mkdirSync(dataDir(), { recursive: true });
-  const logFile = path14.join(dataDir(), "serve.log");
-  const out = fs14.openSync(logFile, "a");
+  fs15.mkdirSync(dataDir(), { recursive: true });
+  const logFile = path15.join(dataDir(), "serve.log");
+  const out = fs15.openSync(logFile, "a");
   const child = spawn5(process.execPath, [process.argv[1], "serve", "--port", String(cdpPort), "--api-port", String(apiPort)], { detached: true, stdio: ["ignore", out, out], windowsHide: true });
   child.unref();
-  fs14.closeSync(out);
+  fs15.closeSync(out);
   for (let i2 = 0; i2 < 20; i2++) {
     await new Promise((r2) => setTimeout(r2, 500));
     try {

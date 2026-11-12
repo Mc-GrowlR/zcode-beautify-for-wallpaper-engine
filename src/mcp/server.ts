@@ -12,8 +12,10 @@ import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, re
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { ensureExperimentalGate, experimentalEnabled, loadConfig } from "../core/launch.js";
 import { target } from "../core/target.js";
-import { DEFAULT_CONFIG, type BubbleLookConfig, type ChatLoadLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
+import { DEFAULT_CONFIG, type ChatLoadLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
 import { spawnServeDetached } from "../core/experimental.js";
+import { BUBBLE_STUDIO_URI, bubbleLookPatchFromTool, bubbleStudioResultMeta, bubbleStudioState, deleteBubbleRecipe, saveBubbleRecipe } from "../core/bubbleStudio.js";
+import { bubbleStudioHtml } from "./bubbleStudioHtml.js";
 import { VERSION } from "../version.js";
 
 // The plugin host launches MCP servers with the beautify data dir pointed at a
@@ -136,6 +138,9 @@ export const TOOL_NAMES = [
   "set_background",
   "import_scene_wallpaper",
   "apply_options",
+  "bubble_studio_state",
+  "save_bubble_recipe",
+  "delete_bubble_recipe",
   "refresh_theme",
   "reset_appearance",
   "beautify_status",
@@ -143,6 +148,25 @@ export const TOOL_NAMES = [
   "disable_experimental",
   "repair_launchers",
 ] as const;
+
+/**
+ * The Bubble Studio page (气泡工坊) as an MCP Apps resource: hosts with UI
+ * support (ZCode 3.16+) render it in a sandboxed page after a bubble tool
+ * result references it via `_meta.ui`; plain hosts never read it. Built from
+ * a function so the recipe CSS is baked fresh on every read.
+ */
+server.registerResource(
+  "bubble-studio",
+  BUBBLE_STUDIO_URI,
+  {
+    title: "气泡工坊 (Bubble Studio)",
+    description: "Interactive gallery of chat-bubble recipes: preview, try on, fine-tune and save bubble looks.",
+    mimeType: "text/html;profile=mcp-app",
+  },
+  async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: "text/html;profile=mcp-app", text: bubbleStudioHtml() }],
+  }),
+);
 
 server.registerTool(
   "set_background",
@@ -234,7 +258,7 @@ server.registerTool(
   {
     title: "Tune ZCode appearance",
     description:
-      "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, sidebar-only extra darkening (侧边栏压暗), Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), the user chat bubble look, and the sidebar session running-indicator icon (运行中图标). Only the provided values change; the rest keep their current setting.",
+      "Adjust the live ZCode appearance without changing the wallpaper: blur radius, dim level, sidebar-only extra darkening (侧边栏压暗), Monet dynamic colors on/off, wallpaper visibility (translucent vs opaque surfaces), the user chat bubble look, and the sidebar session running-indicator icon (运行中图标). Only the provided values change; the rest keep their current setting. When `bubble` is set, ZCode 3.16+ additionally opens the interactive Bubble Studio gallery (气泡工坊) where the user can preview every recipe, fine-tune tint/radius/width/alignment/custom CSS and save their own.",
     inputSchema: {
       blur: z.number().min(0).max(100).optional().describe("Wallpaper blur radius in px"),
       dim: z.number().min(0).max(100).optional().describe("Wallpaper darkening 0-100"),
@@ -262,6 +286,9 @@ server.registerTool(
       chat_width_inset_rem: z.number().min(0).max(24).optional().describe("Side inset in rem for the column width formula at the wide tier (stock 24; smaller = wider; default 12 when a cap is set). Only meaningful with chat_width_cap_rem > 0"),
       chat_hide_elapsed_decimal: z.boolean().optional().describe("Hide the decimal in the running elapsed time under the conversation (耗时秒数去小数): true rewrites the live working-row seconds from \"53.4 秒\" to \"53 秒\"; false restores stock"),
       chat_drag_resize: z.boolean().optional().describe("Drag handles on both edges of the conversation column (两侧拖拽调宽): true mounts two hidden vertical strips — hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips"),
+      chat_session_hover: z.boolean().optional().describe("会话概览悬停卡: true shows a preview card when the mouse rests on a sidebar session row, listing that conversation's real user prompts (oldest → newest, newest bold, served from ZCode's local session db by the beautify daemon; ZCode's own workspace hover card is hidden while on); false restores stock"),
+      chat_session_hover_side: z.boolean().optional().describe("侧栏标题悬停: whether the LEFT task-list session rows trigger the 会话概览 hover card (true, default); false = only the conversation's turn ticks (对话概要标示) open it and the sidebar keeps ZCode's own workspace hover card. Only meaningful with chat_session_hover on"),
+      chat_session_hover_max: z.number().min(1).max(60).optional().describe("会话概览卡最多显示几条提问 (1-60, default 10): the card grows up to this many visible rows; excess prompts live in the card's scrollable list (auto-landed on the newest). Only meaningful with chat_session_hover on"),
       chat_composer_fade: z.number().min(0).max(100).optional().describe("输入框透明度: 0 = stock composer background, 1-100 fades the chat input box's paint toward transparent so the wallpaper shows through (text and border untouched)"),
       chat_loading_icon: z.object({
         mode: z.enum(["default", "classic", "image"]).optional().describe("会话底部加载图标: default = ZCode 3.18's stock brand-colored orbit glyph, classic = the pre-3.18 3×3 pixel-wave dots, image = a user picture/GIF"),
@@ -271,16 +298,14 @@ server.registerTool(
       }).optional().describe("Conversation-footer loading icon look; omitted fields keep their current value"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_composer_fade, chat_loading_icon }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon }) => {
     try {
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       // Send only the fields the caller provided: the session layer merges
       // this partial over the stored look, so one-field tweaks don't reset
-      // the rest.
-      const bubbleLook =
-        bubble === undefined
-          ? undefined
-          : (Object.fromEntries(Object.entries(bubble).filter(([, v]) => v !== undefined)) as Partial<BubbleLookConfig>);
+      // the rest. bubbleLookPatchFromTool also maps custom_css → customCss
+      // (a raw passthrough stored a dead snake_case key nothing read).
+      const bubbleLook = bubble === undefined ? undefined : bubbleLookPatchFromTool(bubble as Record<string, unknown>);
       const taskSpinnerLook =
         spinner === undefined
           ? undefined
@@ -290,13 +315,16 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]),
             ) as Partial<TaskSpinnerLookConfig>);
       const chatLook: Partial<ChatLookConfig> | undefined =
-        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined && chat_composer_fade === undefined
+        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined && chat_composer_fade === undefined && chat_session_hover === undefined && chat_session_hover_side === undefined && chat_session_hover_max === undefined
           ? undefined
           : {
               ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
               ...(chat_width_inset_rem !== undefined ? { widthInsetRem: chat_width_inset_rem } : {}),
               ...(chat_hide_elapsed_decimal !== undefined ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {}),
               ...(chat_drag_resize !== undefined ? { dragResize: chat_drag_resize ? 1 : 0 } : {}),
+              ...(chat_session_hover !== undefined ? { sessionHover: chat_session_hover ? 1 : 0 } : {}),
+              ...(chat_session_hover_side !== undefined ? { sessionHoverSide: chat_session_hover_side ? 1 : 0 } : {}),
+              ...(chat_session_hover_max !== undefined ? { sessionHoverMax: chat_session_hover_max } : {}),
               ...(chat_composer_fade !== undefined ? { composerFade: chat_composer_fade } : {}),
             };
       const chatLoadLook =
@@ -308,7 +336,77 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k, v]),
             ) as Partial<ChatLoadLookConfig>);
       const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook });
-      return { content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }] };
+      // Bubble changes surface the interactive Bubble Studio gallery (MCP
+      // Apps hosts render it; plain hosts just show the text card below).
+      return {
+        content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }],
+        ...(bubble !== undefined ? { _meta: bubbleStudioResultMeta() } : {}),
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "bubble_studio_state",
+  {
+    title: "Bubble Studio state",
+    description:
+      "Snapshot for the Bubble Studio gallery (气泡工坊): the currently applied bubble look, its matching recipe id, the built-in presets and the user's saved recipes. Primarily consumed by the studio page; harmless to call directly.",
+    inputSchema: {},
+  },
+  async () => {
+    const state = bubbleStudioState();
+    return { content: [{ type: "text", text: JSON.stringify(state) }] };
+  }
+);
+
+server.registerTool(
+  "save_bubble_recipe",
+  {
+    title: "Save bubble recipe",
+    description:
+      'Save a chat-bubble look as a named recipe for the Bubble Studio gallery (气泡工坊). With `look` omitted it saves the currently applied look ("save what is live now"). Sending an existing saved recipe `id` updates it in place. Opens the studio gallery on UI-capable hosts (ZCode 3.16+).',
+    inputSchema: {
+      name: z.string().min(1).max(40).optional().describe("Recipe display name (defaults to 气泡配方)"),
+      id: z.string().optional().describe("Id of an existing saved recipe to update; omit to create a new one"),
+      look: z.object({
+        preset: z.enum(["default", "accent", "glass", "outline", "flat", "custom"]).optional(),
+        tint: z.number().min(0).max(100).optional(),
+        radius: z.number().min(4).max(24).optional(),
+        width: z.number().min(40).max(90).optional(),
+        align: z.enum(["right", "left"]).optional(),
+        custom_css: z.string().max(8000).optional(),
+      }).optional().describe("The look to store; defaults to the currently applied bubble look"),
+    },
+  },
+  async ({ name, id, look }) => {
+    try {
+      const recipe = saveBubbleRecipe({ name, id, look });
+      return {
+        content: [{ type: "text", text: JSON.stringify({ saved: true, recipe }) }],
+        _meta: bubbleStudioResultMeta(),
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };
+    }
+  }
+);
+
+server.registerTool(
+  "delete_bubble_recipe",
+  {
+    title: "Delete bubble recipe",
+    description: "Delete a saved Bubble Studio recipe by id. Built-in presets cannot be deleted.",
+    inputSchema: {
+      id: z.string().describe("Id of the saved recipe (from bubble_studio_state)"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      deleteBubbleRecipe(id);
+      return { content: [{ type: "text", text: JSON.stringify({ deleted: true, id }) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Failed: ${(err as Error).message}` }], isError: true };
     }

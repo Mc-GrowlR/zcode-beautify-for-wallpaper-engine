@@ -23,6 +23,7 @@
 ### 聊天区美化
 
 - **聊天气泡**——你发出的消息气泡五种预设（`accent` 主题色染色、`glass` 毛玻璃、`outline` 描边、`flat` 扁平、`default` 原生），加上染色强度、圆角、宽度、左右对齐滑杆，气泡样式编辑器与个人样式库，以及自定义 CSS 支持。颜色全部引用实时主题 token，莫奈换主题时气泡自动跟随。
+- **气泡工坊**（Bubble Studio，ZCode 3.16+）——基于 ZCode MCP Apps 的交互画廊页：智能体改气泡样式后，工具结果直接在对话内展开工坊页，所有配方并排预览；点卡片即可"试穿"（真实聊天区即时换装），滑杆微调染色 / 圆角 / 宽度 / 对齐 / 自定义 CSS，还能保存自己的命名配方（存于 `bubble-recipes.json`，上限 50 个）。侧栏也有常驻入口；不支持 UI 插件的旧宿主自动回落为普通文字卡。
 - **消息流宽度**——加宽或收窄对话列：原生 / 宽档位 / 三档窄宽度 / 完全自定义（rem 上限 + 留白）。注入的是**公式**（rem 上限 + `calc()` 留白）而非定值宽度，随窗口缩放与原生同机制跟随，永不溢出、不破坏输入栏。
 - **两侧拖拽调宽**（默认关）——对话列左右边缘的隐形竖条：悬停浮现 3px 主题色竖线，拖动对称加宽/收窄对话列（DeepSeek 式交互），双击竖条恢复档位设置，Esc 取消本次拖动。拖拽宽度存本地、优先于档位；未拖拽时布局与原生逐像素一致。
 - **大会话流畅模式**（默认关）——对远屏外的消息行先量真实高度再跳过布局与绘制（`content-visibility:auto` + 精确 `contain-intrinsic-size`）。51MB 会话实测打开耗时 **-41%**、滚动条零失真；长会话滚动更顺。
@@ -35,7 +36,7 @@
 - **实时设置面板**——ZCode 窗口内可拖拽的悬浮面板，三个标签页：**壁纸**（分组壁纸库、带进度与依赖引导的导入、当前外观）、**定时播放**（播放方案）、**设置**——blur/dim 滑块、取景模式、Monet 与壁纸透显开关、聊天界面遮罩（整体压暗 / 渐变蒙版 / 白纱）、昼夜护眼、录制分辨率、配置导出/导入、最近使用记录、一键还原。所有调整即时预览并自动保存。
 - **零操作服务**——MCP server 在 ZCode 启动时自动拉起后台 serve，面板无需手动启动，开箱即有。
 - **启动项自修复**——`serve` 运行期间，所有 ZCode 启动项（桌面 / 开始菜单 / 任务栏快捷方式——含 OneDrive 重定向目录——以及 `zcode://` 协议处理器、资源管理器右键菜单）自动保持携带 `--remote-debugging-port`，主题因此能在 ZCode 重启甚至更新器重建快捷方式后依然存活；`repair-launchers` 可随时按需扫描修复并输出结构化报告（机器级条目只报告不修改）。主题本身在渲染器刷新后自动恢复，上次外观还会缓存到 `localStorage` 作为兜底。
-- **对话控制**——内置斜杠命令 `/beautify` 与 `/bubble`，加上 MCP 工具（`set_background`、`import_scene_wallpaper`、`apply_options`、`repair_launchers` 等），让 ZCode 智能体代你设壁纸、调主题，或用一句自然语言改气泡样式。
+- **对话控制**——内置斜杠命令 `/beautify` 与 `/bubble`，加上 MCP 工具（`set_background`、`import_scene_wallpaper`、`apply_options`、`repair_launchers` 等），让 ZCode 智能体代你设壁纸、调主题，或用一句自然语言改气泡样式；改气泡还会在 ZCode 3.16+ 对话内打开气泡工坊交互画廊。
 
 ## 原理
 
@@ -186,7 +187,10 @@ set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbud
 |---|---|
 | `set_background` | 设壁纸（图片或场景）+ 莫奈配色 |
 | `import_scene_wallpaper` | 端到端导入 WE 场景 / 视频壁纸 |
-| `apply_options` | 不重传图片，单独调 blur/dim/monet/透显/取景、消息流宽度、气泡样式 |
+| `apply_options` | 不重传图片，单独调 blur/dim/monet/透显/取景、消息流宽度、气泡样式；改气泡时会在 ZCode 3.16+ 打开气泡工坊画廊 |
+| `bubble_studio_state` | 气泡工坊页面数据源：当前样式、匹配配方 id、内置预设、已保存配方 |
+| `save_bubble_recipe` | 保存（或更新）命名气泡配方——缺省保存当前生效样式 |
+| `delete_bubble_recipe` | 按 id 删除已保存配方（内置预设受保护） |
 | `refresh_theme` | 重启后重注入已存主题 |
 | `reset_appearance` | 移除壁纸与覆盖，还原默认 |
 | `beautify_status` | 查看已存配置 |
