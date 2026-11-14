@@ -317,6 +317,7 @@ var cdp_exports = {};
 __export(cdp_exports, {
   CdpConnection: () => CdpConnection,
   CdpError: () => CdpError,
+  LIST_PAGING_VER: () => LIST_PAGING_VER,
   buildBootstrapScript: () => buildBootstrapScript,
   buildResetScript: () => buildResetScript,
   injectIntoTarget: () => injectIntoTarget,
@@ -418,6 +419,19 @@ function buildBootstrapScript(payload) {
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
+  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse} \u2014 initial 0
+  // = the stock 5/+5 paging with no collapse control.
+  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0 }))};
+  // Generation stamp: the BUILD version of the paging engine. Older
+  // generations (their addScriptToEvaluateOnNewDocument registrations outlive
+  // the serve restart that shipped fixed code) leave identical css/chat/list
+  // keys \u2014 without the stamp the newer eval would early-return on the
+  // identity check and the OLD machinery (buggy scan, stale closures) would
+  // keep running. A plain eval-instance marker would be wrong: every
+  // Runtime.evaluate creates fresh closures, so same-build pushes would
+  // always full-apply and replay the wallpaper transition. Bump
+  // LIST_PAGING_VER whenever the paging code below changes.
+  var LIST_VER = ${JSON.stringify(LIST_PAGING_VER)};
   // Bubble recipe tables must be initialized HERE, before the fast paths run:
   // applyBubbleLook() is reachable from the volume fast path at the top of
   // this function body, and var initializers down below would still be
@@ -455,7 +469,8 @@ function buildBootstrapScript(payload) {
   if (VIDEO_SRC && VOL !== (window.__zcodeBeautify.vol ?? 0)
       && window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
       && window.__zcodeBeautify.videoSrc === VIDEO_SRC
-      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}) {
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.listStamp === LIST_VER) {
     var liveVid = document.getElementById(MARKER + '-video');
     if (liveVid) {
       liveVid.muted = VOL === 0;
@@ -478,6 +493,11 @@ function buildBootstrapScript(payload) {
     if (window.__zcodeBeautify.loadKey !== LOAD) {
       window.__zcodeBeautify.loadKey = LOAD;
       applyLoadLook();
+    }
+    if (window.__zcodeBeautify.listKey !== LIST) {
+      window.__zcodeBeautify.listKey = LIST;
+      window.__zcodeBeautify.listStamp = LIST_VER;
+      applyListPaging();
     }
     return;
   }
@@ -556,13 +576,33 @@ function buildBootstrapScript(payload) {
     if (loadOnly) return;
   }
 
+  // List-paging fast path (\u4F1A\u8BDD\u5217\u8868\u5206\u9875): the paging state machine lives in
+  // its own observer + per-container attrs, so re-counting rows must not
+  // replay the wallpaper transition either.
+  if (window.__zcodeBeautify.listKey !== LIST) {
+    var listOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
+      && window.__zcodeBeautify.videoSrc === VIDEO_SRC
+      && window.__zcodeBeautify.wpImg === WP_IMG
+      && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))}
+      && window.__zcodeBeautify.vol === VOL
+      && window.__zcodeBeautify.chatKey === CHAT
+      && window.__zcodeBeautify.bubbleKey === BUBBLE
+      && window.__zcodeBeautify.spinnerKey === SPIN
+      && window.__zcodeBeautify.loadKey === LOAD
+      && document.getElementById(MARKER + '-style');
+    window.__zcodeBeautify.listKey = LIST;
+    window.__zcodeBeautify.listStamp = LIST_VER;
+    applyListPaging();
+    if (listOnly) return;
+  }
+
   // State alone is not proof the DOM work succeeded: an earlier run may have
   // died halfway (e.g. aborted mid-transition) leaving state set but no style
   // element \u2014 without the element check every later injection would silently
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && PREV_API === PREVIEW_API && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && window.__zcodeBeautify.listKey === LIST && window.__zcodeBeautify.listStamp === LIST_VER && PREV_API === PREVIEW_API && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -840,6 +880,9 @@ function buildBootstrapScript(payload) {
   applySpinnerLook();
   window.__zcodeBeautify.loadKey = LOAD;
   applyLoadLook();
+  window.__zcodeBeautify.listKey = LIST;
+  window.__zcodeBeautify.listStamp = LIST_VER;
+  applyListPaging();
 
   function applyChatLook() {
     if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
@@ -2206,6 +2249,244 @@ function buildBootstrapScript(payload) {
     }
   }
 
+  // --- \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging) ------------------------------------
+  // ZCode's ProjectTaskRows hardcodes the project card's session list to
+  // "first 5 rows, +5 per \u663E\u793A\u66F4\u591A click" with no way back. This re-implements
+  // the paging on top of React's own list instead of patching it: rows beyond
+  // the wanted count get an inline display:none, extra rows are render-ahead
+  // by CLICKING the native \u663E\u793A\u66F4\u591A button (the limit lives in React state \u2014
+  // clicking is the only sanctioned way to move it), and an optional \u6536\u8D77
+  // control snaps the visible window back to the initial count. The whole
+  // machine is idempotent and re-runs from a childList-only MutationObserver,
+  // so React rebuilds (mount, limit growth, row swaps) re-converge on their
+  // own. Scope: containers under [data-testid="virtual-project-tasks"] only \u2014
+  // the pinned / timeline / unread sections keep their stock behaviour.
+  function zbListRows(container) {
+    var out = [];
+    var kids = container.children;
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      // Row wrappers are plain divs; our toolbar div carries the marker attr
+      // and the empty state ("\u8FD8\u6CA1\u6709\u4F1A\u8BDD") is never a paged row.
+      if (k.tagName === 'DIV' && !k.hasAttribute('data-zb-list-bar') && k.getAttribute('data-testid') !== 'project-no-tasks') out.push(k);
+    }
+    return out;
+  }
+
+  function zbListClean() {
+    if (window.__zcodeBeautify.listObs) {
+      try { window.__zcodeBeautify.listObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.listObs = null;
+    }
+    var st = document.getElementById(MARKER + '-list-style');
+    if (st) st.remove();
+    var hosts = document.querySelectorAll('[data-testid="virtual-project-tasks"]');
+    for (var i = 0; i < hosts.length; i++) {
+      var bars = hosts[i].querySelectorAll('[data-zb-list-bar]');
+      for (var b = 0; b < bars.length; b++) bars[b].remove();
+      var lists = hosts[i].querySelectorAll('[data-zb-paging]');
+      for (var l = 0; l < lists.length; l++) {
+        lists[l].removeAttribute('data-zb-paging');
+        var rows = lists[l].children;
+        for (var r = 0; r < rows.length; r++) {
+          if (rows[r].style && rows[r].style.display === 'none') rows[r].style.display = '';
+        }
+      }
+    }
+  }
+
+  function applyListPaging() {
+    if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
+    var L;
+    try { L = JSON.parse(LIST); } catch (e) { return; }
+    var init = Math.max(0, Math.round(Number(L && L.initial) || 0));
+    if (init <= 0) { zbListClean(); return; }
+    // Publish to SLOTS, never to closures: the observer created by an earlier
+    // generation keeps firing this generation's scans (same pattern as
+    // hoverSide/hoverMax) \u2014 closures here would go stale on config edits.
+    window.__zcodeBeautify.listInit = init;
+    window.__zcodeBeautify.listStep = Math.max(1, Math.round(Number(L && L.step) || 5));
+    window.__zcodeBeautify.listCollapse = Number(L && L.collapse) === 1;
+
+    // Static rule: the native button is replaced by our toolbar row. Its
+    // element STAYS in the DOM (display:none) \u2014 render-ahead clicks it.
+    var stEl = document.getElementById(MARKER + '-list-style');
+    if (!stEl) {
+      stEl = document.createElement('style');
+      stEl.id = MARKER + '-list-style';
+      (document.head || document.documentElement).appendChild(stEl);
+    }
+    var listCss = '[data-zb-paging] > button[data-task-list-show-more]{display:none!important}';
+    if (stEl.textContent !== listCss) stEl.textContent = listCss;
+
+    // A container is the DEEPEST element whose relevant children are session
+    // rows: either it owns the native paging button directly, or every div
+    // child is a py-px row wrapper (toolbar/empty-state excluded). A fixed
+    // DEPTH would break \u2014 CollapsibleContent grows an extra animation wrapper
+    // after a collapse/expand cycle, moving the list one layer down (live:
+    // depth-3 candidates became the pl-2 wrapper, whose container child got
+    // paged as if it were a row). The "every div child is py-px" constraint
+    // also keeps the pl-2 wrapper itself out: it owns the worktree-creating
+    // py-px rows PLUS the non-py-px container div, so it never qualifies.
+    function qualifies(c) {
+      if (c.querySelector(':scope > button[data-task-list-show-more]')) return true;
+      var kids = c.children;
+      var saw = false;
+      for (var k = 0; k < kids.length; k++) {
+        var el = kids[k];
+        if (el.hasAttribute('data-zb-list-bar')) continue;
+        if (el.tagName !== 'DIV') return false;
+        if (el.getAttribute('data-testid') === 'project-no-tasks') continue;
+        if (String(el.className || '').indexOf('py-px') === -1) return false;
+        saw = true;
+      }
+      return saw;
+    }
+
+    function zbListToolbar(container, state) {
+      var native = container.querySelector(':scope > button[data-task-list-show-more]');
+      var rows = zbListRows(container);
+      // \u663E\u793A\u66F4\u591A stays available whenever React still offers a page OR rows
+      // are hidden locally: once render-ahead lifted the React limit past the
+      // total the native button unmounts for good \u2014 without the second
+      // condition a \u6536\u8D77 would leave the hidden rows unreachable.
+      var needMore = Boolean(native) || rows.length > state.visible;
+      var needCollapse = window.__zcodeBeautify.listCollapse && state.visible > window.__zcodeBeautify.listInit;
+      var bar = container.querySelector(':scope > div[data-zb-list-bar]');
+      if (!needMore && !needCollapse) {
+        if (bar) bar.remove();
+        return;
+      }
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.setAttribute('data-zb-list-bar', '1');
+        bar.style.display = 'flex';
+        bar.style.alignItems = 'center';
+        bar.style.gap = '12px';
+        // Clone the native ghost button so the look tracks ZCode's own styles
+        // (classes ship whatever theme tokens the row buttons use).
+        var tpl = native ? native.cloneNode(true) : null;
+        if (tpl) tpl.removeAttribute('data-task-list-show-more');
+        var zh = (document.documentElement.lang || '').indexOf('zh') === 0;
+        var more = tpl || document.createElement('button');
+        more.type = 'button';
+        more.textContent = native && native.textContent ? native.textContent : (zh ? '\u663E\u793A\u66F4\u591A' : 'Show more');
+        more.setAttribute('data-zb-list-more', '1');
+        more.addEventListener('click', function() {
+          state.visible += window.__zcodeBeautify.listStep;
+          applyListContainer(container);
+        });
+        var less = (tpl ? tpl.cloneNode(true) : document.createElement('button'));
+        less.type = 'button';
+        less.textContent = (zh ? '\u6536\u8D77' : 'Show less');
+        less.setAttribute('data-zb-list-less', '1');
+        less.addEventListener('click', function() {
+          state.visible = window.__zcodeBeautify.listInit;
+          applyListContainer(container);
+        });
+        bar.appendChild(more);
+        bar.appendChild(less);
+      } else {
+        // Refresh the cloned label from the live native button (locale swaps).
+        var moreBtn = bar.querySelector('[data-zb-list-more]');
+        if (moreBtn && native && native.textContent && moreBtn.textContent !== native.textContent) {
+          moreBtn.textContent = native.textContent;
+        }
+      }
+      var moreB = bar.querySelector('[data-zb-list-more]');
+      if (moreB) moreB.style.display = needMore ? '' : 'none';
+      var lessB = bar.querySelector('[data-zb-list-less]');
+      if (lessB) lessB.style.display = needCollapse ? '' : 'none';
+      // Keep the toolbar the LAST child (React appends new rows at the end).
+      if (container.lastElementChild !== bar) container.appendChild(bar);
+    }
+
+    function applyListContainer(container) {
+      var SLOTS = window.__zcodeBeautify;
+      var state = container.__zbListVis;
+      if (!state) state = container.__zbListVis = { visible: SLOTS.listInit, baseInit: SLOTS.listInit };
+      // A config edit re-baselines: the new initial is the collapsed position
+      // every list should show (an expanded position from the old setting
+      // would otherwise linger until the page reloads).
+      if (state.baseInit !== SLOTS.listInit) {
+        state.baseInit = SLOTS.listInit;
+        state.visible = SLOTS.listInit;
+      }
+      var rows = zbListRows(container);
+      if (!rows.length) return;
+      // Render-ahead: while fewer rows are mounted than wanted, click the
+      // (hidden) native button \u2014 React raises its own limit by pageSize each
+      // time. Discrete clicks flush synchronously; the cap only bounds a
+      // pathological no-op loop, the observer self-heals any deferral.
+      var guard = 0;
+      var native = container.querySelector(':scope > button[data-task-list-show-more]');
+      while (rows.length < state.visible && native && guard < 100) {
+        native.click();
+        guard++;
+        rows = zbListRows(container);
+        native = container.querySelector(':scope > button[data-task-list-show-more]');
+      }
+      for (var r = 0; r < rows.length; r++) {
+        var want = r < state.visible ? '' : 'none';
+        if (rows[r].style.display !== want) rows[r].style.display = want;
+      }
+      if (container.getAttribute('data-zb-paging') !== 'on') container.setAttribute('data-zb-paging', 'on');
+      zbListToolbar(container, state);
+    }
+
+    function scan() {
+      var cands = document.querySelectorAll('[data-testid="virtual-project-tasks"] div');
+      for (var i = 0; i < cands.length; i++) {
+        var c = cands[i];
+        if (qualifies(c)) {
+          applyListContainer(c);
+        } else if (c.getAttribute('data-zb-paging') === 'on') {
+          // Stale marking (structure changed, or a pre-fix generation paged
+          // the wrong element): undo the takeover so nothing stays hidden.
+          c.removeAttribute('data-zb-paging');
+          var kids = c.children;
+          for (var k = 0; k < kids.length; k++) {
+            if (kids[k].style && kids[k].style.display === 'none') kids[k].style.display = '';
+          }
+          delete c.__zbListVis;
+        }
+      }
+    }
+
+    scan();
+    // Generation handoff: an observer bound by an OLDER eval keeps firing that
+    // generation's scan closure (its addScriptToEvaluateOnNewDocument entry
+    // outlives serve restarts). Evict it so the live observer always belongs
+    // to the newest generation's code (same model as the hover-card rebinding).
+    if (!window.__zcodeBeautify.listObs || window.__zcodeBeautify.listObsStamp !== LIST_VER) {
+      if (window.__zcodeBeautify.listObs) {
+        try { window.__zcodeBeautify.listObs.disconnect(); } catch (e) {}
+        window.__zcodeBeautify.listObs = null;
+      }
+      var listPend = false;
+      var listKick = function() {
+        if (listPend) return;
+        listPend = true;
+        requestAnimationFrame(function() { listPend = false; scan(); });
+      };
+      var obs = new MutationObserver(function(muts) {
+        // Cheap pre-filter: only mutations touching a paging host matter \u2014
+        // chat-area ticks (100ms elapsed text updates) must not force a
+        // sidebar rescan every frame.
+        for (var m = 0; m < muts.length; m++) {
+          var added = muts[m].addedNodes;
+          for (var n = 0; n < added.length; n++) {
+            var el = added[n];
+            if (el && el.closest && el.closest('[data-testid="virtual-project-tasks"]')) { listKick(); return; }
+          }
+        }
+      });
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      window.__zcodeBeautify.listObs = obs;
+      window.__zcodeBeautify.listObsStamp = LIST_VER;
+    }
+  }
+
   // Keep the loop alive. Chromium's media suspension can freeze a nominally
   // playing wallpaper video (paused:false but the clock stops \u2014 occlusion
   // misdetection is common with transparent Electron windows), so a watchdog
@@ -2296,7 +2577,14 @@ function buildResetScript(marker = "zcode-beautify") {
   document.getElementById(${JSON.stringify(marker)} + '-bubble-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-spinner-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-load-style')?.remove();
+  document.getElementById(${JSON.stringify(marker)} + '-list-style')?.remove();
   document.querySelectorAll('.' + ${JSON.stringify(marker)} + '-ld-grid').forEach(function(n){n.remove()});
+  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 teardown: toolbars, container attrs and the inline row hides.
+  document.querySelectorAll('[data-zb-list-bar]').forEach(function(n){n.remove()});
+  document.querySelectorAll('[data-zb-paging]').forEach(function(n){
+    n.removeAttribute('data-zb-paging');
+    n.querySelectorAll(':scope > div').forEach(function(r){ if (r.style.display === 'none') r.style.display = ''; });
+  });
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
@@ -2310,6 +2598,8 @@ function buildResetScript(marker = "zcode-beautify") {
     window.__zcodeBeautify.bubbleKey = null;
     window.__zcodeBeautify.spinnerKey = null;
     window.__zcodeBeautify.loadKey = null;
+    window.__zcodeBeautify.listKey = null;
+    window.__zcodeBeautify.listStamp = null;
     if (window.__zcodeBeautify.chatObs) {
       try { window.__zcodeBeautify.chatObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.chatObs = null;
@@ -2322,10 +2612,14 @@ function buildResetScript(marker = "zcode-beautify") {
       try { window.__zcodeBeautify.loadObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.loadObs = null;
     }
+    if (window.__zcodeBeautify.listObs) {
+      try { window.__zcodeBeautify.listObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.listObs = null;
+    }
   }
 })();`;
 }
-var CdpError, CdpConnection;
+var CdpError, CdpConnection, LIST_PAGING_VER;
 var init_cdp = __esm({
   "dist/core/cdp.js"() {
     "use strict";
@@ -2400,6 +2694,7 @@ var init_cdp = __esm({
         }
       }
     };
+    LIST_PAGING_VER = 2;
   }
 });
 
@@ -112227,7 +112522,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.2.0";
+    VERSION = "6.3.0";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -112437,6 +112732,16 @@ var init_launch = __esm({
 // dist/core/inject.js
 import fs5 from "node:fs";
 import path3 from "node:path";
+function normalizeListPaging(raw) {
+  const num = (v, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(1, Math.min(LIST_PAGING_MAX, Math.round(v))) : dflt;
+  const initial = typeof raw?.initial === "number" && Number.isFinite(raw.initial) && raw.initial >= 1 ? Math.min(LIST_PAGING_MAX, Math.round(raw.initial)) : 0;
+  const collapse = raw?.collapse;
+  return {
+    initial,
+    step: initial > 0 ? num(raw?.step, 5) : 0,
+    collapse: initial > 0 && collapse !== 0 && collapse !== false ? 1 : 0
+  };
+}
 function normalizeChatLook(raw) {
   const pct = (v) => typeof v === "number" && v >= 0 && v <= 100 ? Math.round(v) : 0;
   const cap = typeof raw?.widthCapRem === "number" && Number.isFinite(raw.widthCapRem) ? Math.max(0, Math.min(120, Math.round(raw.widthCapRem))) : 0;
@@ -112485,6 +112790,16 @@ function normalizeChatLoadLook(raw) {
     mode: mode === "image" && !ref(raw?.image) ? "default" : mode,
     image: ref(raw?.image),
     spin: raw?.spin !== false,
+    size
+  };
+}
+function normalizeFabLook(raw) {
+  const mode = raw?.mode === "image" ? "image" : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size) ? Math.max(20, Math.min(64, Math.round(raw.size))) : DEFAULT_FAB_LOOK.size;
+  const ref = (v) => typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode: mode === "image" && !ref(raw?.image) ? "default" : mode,
+    image: ref(raw?.image),
     size
   };
 }
@@ -112680,6 +112995,9 @@ ${rootSelector} { background: transparent !important; }
     componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(void 0),
     chatLoadLook: chatUi ? chatLoadLook : normalizeChatLoadLook(void 0),
+    // 会话列表分页: ZCode-only (the virtual-project-tasks list does not exist
+    // elsewhere); the disabled default keeps WorkBuddy untouched.
+    listPaging: chatUi ? normalizeListPaging(config.listPaging) : normalizeListPaging(void 0),
     startupClean: config.startupClean !== false,
     chatUi,
     startupProbe: app.startupProbe,
@@ -112721,7 +113039,7 @@ async function resetZCode(port) {
   }
   return count;
 }
-var CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, DEFAULT_CHAT_LOAD_LOOK, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
+var LIST_PAGING_MAX, CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, DEFAULT_CHAT_LOAD_LOOK, DEFAULT_FAB_LOOK, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
@@ -112732,6 +113050,7 @@ var init_inject = __esm({
     init_tokens();
     init_target();
     init_launch();
+    LIST_PAGING_MAX = 100;
     CHAT_WIDTH_INSET_DEFAULT = 12;
     DEFAULT_BUBBLE_LOOK = {
       preset: "default",
@@ -112752,6 +113071,11 @@ var init_inject = __esm({
       image: "",
       spin: true,
       size: 16
+    };
+    DEFAULT_FAB_LOOK = {
+      mode: "default",
+      image: "",
+      size: 34
     };
     SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
     SPINNER_MIME = {
@@ -114029,7 +114353,11 @@ function baseConfig(opts, stored) {
     // inside buildPayload where the image reference is resolved too.
     taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook),
     // 会话底部加载图标 merges the same way (mode/image/spin/size).
-    chatLoadLook: normalizeChatLoadLook(opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook)
+    chatLoadLook: normalizeChatLoadLook(opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook),
+    // 会话列表分页 merges the same way (initial/step/collapse).
+    listPaging: normalizeListPaging(opts.listPaging ? { ...stored.listPaging, ...opts.listPaging } : stored.listPaging),
+    // 设置按钮 merges the same way (mode/image/size).
+    fabLook: normalizeFabLook(opts.fabLook ? { ...stored.fabLook, ...opts.fabLook } : stored.fabLook)
   };
 }
 async function applySceneWallpaper(scenePath, opts = {}) {
@@ -114486,7 +114814,10 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     // Window shell: sidebar + content settings window (the reference layout),
     // still one floating draggable panel over ZCode. Only the body column
     // scrolls, so the sidebar stays put.
-    '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: min(680px, calc(100vw - 36px));',
+    // bottom tracks the FAB diameter through --zb-fab-panel-bottom (applyFabLook):
+    // the stock 60px assumes the 34px ball (18px margin + 8px gap + 34px);
+    // a resized ball would otherwise slide under/over the panel edge.
+    '#zb-panel { position: fixed; right: 18px; bottom: var(--zb-fab-panel-bottom, 60px); width: min(680px, calc(100vw - 36px));',
       // FIXED height (not max-height): every settings page renders in the
       // same-size window \u2014 switching tabs must not resize the panel.
       ' height: min(620px, calc(100vh - 68px)); display: flex; flex-direction: column; padding: 0;',
@@ -115179,10 +115510,23 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover-side" title="\u662F\u5426\u5728\u5DE6\u4FA7\u4EFB\u52A1\u5217\u8868\u7684\u4F1A\u8BDD\u6807\u9898\u4E0A\u5F39\u51FA\u6982\u89C8\u5361:\u5F00=\u4FA7\u680F\u4F1A\u8BDD\u884C\u60AC\u505C\u5F39\u5361(\u9690\u85CF\u5B98\u65B9\u5DE5\u4F5C\u533A\u4FE1\u606F\u5361),\u5173=\u4FA7\u680F\u6062\u590D\u5B98\u65B9\u60AC\u505C\u5361,\u4EC5\u5BF9\u8BDD\u533A\u63D0\u95EE\u523B\u5EA6\u6761\u5F39\u5361"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6700\u591A\u663E\u793A</span><span class="zb-set-sub">\u6982\u89C8\u5361\u53EA\u5217\u51FA\u6700\u65B0\u7684\u51E0\u6761\u63D0\u95EE(1-60),\u66F4\u65E9\u7684\u4E0D\u663E\u793A;\u6700\u65B0\u4E00\u6761\u52A0\u7C97</span></div>' +
       '        <div class="zb-ctrl"><input type="number" id="zb-chat-hover-max" min="1" max="60" step="1" title="\u6982\u89C8\u5361\u5217\u51FA\u7684\u63D0\u95EE\u884C\u6570:\u53EA\u663E\u793A\u6700\u65B0\u7684 N \u6761,\u66F4\u65E9\u7684\u4E0D\u8FDB\u5165\u5217\u8868(1-60,\u9ED8\u8BA410)"><span style="opacity:.6">\u6761</span></div></div>' +
-      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6570\u636E\u6765\u6E90</span><span class="zb-set-sub">\u8BFB\u53D6\u672C\u673A ZCode \u4F1A\u8BDD\u5E93(~/.zcode/cli/db),\u4EC5\u5728\u4F60\u60AC\u505C\u65F6\u67E5\u8BE2;\u7F8E\u5316\u670D\u52A1\u672A\u8FD0\u884C\u65F6\u964D\u7EA7\u4E3A\u663E\u793A\u5B8C\u6574\u4F1A\u8BDD\u6807\u9898</span></div></div>' +
-      '      </div>' +
-      '    </div>' +
-      '    </div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6570\u636E\u6765\u6E90</span><span class="zb-set-sub">\u8BFB\u53D6\u672C\u673A ZCode \u4F1A\u8BDD\u5E93(~/.zcode/cli/db),\u4EC5\u5728\u4F60\u60AC\u505C\u65F6\u67E5\u8BE2;\u7F8E\u5316\u670D\u52A1\u672A\u8FD0\u884C\u65F6\u964D\u7EA7\u4E3A\u663E\u793A\u5B8C\u6574\u4F1A\u8BDD\u6807\u9898</span></div></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">\u4F1A\u8BDD\u5217\u8868\u5206\u9875</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u81EA\u5B9A\u5206\u9875</span><span class="zb-set-sub">\u6539\u5199\u5DE6\u4FA7\u9879\u76EE\u5361\u4F1A\u8BDD\u5217\u8868\u7684\u5206\u9875\u884C\u4E3A;\u539F\u751F\u4E3A\u5C55\u5F00 5 \u6761\u3001\u6BCF\u6B21\u52A0\u8F7D 5 \u6761\u3001\u65E0\u6536\u8D77\u6309\u94AE</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-on" title="\u5F00\u542F\u540E\u7531\u4E0B\u65B9\u4E09\u4E2A\u6570\u503C\u63A5\u7BA1\u9879\u76EE\u5361\u7684\u4F1A\u8BDD\u5206\u9875;\u5173\u95ED\u6062\u590D\u539F\u751F 5/+5"></label></div>' +
+    '      <div class="zb-set" id="zb-list-init-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u521D\u59CB\u5C55\u5F00</span><span class="zb-set-sub">\u5C55\u5F00\u9879\u76EE\u65F6\u76F4\u63A5\u663E\u793A\u7684\u4F1A\u8BDD\u6761\u6570(1-100;\u539F\u751F 5)</span></div>' +
+    '        <div class="zb-ctrl"><input type="number" id="zb-list-init" min="1" max="100" step="1" title="\u9879\u76EE\u5361\u5C55\u5F00\u65F6\u7684\u4F1A\u8BDD\u884C\u6570(1-100)"><span style="opacity:.6">\u6761</span></div></div>' +
+    '      <div class="zb-set" id="zb-list-step-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u6BCF\u6B21\u52A0\u8F7D</span><span class="zb-set-sub">\u6BCF\u70B9\u4E00\u6B21"\u663E\u793A\u66F4\u591A"\u8FFD\u52A0\u7684\u6761\u6570(1-100;\u539F\u751F 5)</span></div>' +
+    '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="\u6BCF\u6B21\u70B9\u51FB\u663E\u793A\u66F4\u591A\u8FFD\u52A0\u7684\u884C\u6570(1-100)"><span style="opacity:.6">\u6761</span></div></div>' +
+    '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u6536\u8D77\u6309\u94AE</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u52A0\u4E00\u4E2A"\u6536\u8D77",\u4E00\u952E\u6298\u56DE\u521D\u59CB\u6761\u6570(\u539F\u751F\u5C55\u5F00\u540E\u65E0\u6CD5\u6536\u56DE)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="\u663E\u793A\u6536\u8D77\u6309\u94AE:\u70B9\u51FB\u540E\u5217\u8868\u6298\u56DE\u521D\u59CB\u5C55\u5F00\u6761\u6570"></label></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    </div>' +
       '    <div id="zb-tab-components" hidden>' +
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">\u7EC4\u4EF6\u7CBE\u4FEE \xB7 WorkBuddy</div>' +
@@ -115255,6 +115599,23 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <select id="zb-import-res"><option value="auto">\u9ED8\u8BA4(\u8DDF\u968F\u58C1\u7EB8)</option><option value="1920x1080">1920\xD71080</option><option value="1280x720">1280\xD7720(\u7701\u7535)</option><option value="custom">\u81EA\u5B9A\u4E49\u2026</option></select>' +
     '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" hidden>' +
 '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
+'      </div>' +
+'    </div>' +
+'    <div class="zb-block" id="zb-card-fab">' +
+'      <div class="zb-block-title">\u8BBE\u7F6E\u6309\u94AE</div>' +
+'      <div class="zb-card">' +
+'      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">\u6309\u94AE\u6837\u5F0F</span><span class="zb-set-sub">\u53F3\u4E0B\u89D2\u6253\u5F00\u7F8E\u5316\u9762\u677F\u7684\u60AC\u6D6E\u7403;\u9ED8\u8BA4\u4E3A \u{1F3A8} \u5706\u7403,\u53EF\u6362\u6210\u81EA\u5DF1\u7684\u56FE\u7247/GIF \u52A8\u56FE</span></div>' +
+'        <div class="zb-ctrl"><select id="zb-fab-mode" title="\u8BBE\u7F6E\u6309\u94AE\u5916\u89C2:\u9ED8\u8BA4=\u{1F3A8} \u5706\u7403,\u81EA\u5B9A\u4E49\u56FE\u7247=\u6362\u6210\u56FE\u7247\u6216 GIF">' +
+'          <option value="default">\u9ED8\u8BA4(\u{1F3A8})</option>' +
+'          <option value="image">\u81EA\u5B9A\u4E49\u56FE\u7247</option>' +
+'        </select>' +
+'        <button class="zb-btn" id="zb-fab-pick" title="\u9009\u62E9\u672C\u5730\u56FE\u7247\u6216 GIF \u52A8\u56FE(\u22642MB,\u652F\u6301 gif/png/webp/jpeg/svg)">\u{1F4C1} \u9009\u56FE</button>' +
+'        <input type="file" id="zb-fab-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+'      <div class="zb-set" id="zb-fab-img-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u5F53\u524D\u56FE\u7247</span></div>' +
+'        <div class="zb-ctrl"><img id="zb-fab-preview" alt="\u5F53\u524D\u8BBE\u7F6E\u6309\u94AE\u56FE\u7247" title="\u5F53\u524D\u8BBE\u7F6E\u6309\u94AE\u56FE\u7247" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+'        <button class="zb-btn" id="zb-fab-clear" title="\u6062\u590D\u9ED8\u8BA4 \u{1F3A8} \u5706\u7403">\u2715 \u6062\u590D\u9ED8\u8BA4</button></div></div>' +
+'      <div class="zb-set zb-slide" id="zb-fab-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u6309\u94AE\u5927\u5C0F</span><span class="zb-set-sub">\u60AC\u6D6E\u7403\u76F4\u5F84(20-64px,\u539F\u751F 34)</span></div>' +
+'        <input type="range" id="zb-fab-size" min="20" max="64" step="1" value="34" title="\u60AC\u6D6E\u7403\u76F4\u5F84(20-64px)"><span class="zb-val"><span id="zb-fab-size-val">34</span>px</span></div>' +
 '      </div>' +
 '    </div>' +
 '    <div class="zb-block" id="zb-card-experimental">' +
@@ -115607,6 +115968,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
       $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
       setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+      setListUI({});
+      setFabUI({});
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -115658,6 +116021,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
+        setListUI(c.listPaging || {});
+        setFabUI(c.fabLook || {}, c.fabImageUrl || '');
         setComponentUI(c.componentLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
@@ -115977,6 +116342,55 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     });
   });
 
+  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875: three numbers + a collapse toggle drive listPaging. The
+  // server normalizes/clamps; the bootstrap re-implements ZCode's hardcoded
+  // 5/+5 paging with the configured counts and an optional \u6536\u8D77 control.
+  function setListUI(lp) {
+    var on = Number(lp && lp.initial) > 0;
+    var onEl = $('zb-list-on');
+    if (onEl) onEl.checked = on;
+    var initEl = $('zb-list-init');
+    if (initEl) initEl.value = String(on ? Math.max(1, Math.round(Number(lp.initial) || 5)) : 5);
+    var stepEl = $('zb-list-step');
+    if (stepEl) stepEl.value = String(Math.max(1, Math.round(Number(lp && lp.step) || 5)));
+    var colEl = $('zb-list-collapse');
+    if (colEl) colEl.checked = lp ? lp.collapse !== 0 : true;
+    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = !on;
+    });
+  }
+  var listPushTimer = null;
+  function pushListPaging() {
+    clearTimeout(listPushTimer);
+    listPushTimer = setTimeout(function () {
+      var on = $('zb-list-on') && $('zb-list-on').checked;
+      post('/api/config', {
+        listPaging: {
+          initial: on ? Math.max(1, Math.round(Number($('zb-list-init').value) || 5)) : 0,
+          step: Math.max(1, Math.round(Number($('zb-list-step').value) || 5)),
+          collapse: $('zb-list-collapse') && $('zb-list-collapse').checked ? 1 : 0
+        }
+      }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  $('zb-list-on') && $('zb-list-on').addEventListener('change', function () {
+    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = !this.checked;
+    }, this);
+    pushListPaging();
+  });
+  $('zb-list-init') && $('zb-list-init').addEventListener('input', pushListPaging);
+  $('zb-list-step') && $('zb-list-step').addEventListener('input', pushListPaging);
+  ['zb-list-init', 'zb-list-step'].forEach(function (id) {
+    $(id) && $(id).addEventListener('change', function () {
+      this.value = Math.max(1, Math.min(100, Math.round(Number(this.value) || 5)));
+    });
+  });
+  $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', pushListPaging);
+
+
   // --- user message bubble look (\u804A\u5929\u6C14\u6CE1) -----------------------------------
   function bubbleUIState() {
     return {
@@ -116250,6 +116664,112 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     reflectLoadRows('default');
     pushLoadLook();
     status('\u5DF2\u6062\u590D\u65B0\u7248\u539F\u751F\u52A0\u8F7D\u56FE\u6807');
+  });
+
+  // --- \u8BBE\u7F6E\u6309\u94AE (panel-opener FAB) -------------------------------------------
+  // Purely panel-side: the FAB is this script's own DOM node, so the look is
+  // applied by styling #zb-fab directly from /api/config (no bootstrap, no
+  // theme push). The image upload rides /api/spinner slot "fab" like the
+  // other icon slots; size scales the emoji too (font-size = half the ball).
+  var fabImageRef = '';
+  function applyFabLook() {
+    var fab = $('zb-fab');
+    if (!fab) return;
+    var mode = $('zb-fab-mode').value;
+    var size = Math.max(20, Math.min(64, Math.round(Number($('zb-fab-size').value) || 34)));
+    if (mode === 'image' && fabImageRef && lastConfig && lastConfig.fabImageUrl) {
+      // Empty the emoji and paint the image over the ball (round avatar).
+      // Without a resolved URL (serve down, first refresh pending) the emoji
+      // stays \u2014 an empty dark ball would look broken.
+      if (fab.textContent !== '') fab.textContent = '';
+      fab.style.backgroundImage = 'url("' + lastConfig.fabImageUrl + '")';
+      fab.style.backgroundSize = 'cover';
+      fab.style.backgroundPosition = 'center';
+      fab.style.backgroundRepeat = 'no-repeat';
+    } else {
+      if (fab.textContent !== '\u{1F3A8}') fab.textContent = '\u{1F3A8}';
+      fab.style.backgroundImage = 'none';
+    }
+    if (fab.style.width !== size + 'px') fab.style.width = size + 'px';
+    if (fab.style.height !== size + 'px') fab.style.height = size + 'px';
+    var fs = Math.round(size * 0.5);
+    if (fab.style.fontSize !== fs + 'px') fab.style.fontSize = fs + 'px';
+    // Anchor the (undragged) panel above the ball with the same 8px gap the
+    // stock 34px geometry bakes in: 18px FAB margin + size + 8px gap. A dragged
+    // panel carries inline right/bottom:auto, which outranks this var and keeps
+    // the user's chosen spot; the pull-back-in flow clears the inlines and
+    // re-anchors, so the var takes over again there.
+    document.documentElement.style.setProperty('--zb-fab-panel-bottom', (size + 26) + 'px');
+  }
+  function reflectFabRows(mode) {
+    var on = mode === 'image' && Boolean(fabImageRef);
+    $('zb-fab-img-row').hidden = !on;
+    // Size stays adjustable in BOTH modes \u2014 reverting to the stock emoji must
+    // not strand a resized ball with no visible control to change it back.
+    $('zb-fab-size-row').hidden = false;
+    if (on && lastConfig && lastConfig.fabImageUrl) $('zb-fab-preview').src = lastConfig.fabImageUrl;
+    applyFabLook();
+  }
+  function setFabUI(s, url) {
+    s = s || {};
+    var mode = s.mode === 'image' && s.image ? 'image' : 'default';
+    fabImageRef = typeof s.image === 'string' ? s.image : '';
+    if (url && lastConfig) lastConfig.fabImageUrl = url;
+    $('zb-fab-mode').value = mode;
+    $('zb-fab-size').value = s.size ?? 34;
+    $('zb-fab-size-val').textContent = String(s.size ?? 34);
+    reflectFabRows(mode);
+  }
+  var fabPushTimer = null;
+  function pushFabLook() {
+    clearTimeout(fabPushTimer);
+    fabPushTimer = setTimeout(function () {
+      post('/api/config', {
+        fabLook: {
+          mode: $('zb-fab-mode').value,
+          image: fabImageRef,
+          size: Math.max(20, Math.min(64, Math.round(Number($('zb-fab-size').value) || 34)))
+        }
+      }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  $('zb-fab-mode') && $('zb-fab-mode').addEventListener('change', function () {
+    reflectFabRows(this.value);
+    pushFabLook();
+  });
+  $('zb-fab-size') && $('zb-fab-size').addEventListener('input', function () {
+    $('zb-fab-size-val').textContent = this.value;
+    applyFabLook(); // live ball resize, no push spam
+  });
+  $('zb-fab-size') && $('zb-fab-size').addEventListener('change', pushFabLook);
+  $('zb-fab-pick') && $('zb-fab-pick').addEventListener('click', function () {
+    $('zb-fab-file').click();
+  });
+  $('zb-fab-file') && $('zb-fab-file').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { status('\u56FE\u7247\u8D85\u8FC7 2MB,\u60AC\u6D6E\u7403\u8BF7\u9009\u5C0F\u4E00\u70B9\u7684\u6587\u4EF6'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      post('/api/spinner', { dataUri: fr.result, name: f.name, slot: 'fab' }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        if (d && d.fabLook && d.fabLook.image) {
+          fabImageRef = d.fabLook.image;
+          lastConfig = d; // resolved preview URL rides on the same payload
+          $('zb-fab-mode').value = 'image';
+          reflectFabRows('image');
+        }
+        status(d && d.windows > 0 ? '\u8BBE\u7F6E\u6309\u94AE\u5DF2\u5E94\u7528' : '\u8BBE\u7F6E\u6309\u94AE\u5DF2\u4FDD\u5B58(ZCode \u672A\u8FDE\u63A5)');
+      });
+    };
+    fr.readAsDataURL(f);
+  });
+  $('zb-fab-clear') && $('zb-fab-clear').addEventListener('click', function () {
+    $('zb-fab-mode').value = 'default';
+    reflectFabRows('default');
+    pushFabLook();
+    status('\u5DF2\u6062\u590D\u9ED8\u8BA4 \u{1F3A8} \u8BBE\u7F6E\u6309\u94AE');
   });
 
   // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
@@ -119261,6 +119781,15 @@ function publicConfig(config) {
     // 会话底部加载图标: normalized look + resolved paint URL for the preview.
     chatLoadLook: normalizeChatLoadLook(config.chatLoadLook),
     chatLoadImageUrl: normalizeChatLoadLook(config.chatLoadLook).mode === "image" ? resolveSpinnerImageRef(config.chatLoadLook?.image ?? "", config.apiPort ?? target().apiPort, mediaToken) : "",
+    // 会话列表分页: normalized counts for the panel's sidebar controls.
+    listPaging: normalizeListPaging(config.listPaging),
+    // 设置按钮 (panel-opener FAB): normalized look + resolved paint URL for
+    // the preview; the FAB itself is styled panel-side from /api/config.
+    fabLook: normalizeFabLook(config.fabLook),
+    // Resolved whenever a ref EXISTS (not only in image mode): the panel can
+    // switch modes locally and must be able to paint the ball immediately,
+    // before the next beat brings the pushed config back around.
+    fabImageUrl: normalizeFabLook(config.fabLook).image ? resolveSpinnerImageRef(config.fabLook?.image ?? "", config.apiPort ?? target().apiPort, mediaToken) : "",
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -119344,6 +119873,12 @@ function sanitize(body) {
   if (body?.chatLoadLook && typeof body.chatLoadLook === "object") {
     out.chatLoadLook = normalizeChatLoadLook(body.chatLoadLook);
   }
+  if (body?.listPaging && typeof body.listPaging === "object") {
+    out.listPaging = normalizeListPaging(body.listPaging);
+  }
+  if (body?.fabLook && typeof body.fabLook === "object") {
+    out.fabLook = normalizeFabLook(body.fabLook);
+  }
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const dn = body?.dayNight;
   if (dn && typeof dn === "object") {
@@ -119420,6 +119955,7 @@ async function holdSession(target2, config, apiPort, opts = {}) {
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
     chatLoadLook: payload.chatLoadLook,
+    listPaging: payload.listPaging,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
@@ -119465,6 +120001,7 @@ async function pushConfigToSessions(config) {
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
     chatLoadLook: payload.chatLoadLook,
+    listPaging: payload.listPaging,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
@@ -119792,7 +120329,7 @@ async function startServe(opts) {
       }
       if (req.method === "POST" && url.pathname === "/api/spinner") {
         const body = JSON.parse(await readBody(req));
-        const slot = body?.slot === "unread" || body?.slot === "error" || body?.slot === "loading" ? body.slot : "running";
+        const slot = body?.slot === "unread" || body?.slot === "error" || body?.slot === "loading" || body?.slot === "fab" ? body.slot : "running";
         const dataUri = typeof body?.dataUri === "string" ? body.dataUri : "";
         const m = /^data:(image\/(?:gif|png|webp|jpeg|bmp|svg\+xml));base64,(.+)$/.exec(dataUri);
         if (!m)
@@ -119802,7 +120339,7 @@ async function startServe(opts) {
           throw new Error("image too large (max 2 MB) \u2014 a 16px icon wants a few KB");
         }
         const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
-        const base = slot === "running" ? "spinner" : "spinner-" + slot;
+        const base = slot === "running" ? "spinner" : slot === "fab" ? "fab" : "spinner-" + slot;
         const dest = path14.join(spinnerDir(), base + ext);
         fs14.mkdirSync(spinnerDir(), { recursive: true });
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
@@ -119814,6 +120351,17 @@ async function startServe(opts) {
         }
         fs14.writeFileSync(dest, bytes);
         const config = runtimeConfig();
+        if (slot === "fab") {
+          const look2 = normalizeFabLook(config.fabLook);
+          const nextCfg2 = {
+            ...config,
+            fabLook: { ...look2, mode: "image", image: dest }
+          };
+          saveConfig(persisted(nextCfg2));
+          const windows2 = await pushConfigToSessions(nextCfg2).catch(() => 0);
+          sendJson(res, 200, { ok: true, windows: windows2, ...publicConfig(nextCfg2) });
+          return;
+        }
         if (slot === "loading") {
           const look2 = normalizeChatLoadLook(config.chatLoadLook);
           const nextCfg2 = {

@@ -24,7 +24,7 @@ import {
   listTargets,
   pickRendererTargets,
 } from "./cdp.js";
-import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLoadLook, normalizeChatLook, normalizeTaskSpinnerLook, resolveSpinnerImageRef, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
+import { buildPayload, DEFAULT_CONFIG, normalizeBubbleLook, normalizeChatLoadLook, normalizeChatLook, normalizeFabLook, normalizeListPaging, normalizeTaskSpinnerLook, resolveSpinnerImageRef, type BeautifyConfig, type RotationConfig, type RotationEntry, type RotationMode, type RotationPlan } from "./inject.js";
 import { normalizeComponentLook } from "./componentLook.js";
 import { loadWallpaper, extractPalette, type WallpaperAssets } from "./monet.js";
 import { themeFromSourceColor, argbFromRgb } from "@material/material-color-utilities";
@@ -306,6 +306,17 @@ function publicConfig(config: BeautifyConfig) {
     chatLoadImageUrl: normalizeChatLoadLook(config.chatLoadLook).mode === "image"
       ? resolveSpinnerImageRef(config.chatLoadLook?.image ?? "", config.apiPort ?? appTarget().apiPort, mediaToken)
       : "",
+    // 会话列表分页: normalized counts for the panel's sidebar controls.
+    listPaging: normalizeListPaging(config.listPaging),
+    // 设置按钮 (panel-opener FAB): normalized look + resolved paint URL for
+    // the preview; the FAB itself is styled panel-side from /api/config.
+    fabLook: normalizeFabLook(config.fabLook),
+    // Resolved whenever a ref EXISTS (not only in image mode): the panel can
+    // switch modes locally and must be able to paint the ball immediately,
+    // before the next beat brings the pushed config back around.
+    fabImageUrl: normalizeFabLook(config.fabLook).image
+      ? resolveSpinnerImageRef(config.fabLook?.image ?? "", config.apiPort ?? appTarget().apiPort, mediaToken)
+      : "",
     startupClean: config.startupClean !== false,
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
@@ -399,6 +410,14 @@ function sanitize(body: any): Partial<BeautifyConfig> {
   // 会话底部加载图标: identical contract, mirrored normalizer.
   if (body?.chatLoadLook && typeof body.chatLoadLook === "object") {
     out.chatLoadLook = normalizeChatLoadLook(body.chatLoadLook);
+  }
+  // 会话列表分页: same full-object contract — initial 0 = stock paging.
+  if (body?.listPaging && typeof body.listPaging === "object") {
+    out.listPaging = normalizeListPaging(body.listPaging);
+  }
+  // 设置按钮 (FAB): same full-object contract.
+  if (body?.fabLook && typeof body.fabLook === "object") {
+    out.fabLook = normalizeFabLook(body.fabLook);
   }
   // Day/night look schedule (护眼): two dim/blur presets switch at times.
   const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -529,6 +548,7 @@ async function holdSession(
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
     chatLoadLook: payload.chatLoadLook,
+    listPaging: payload.listPaging,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
@@ -585,6 +605,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     bubbleLook: payload.bubbleLook,
     spinnerLook: payload.taskSpinnerLook,
     chatLoadLook: payload.chatLoadLook,
+    listPaging: payload.listPaging,
     startupClean: payload.startupClean,
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
@@ -1021,7 +1042,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // the loading slot's mode.
       if (req.method === "POST" && url.pathname === "/api/spinner") {
         const body = JSON.parse(await readBody(req));
-        const slot = body?.slot === "unread" || body?.slot === "error" || body?.slot === "loading" ? body.slot : "running";
+        const slot = body?.slot === "unread" || body?.slot === "error" || body?.slot === "loading" || body?.slot === "fab" ? body.slot : "running";
         const dataUri = typeof body?.dataUri === "string" ? body.dataUri : "";
         const m = /^data:(image\/(?:gif|png|webp|jpeg|bmp|svg\+xml));base64,(.+)$/.exec(dataUri);
         if (!m) throw new Error("dataUri must be a base64 image data URI (gif/png/webp/jpeg/bmp/svg)");
@@ -1030,7 +1051,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           throw new Error("image too large (max 2 MB) — a 16px icon wants a few KB");
         }
         const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
-        const base = slot === "running" ? "spinner" : "spinner-" + slot;
+        const base = slot === "running" ? "spinner" : slot === "fab" ? "fab" : "spinner-" + slot;
         // Written under spinner/, NOT the data dir root — the root is the
         // wallpaper library's namespace (/api/library scans it).
         const dest = path.join(spinnerDir(), base + ext);
@@ -1046,6 +1067,20 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         }
         fs.writeFileSync(dest, bytes);
         const config = runtimeConfig();
+        if (slot === "fab") {
+          // 设置按钮 (panel-opener FAB) lives in its own config object; the
+          // FAB is styled panel-side from /api/config, so the theme push only
+          // keeps the held sessions' payloads in sync (it early-returns).
+          const look = normalizeFabLook(config.fabLook);
+          const nextCfg: BeautifyConfig = {
+            ...config,
+            fabLook: { ...look, mode: "image" as const, image: dest },
+          };
+          saveConfig(persisted(nextCfg));
+          const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
+          sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
+          return;
+        }
         if (slot === "loading") {
           // 会话底部加载图标 lives in its own config object.
           const look = normalizeChatLoadLook(config.chatLoadLook);

@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLoadLook, normalizeChatLook, normalizeTaskSpinnerLook, type BeautifyConfig, type BubbleLookConfig, type ChatLoadLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig, type BuiltPayload } from "./inject.js";
+import { applyToZCode, buildPayload, DEFAULT_CONFIG, loadWallpaper, resetZCode, normalizeChatLoadLook, normalizeChatLook, normalizeFabLook, normalizeListPaging, normalizeTaskSpinnerLook, type BeautifyConfig, type BubbleLookConfig, type ChatLoadLookConfig, type ChatLookConfig, type FabLookConfig, type ListPagingConfig, type TaskSpinnerLookConfig, type BuiltPayload } from "./inject.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
 import { target } from "./target.js";
 import { detectWallpaperType } from "./wallpaperType.js";
@@ -28,6 +28,10 @@ export interface ApplyOptions {
   chatLoadLook?: Partial<ChatLoadLookConfig>;
   /** Chat-area look patch (聊天界面); merged over the stored config. */
   chatLook?: Partial<ChatLookConfig>;
+  /** Sidebar session-list paging patch (会话列表分页); merged over the stored config. */
+  listPaging?: Partial<ListPagingConfig>;
+  /** Panel-opener FAB look patch (设置按钮); merged over the stored config. */
+  fabLook?: Partial<FabLookConfig>;
 }
 
 /** Applies (or refreshes) the theme using the stored config. */
@@ -115,6 +119,14 @@ export function baseConfig(opts: ApplyOptions, stored: Partial<BeautifyConfig>):
     // 会话底部加载图标 merges the same way (mode/image/spin/size).
     chatLoadLook: normalizeChatLoadLook(
       opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook
+    ),
+    // 会话列表分页 merges the same way (initial/step/collapse).
+    listPaging: normalizeListPaging(
+      opts.listPaging ? { ...stored.listPaging, ...opts.listPaging } : stored.listPaging
+    ),
+    // 设置按钮 merges the same way (mode/image/size).
+    fabLook: normalizeFabLook(
+      opts.fabLook ? { ...stored.fabLook, ...opts.fabLook } : stored.fabLook
     ),
   };
 }

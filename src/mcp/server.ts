@@ -12,7 +12,7 @@ import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, re
 import { detectWallpaperType } from "../core/wallpaperType.js";
 import { ensureExperimentalGate, experimentalEnabled, loadConfig } from "../core/launch.js";
 import { target } from "../core/target.js";
-import { DEFAULT_CONFIG, type ChatLoadLookConfig, type ChatLookConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
+import { DEFAULT_CONFIG, type ChatLoadLookConfig, type ChatLookConfig, type FabLookConfig, type ListPagingConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
 import { spawnServeDetached } from "../core/experimental.js";
 import { BUBBLE_STUDIO_URI, bubbleLookPatchFromTool, bubbleStudioResultMeta, bubbleStudioState, deleteBubbleRecipe, saveBubbleRecipe } from "../core/bubbleStudio.js";
 import { bubbleStudioHtml } from "./bubbleStudioHtml.js";
@@ -296,9 +296,17 @@ server.registerTool(
         spin: z.boolean().optional().describe("Keep a CSS rotation on the replaced icon (true, default — good for static images; false for animated GIFs)"),
         size: z.number().min(10).max(28).optional().describe("Icon size in px (stock slot 16); only meaningful for image mode — classic is a fixed 13px grid"),
       }).optional().describe("Conversation-footer loading icon look; omitted fields keep their current value"),
+      list_initial: z.number().min(0).max(100).optional().describe("会话列表分页: how many session rows a project card shows when expanded (初始展开条数, 1-100). 0 = stock behaviour (ZCode's hardcoded 5, +5 per click, no collapse)"),
+      list_step: z.number().min(1).max(100).optional().describe("会话列表分页: how many rows each 显示更多 click adds (每次加载条数, 1-100). Only meaningful with list_initial > 0"),
+      list_collapse: z.boolean().optional().describe("会话列表分页: whether a 收起 button sits next to 显示更多 (true, default) snapping the list back to list_initial rows; false hides it. Only meaningful with list_initial > 0"),
+      fab: z.object({
+        mode: z.enum(["default", "image"]).optional().describe("设置按钮 (panel-opener FAB): default = the stock 🎨 ball, image = a user picture/GIF"),
+        image_path: z.string().optional().describe("Absolute path or file name of the image for the FAB (resolved serve-side; required when mode = image; ≤2MB when uploaded via the panel)"),
+        size: z.number().min(20).max(64).optional().describe("Ball diameter in px (stock 34)"),
+      }).optional().describe("Panel-opener button look; omitted fields keep their current value"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, fab }) => {
     try {
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       // Send only the fields the caller provided: the session layer merges
@@ -335,7 +343,23 @@ server.registerTool(
                 .filter(([, v]) => v !== undefined)
                 .map(([k, v]) => [k === "image_path" ? "image" : k, v]),
             ) as Partial<ChatLoadLookConfig>);
-      const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook });
+      const listPaging: Partial<ListPagingConfig> | undefined =
+        list_initial === undefined && list_step === undefined && list_collapse === undefined
+          ? undefined
+          : {
+              ...(list_initial !== undefined ? { initial: list_initial } : {}),
+              ...(list_step !== undefined ? { step: list_step } : {}),
+              ...(list_collapse !== undefined ? { collapse: list_collapse ? 1 : 0 } : {}),
+            };
+      const fabLook =
+        fab === undefined
+          ? undefined
+          : (Object.fromEntries(
+              Object.entries(fab)
+                .filter(([, v]) => v !== undefined)
+                .map(([k, v]) => [k === "image_path" ? "image" : k, v]),
+            ) as Partial<FabLookConfig>);
+      const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook, listPaging, fabLook });
       // Bubble changes surface the interactive Bubble Studio gallery (MCP
       // Apps hosts render it; plain hosts just show the text card below).
       return {

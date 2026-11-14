@@ -20,7 +20,26 @@
 > 6.1.2：输入框透明度语义修正（0 = 不透明实底，旧"0=原生"因 3.18 令牌自带半透明而名不副实）+ 面板下拉框全面重做（自绘弹层替换 OS 原生样式）。
 > 6.1.3：旧版波浪图标按 zai-org/ZCode 上游源码忠实重写（9 真实 DOM 点 + 原 keyframes，替换 6.1.1 的渐变模拟——后者渲染又暗又糊）。
 > 6.1.4：修复波浪不动——点规则上的 !important 会压过 CSS 动画（作者 !important > 动画,且 !important 简写清零 animation-delay）,去掉后波浪真正跑起来。
+> 6.3.0：会话列表分页——左侧项目卡会话列表的"初始展开条数 / 每次加载条数"可配置（原生硬编码 5/+5），并新增原生没有的「收起」按钮一键折回初始条数（面板「聊天 → 会话列表分页」+ MCP `list_initial` / `list_step` / `list_collapse`）；设置按钮自定义——右下角悬浮球可换图片/GIF 并调大小（面板「通用 → 设置按钮」+ MCP `fab`）。
 > 6.2.0：气泡工坊（Bubble Studio）——ZCode 3.16+ 的 MCP Apps 交互页：改气泡样式后对话内直接展开画廊，预览/试穿/微调/保存配方；侧栏常驻入口 + 三个新 MCP 工具。会话概览悬停卡——鼠标停在侧边栏会话行约 0.3 秒即弹出该会话的全部提问列表（按用户参考图样式：无头部纯列表、右对齐、行尾短横线、最新一条白色加粗），开启期间替换官方的工作区悬停卡。
+
+## 6.3.0 — 会话列表分页（sidebar list paging）
+
+- **背景**：ZCode 源码 `packages/ui/src/project-sidebar/ProjectTaskRows.tsx` 把项目卡的会话列表硬编码为 `pageSize = chronological ? 20 : 5`——展开只见 5 条、每点一次「显示更多」+5、展开后无法收回（仅置顶区有 showLess）。本功能在 DOM 层重做这套分页：**初始展开条数**与**每次加载条数**都变成可配置（1-100），并提供原生没有的「收起」按钮。
+- **实现**：不 patch React——超出的行写 inline `display:none`；需要更多行时**程序化点击原生「显示更多」**（render-ahead，React 自己的 limit 是唯一合法通道，离散点击同步 flush）；工具条按钮克隆原生 ghost 按钮节点（类名随版本走，主题令牌天然一致）。MutationObserver（childList + rAF 去抖 + `closest('[data-testid="virtual-project-tasks"]')` 预过滤，聊天区 100ms 耗时文本更新不触发重扫）在 React 重建（挂载/limit 增长/行替换）后自动重新收敛；全部写操作幂等（值不变不写），无回环。
+- **两个关键修复**：① render-ahead 把 React limit 抬过总数后原生按钮永久卸载——此时「收起」会藏行而 MORE 判断 `Boolean(native)` 变假，隐藏行将无入口可展开；改为 `native || 有隐藏行`。② 配置变更后旧 observer 闭包拿着旧 init/step（悬停卡同款陈旧闭包坑）——配置发布到 `__zcodeBeautify.listInit/listStep/listCollapse` 槽位，闭包只读槽位；`initial` 变化还会把已展开列表的 visible 重置回新基线（state.baseInit 比对）。
+- **范围与安全**：只接管 `[data-testid="virtual-project-tasks"]` 下的平铺会话列表（ManagedWorktreeCreatingRows 的 py-px 行与其同级、靠"子元素是否 py-px 行"区分，永不分页；置顶/时间线/未读区保持原生）；非 ZCode 目标强制 stock；面板非 ZCode 客户端整个聊天页随官方逻辑移除。
+- **配置**：`listPaging.initial`（0 = 关，回原生 5/+5）/ `listPaging.step` / `listPaging.collapse`（收起按钮，默认开）。面板「聊天 → 会话列表分页」三数值 + 两开关即时生效（300ms 防抖，listKey 快路径不重放壁纸转场）；MCP `apply_options` 新增 `list_initial` / `list_step` / `list_collapse`；serve `sanitize` + `publicConfig` + 两处 bootstrap 组装点 + `baseConfig` 部分合并全接线；reset 脚本清理样式/工具条/标记/observer。
+- **实机首测两坑（用户报告"还是默认的 5 条"暴露，均已修复 + 回归测试）**：① **发现选择器写死层级**——CollapsibleContent 在折叠/展开一个循环后会挂出额外动画包装层，列表容器从第 3 层掉到第 4 层，`> div > div` 三层选择器匹配到 pl-2 包装层（其容器子 div 被当成"行"打了 data-zb-paging），真容器永远没人管；改为深度无关判定——「直接子元素里有原生按钮」或「全部 div 子元素都是 py-px 行（工具条/空态除外）」才算容器，pl-2 因拥有非 py-px 的容器子 div 天然不合格，并在扫描时自动清除旧代误标（连带恢复被藏的行）；② **跨代早退**——serve 重启换上新代码后，页面上残留的旧一代求值留着完全相同的 css/chat/list 键，新求值在终检全等处早退、修复后的 scan 根本不运行（陈旧闭包坑的变体）；加 LIST_PAGING_VER 构建版本戳——终检与音量快路径都要求戳一致，全量应用与 listKey 快路径写回戳，观察器按 ObsStamp 跨代驱逐重绑（悬停卡 hoverTeardown 同款模式）；戳必须标识构建版本而非求值实例（后者会让同构建的每次推送都全量应用、重放壁纸转场）。
+- 测试：t32（normalize / ZCode·WorkBuddy 双目标 payload / jsdom 全生命周期：render-ahead 精确页大小、原生按钮耗尽后 MORE 仍可展开、收起复位、creating 行永不误伤、二次求值换配置走快路径重置基线、initial=0 全清场、**多一层动画包装的深度 4 容器 + 误标恢复、同构建早退保快路径、陈旧戳强制重扫 + 观察器跨代驱逐** / reset / 面板 / serve·MCP·session 接线字符串断言）。
+
+## 6.3.0 — 设置按钮自定义（FAB look）
+
+- **功能**：右下角打开美化面板的悬浮球（默认 🎨 34px 圆球）可在「通用 → 设置按钮」换成自己的图片 / GIF 动图并调整直径（20-64px）。**纯面板侧实现**——FAB 是面板脚本自己的 DOM 节点，由 refresh() 从 /api/config 读 `fabLook` 直接内联样式（图片铺圆球 cover 裁剪、emoji 字号=直径一半），bootstrap 与主题注入完全不经手；图片上传复用 /api/spinner 上传通道（新 slot `"fab"`，落 `spinner/fab.<ext>`，同款 2MB 上限与旧变体清扫），解析走 resolveSpinnerImageRef（/media/spinner 直出带令牌 URL）。
+- **三处细节**：① 大小滑条**两种模式下都可见**——否则恢复默认 🎨 后被放大过的球没有入口调回去；② `fabImageUrl` 在**存在 image ref 时就解析**（不 gate 在 image 模式上）——面板本地切模式要能即时上画，等不到 4s 心跳把推送结果带回来；③ 图片 URL 未就绪（serve 掉线/首刷前）保留 🎨 不清空——空黑球观感像坏了；离线重置恢复原生球。
+- **面板锚点跟球**（用户实测反馈）：面板打开位置的 `bottom: 60px` 按 34px 原生球写死，调大球后面板底边插进球里——改为 `bottom: var(--zb-fab-panel-bottom, 60px)`，applyFabLook 按球径写变量（18px 球边距 + 直径 + 8px 间隙；34px 时恰好还原 60px）。拖拽过的面板带 inline `right/bottom:auto` 优先于变量、保持用户自选位置；「拉回视口」流程清 inline 后重新锚定、变量重新接管。实机：48px 球 → 球顶与面板底边恰 8px 无重叠，34px 还原 60px。
+- **配置**：`fabLook { mode, image, size }`（normalize 镜像 chatLoadLook：image 模式无 ref 降级 default、size 钳 20-64、ref 上限同款）；面板（zb-fab-mode/-pick/-clear/-size 三控件 + 防抖推送）+ MCP `apply_options` 新增 `fab { mode, image_path, size }`（baseConfig 部分合并同款语义）+ serve sanitize/publicConfig。
+- 测试：t33（normalize / serve 三处接线 / jsdom 真面板行为：图片铺球、emoji 随直径缩放、滑条即时预览不推送、恢复默认、离线还原 / MCP schema / baseConfig 合并），全套 npm test exit=0；实机 CDP：上传 slot=fab → 挂载即上图、面板切模式即时生效、48px 截图目检（红色圆测试图铺满球面）。
 
 ## 6.2.0 — 会话概览悬停卡（侧边栏 session hover preview）
 

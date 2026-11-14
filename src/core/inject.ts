@@ -155,6 +155,47 @@ export interface ChatLookConfig {
   sessionHoverMax: number;
 }
 
+/**
+ * Sidebar session-list paging (会话列表分页): ZCode hardcodes the project
+ * card's session rows to "first 5, +5 per 显示更多 click" (packages/ui
+ * ProjectTaskRows.tsx: `pageSize = chronological ? 20 : 5`, no collapse once
+ * expanded). This knob re-implements that paging at the DOM level with two
+ * user-set numbers plus a 收起 control.
+ */
+export interface ListPagingConfig {
+  /**
+   * Rows shown when a project card expands (初始展开条数), 1-100.
+   * 0 = feature off: nothing injected, the stock 5/+5 behaviour stays.
+   */
+  initial: number;
+  /** Rows added per 显示更多 click (每次加载条数), 1-100; only used when initial > 0. */
+  step: number;
+  /**
+   * 收起 button next to 显示更多 (1 = show, 0 = hide): snaps the visible rows
+   * back to `initial` without unmounting anything.
+   */
+  collapse: number;
+}
+
+const LIST_PAGING_MAX = 100;
+
+/** Clamp a partial paging config: 0 = off; counts to 1-100 ints. */
+export function normalizeListPaging(raw?: Partial<ListPagingConfig>): ListPagingConfig {
+  const num = (v: unknown, dflt: number): number =>
+    typeof v === "number" && Number.isFinite(v)
+      ? Math.max(1, Math.min(LIST_PAGING_MAX, Math.round(v)))
+      : dflt;
+  const initial = typeof raw?.initial === "number" && Number.isFinite(raw.initial) && raw.initial >= 1
+    ? Math.min(LIST_PAGING_MAX, Math.round(raw.initial))
+    : 0;
+  const collapse = raw?.collapse as unknown;
+  return {
+    initial,
+    step: initial > 0 ? num(raw?.step, 5) : 0,
+    collapse: initial > 0 && collapse !== 0 && collapse !== false ? 1 : 0,
+  };
+}
+
 /** Stock wide-tier constants, for reference/tests: 72rem cap, 24rem inset. */
 export const STOCK_CHAT_WIDTH = { capRem: 72, insetRem: 24 } as const;
 
@@ -344,9 +385,43 @@ export function normalizeChatLoadLook(raw?: Partial<ChatLoadLookConfig>): ChatLo
   };
 }
 
+/**
+ * FAB look (设置按钮): the floating panel-opener button (默认 🎨 圆球) can
+ * carry a custom image and size. Purely panel-side — the bootstrap never
+ * touches the FAB, so nothing here flows into BuiltPayload.
+ */
+export type FabMode = "default" | "image";
+export interface FabLookConfig {
+  mode: FabMode;
+  /** Image reference — same resolution rules as taskSpinnerLook.image. */
+  image: string;
+  /** Ball diameter in px (stock 34). */
+  size: number;
+}
+
+export const DEFAULT_FAB_LOOK: FabLookConfig = {
+  mode: "default",
+  image: "",
+  size: 34,
+};
+
+/** Clamp a partial fab look over the defaults (mirrors the chat-load icon). */
+export function normalizeFabLook(raw?: Partial<FabLookConfig>): FabLookConfig {
+  const mode: FabMode = raw?.mode === "image" ? "image" : "default";
+  const size = typeof raw?.size === "number" && Number.isFinite(raw.size)
+    ? Math.max(20, Math.min(64, Math.round(raw.size)))
+    : DEFAULT_FAB_LOOK.size;
+  const ref = (v: unknown): string =>
+    typeof v === "string" ? v.trim().slice(0, SPINNER_REF_MAX_CHARS) : "";
+  return {
+    mode: mode === "image" && !ref(raw?.image) ? "default" : mode,
+    image: ref(raw?.image),
+    size,
+  };
+}
+
 /** Inline fallback cap for local files outside the data dir. */
 export const SPINNER_FILE_MAX_BYTES = 2 * 1024 * 1024;
-
 const SPINNER_MIME: Record<string, string> = {
   ".gif": "image/gif",
   ".png": "image/png",
@@ -487,6 +562,10 @@ export interface BeautifyConfig {
   taskSpinnerLook?: Partial<TaskSpinnerLookConfig>;
   /** Conversation-footer loading icon (会话底部加载图标); absent = stock. */
   chatLoadLook?: Partial<ChatLoadLookConfig>;
+  /** Panel-opener FAB look (设置按钮); absent = stock 🎨 ball. */
+  fabLook?: Partial<FabLookConfig>;
+  /** Sidebar session-list paging (会话列表分页); absent = stock 5/+5, no collapse. */
+  listPaging?: Partial<ListPagingConfig>;
   /** Hide wallpaper+panel during ZCode's startup screen (default true). */
   startupClean?: boolean;
   /** Beautify ZCode's update-status window too (default false — stays stock). */
@@ -551,6 +630,8 @@ export interface BuiltPayload {
    * RESOLVED paint URL (media endpoint / data URI), "" = stock glyph.
    */
   chatLoadLook?: ChatLoadLookConfig;
+  /** Sidebar session-list paging (会话列表分页); `initial: 0` = stock behaviour. */
+  listPaging?: ListPagingConfig;
   /** Defer mounting until the ZCode startup screen is gone (default true). */
   startupClean?: boolean;
   /** False when the target client has no chat-area extras wired yet. */
@@ -763,6 +844,9 @@ ${rootSelector} { background: transparent !important; }
     componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(undefined),
     chatLoadLook: chatUi ? chatLoadLook : normalizeChatLoadLook(undefined),
+    // 会话列表分页: ZCode-only (the virtual-project-tasks list does not exist
+    // elsewhere); the disabled default keeps WorkBuddy untouched.
+    listPaging: chatUi ? normalizeListPaging(config.listPaging) : normalizeListPaging(undefined),
     startupClean: config.startupClean !== false,
     chatUi,
     startupProbe: app.startupProbe,

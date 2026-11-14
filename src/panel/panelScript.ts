@@ -121,7 +121,10 @@ export function buildPanelScript(
     // Window shell: sidebar + content settings window (the reference layout),
     // still one floating draggable panel over ZCode. Only the body column
     // scrolls, so the sidebar stays put.
-    '#zb-panel { position: fixed; right: 18px; bottom: 60px; width: min(680px, calc(100vw - 36px));',
+    // bottom tracks the FAB diameter through --zb-fab-panel-bottom (applyFabLook):
+    // the stock 60px assumes the 34px ball (18px margin + 8px gap + 34px);
+    // a resized ball would otherwise slide under/over the panel edge.
+    '#zb-panel { position: fixed; right: 18px; bottom: var(--zb-fab-panel-bottom, 60px); width: min(680px, calc(100vw - 36px));',
       // FIXED height (not max-height): every settings page renders in the
       // same-size window — switching tabs must not resize the panel.
       ' height: min(620px, calc(100vh - 68px)); display: flex; flex-direction: column; padding: 0;',
@@ -814,10 +817,23 @@ export function buildPanelScript(
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover-side" title="是否在左侧任务列表的会话标题上弹出概览卡:开=侧栏会话行悬停弹卡(隐藏官方工作区信息卡),关=侧栏恢复官方悬停卡,仅对话区提问刻度条弹卡"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">最多显示</span><span class="zb-set-sub">概览卡只列出最新的几条提问(1-60),更早的不显示;最新一条加粗</span></div>' +
       '        <div class="zb-ctrl"><input type="number" id="zb-chat-hover-max" min="1" max="60" step="1" title="概览卡列出的提问行数:只显示最新的 N 条,更早的不进入列表(1-60,默认10)"><span style="opacity:.6">条</span></div></div>' +
-      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">数据来源</span><span class="zb-set-sub">读取本机 ZCode 会话库(~/.zcode/cli/db),仅在你悬停时查询;美化服务未运行时降级为显示完整会话标题</span></div></div>' +
-      '      </div>' +
-      '    </div>' +
-      '    </div>' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">数据来源</span><span class="zb-set-sub">读取本机 ZCode 会话库(~/.zcode/cli/db),仅在你悬停时查询;美化服务未运行时降级为显示完整会话标题</span></div></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    <div class="zb-block">' +
+    '      <div class="zb-block-title">会话列表分页</div>' +
+    '      <div class="zb-card">' +
+    '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">自定分页</span><span class="zb-set-sub">改写左侧项目卡会话列表的分页行为;原生为展开 5 条、每次加载 5 条、无收起按钮</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-on" title="开启后由下方三个数值接管项目卡的会话分页;关闭恢复原生 5/+5"></label></div>' +
+    '      <div class="zb-set" id="zb-list-init-row" hidden><div class="zb-set-main"><span class="zb-set-name">初始展开</span><span class="zb-set-sub">展开项目时直接显示的会话条数(1-100;原生 5)</span></div>' +
+    '        <div class="zb-ctrl"><input type="number" id="zb-list-init" min="1" max="100" step="1" title="项目卡展开时的会话行数(1-100)"><span style="opacity:.6">条</span></div></div>' +
+    '      <div class="zb-set" id="zb-list-step-row" hidden><div class="zb-set-main"><span class="zb-set-name">每次加载</span><span class="zb-set-sub">每点一次"显示更多"追加的条数(1-100;原生 5)</span></div>' +
+    '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="每次点击显示更多追加的行数(1-100)"><span style="opacity:.6">条</span></div></div>' +
+    '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">收起按钮</span><span class="zb-set-sub">在"显示更多"旁加一个"收起",一键折回初始条数(原生展开后无法收回)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="显示收起按钮:点击后列表折回初始展开条数"></label></div>' +
+    '      </div>' +
+    '    </div>' +
+    '    </div>' +
       '    <div id="zb-tab-components" hidden>' +
     '    <div class="zb-block">' +
     '      <div class="zb-block-title">组件精修 · WorkBuddy</div>' +
@@ -890,6 +906,23 @@ export function buildPanelScript(
     '        <select id="zb-import-res"><option value="auto">默认(跟随壁纸)</option><option value="1920x1080">1920×1080</option><option value="1280x720">1280×720(省电)</option><option value="custom">自定义…</option></select>' +
     '        <input type="number" id="zb-res-w" min="256" max="3840" step="2" hidden>' +
 '        <input type="number" id="zb-res-h" min="144" max="2160" step="2" hidden></div>' +
+'      </div>' +
+'    </div>' +
+'    <div class="zb-block" id="zb-card-fab">' +
+'      <div class="zb-block-title">设置按钮</div>' +
+'      <div class="zb-card">' +
+'      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">按钮样式</span><span class="zb-set-sub">右下角打开美化面板的悬浮球;默认为 🎨 圆球,可换成自己的图片/GIF 动图</span></div>' +
+'        <div class="zb-ctrl"><select id="zb-fab-mode" title="设置按钮外观:默认=🎨 圆球,自定义图片=换成图片或 GIF">' +
+'          <option value="default">默认(🎨)</option>' +
+'          <option value="image">自定义图片</option>' +
+'        </select>' +
+'        <button class="zb-btn" id="zb-fab-pick" title="选择本地图片或 GIF 动图(≤2MB,支持 gif/png/webp/jpeg/svg)">📁 选图</button>' +
+'        <input type="file" id="zb-fab-file" accept="image/gif,image/png,image/webp,image/jpeg,image/svg+xml" hidden></div></div>' +
+'      <div class="zb-set" id="zb-fab-img-row" hidden><div class="zb-set-main"><span class="zb-set-name">当前图片</span></div>' +
+'        <div class="zb-ctrl"><img id="zb-fab-preview" alt="当前设置按钮图片" title="当前设置按钮图片" style="width:22px;height:22px;object-fit:contain;border-radius:5px;background:rgba(128,128,128,.18)">' +
+'        <button class="zb-btn" id="zb-fab-clear" title="恢复默认 🎨 圆球">✕ 恢复默认</button></div></div>' +
+'      <div class="zb-set zb-slide" id="zb-fab-size-row" hidden><div class="zb-set-main"><span class="zb-set-name">按钮大小</span><span class="zb-set-sub">悬浮球直径(20-64px,原生 34)</span></div>' +
+'        <input type="range" id="zb-fab-size" min="20" max="64" step="1" value="34" title="悬浮球直径(20-64px)"><span class="zb-val"><span id="zb-fab-size-val">34</span>px</span></div>' +
 '      </div>' +
 '    </div>' +
 '    <div class="zb-block" id="zb-card-experimental">' +
@@ -1242,6 +1275,8 @@ export function buildPanelScript(
       $('zb-dim').value = 0; $('zb-dim-val').textContent = '0';
       $('zb-sidebar-dim').value = 0; $('zb-sidebar-dim-val').textContent = '0';
       setChatSliders(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+      setListUI({});
+      setFabUI({});
       $('zb-monet').checked = false;
       $('zb-vis').checked = false;
       $('zb-fit').value = 'cover';
@@ -1293,6 +1328,8 @@ export function buildPanelScript(
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
+        setListUI(c.listPaging || {});
+        setFabUI(c.fabLook || {}, c.fabImageUrl || '');
         setComponentUI(c.componentLook || {});
         $('zb-fit') && applyFitLabel($('zb-fit'), c.fit || 'cover');
         var sc = document.getElementById('zb-startup-clean');
@@ -1612,6 +1649,55 @@ export function buildPanelScript(
     });
   });
 
+  // 会话列表分页: three numbers + a collapse toggle drive listPaging. The
+  // server normalizes/clamps; the bootstrap re-implements ZCode's hardcoded
+  // 5/+5 paging with the configured counts and an optional 收起 control.
+  function setListUI(lp) {
+    var on = Number(lp && lp.initial) > 0;
+    var onEl = $('zb-list-on');
+    if (onEl) onEl.checked = on;
+    var initEl = $('zb-list-init');
+    if (initEl) initEl.value = String(on ? Math.max(1, Math.round(Number(lp.initial) || 5)) : 5);
+    var stepEl = $('zb-list-step');
+    if (stepEl) stepEl.value = String(Math.max(1, Math.round(Number(lp && lp.step) || 5)));
+    var colEl = $('zb-list-collapse');
+    if (colEl) colEl.checked = lp ? lp.collapse !== 0 : true;
+    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = !on;
+    });
+  }
+  var listPushTimer = null;
+  function pushListPaging() {
+    clearTimeout(listPushTimer);
+    listPushTimer = setTimeout(function () {
+      var on = $('zb-list-on') && $('zb-list-on').checked;
+      post('/api/config', {
+        listPaging: {
+          initial: on ? Math.max(1, Math.round(Number($('zb-list-init').value) || 5)) : 0,
+          step: Math.max(1, Math.round(Number($('zb-list-step').value) || 5)),
+          collapse: $('zb-list-collapse') && $('zb-list-collapse').checked ? 1 : 0
+        }
+      }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  $('zb-list-on') && $('zb-list-on').addEventListener('change', function () {
+    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.hidden = !this.checked;
+    }, this);
+    pushListPaging();
+  });
+  $('zb-list-init') && $('zb-list-init').addEventListener('input', pushListPaging);
+  $('zb-list-step') && $('zb-list-step').addEventListener('input', pushListPaging);
+  ['zb-list-init', 'zb-list-step'].forEach(function (id) {
+    $(id) && $(id).addEventListener('change', function () {
+      this.value = Math.max(1, Math.min(100, Math.round(Number(this.value) || 5)));
+    });
+  });
+  $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', pushListPaging);
+
+
   // --- user message bubble look (聊天气泡) -----------------------------------
   function bubbleUIState() {
     return {
@@ -1885,6 +1971,112 @@ export function buildPanelScript(
     reflectLoadRows('default');
     pushLoadLook();
     status('已恢复新版原生加载图标');
+  });
+
+  // --- 设置按钮 (panel-opener FAB) -------------------------------------------
+  // Purely panel-side: the FAB is this script's own DOM node, so the look is
+  // applied by styling #zb-fab directly from /api/config (no bootstrap, no
+  // theme push). The image upload rides /api/spinner slot "fab" like the
+  // other icon slots; size scales the emoji too (font-size = half the ball).
+  var fabImageRef = '';
+  function applyFabLook() {
+    var fab = $('zb-fab');
+    if (!fab) return;
+    var mode = $('zb-fab-mode').value;
+    var size = Math.max(20, Math.min(64, Math.round(Number($('zb-fab-size').value) || 34)));
+    if (mode === 'image' && fabImageRef && lastConfig && lastConfig.fabImageUrl) {
+      // Empty the emoji and paint the image over the ball (round avatar).
+      // Without a resolved URL (serve down, first refresh pending) the emoji
+      // stays — an empty dark ball would look broken.
+      if (fab.textContent !== '') fab.textContent = '';
+      fab.style.backgroundImage = 'url("' + lastConfig.fabImageUrl + '")';
+      fab.style.backgroundSize = 'cover';
+      fab.style.backgroundPosition = 'center';
+      fab.style.backgroundRepeat = 'no-repeat';
+    } else {
+      if (fab.textContent !== '🎨') fab.textContent = '🎨';
+      fab.style.backgroundImage = 'none';
+    }
+    if (fab.style.width !== size + 'px') fab.style.width = size + 'px';
+    if (fab.style.height !== size + 'px') fab.style.height = size + 'px';
+    var fs = Math.round(size * 0.5);
+    if (fab.style.fontSize !== fs + 'px') fab.style.fontSize = fs + 'px';
+    // Anchor the (undragged) panel above the ball with the same 8px gap the
+    // stock 34px geometry bakes in: 18px FAB margin + size + 8px gap. A dragged
+    // panel carries inline right/bottom:auto, which outranks this var and keeps
+    // the user's chosen spot; the pull-back-in flow clears the inlines and
+    // re-anchors, so the var takes over again there.
+    document.documentElement.style.setProperty('--zb-fab-panel-bottom', (size + 26) + 'px');
+  }
+  function reflectFabRows(mode) {
+    var on = mode === 'image' && Boolean(fabImageRef);
+    $('zb-fab-img-row').hidden = !on;
+    // Size stays adjustable in BOTH modes — reverting to the stock emoji must
+    // not strand a resized ball with no visible control to change it back.
+    $('zb-fab-size-row').hidden = false;
+    if (on && lastConfig && lastConfig.fabImageUrl) $('zb-fab-preview').src = lastConfig.fabImageUrl;
+    applyFabLook();
+  }
+  function setFabUI(s, url) {
+    s = s || {};
+    var mode = s.mode === 'image' && s.image ? 'image' : 'default';
+    fabImageRef = typeof s.image === 'string' ? s.image : '';
+    if (url && lastConfig) lastConfig.fabImageUrl = url;
+    $('zb-fab-mode').value = mode;
+    $('zb-fab-size').value = s.size ?? 34;
+    $('zb-fab-size-val').textContent = String(s.size ?? 34);
+    reflectFabRows(mode);
+  }
+  var fabPushTimer = null;
+  function pushFabLook() {
+    clearTimeout(fabPushTimer);
+    fabPushTimer = setTimeout(function () {
+      post('/api/config', {
+        fabLook: {
+          mode: $('zb-fab-mode').value,
+          image: fabImageRef,
+          size: Math.max(20, Math.min(64, Math.round(Number($('zb-fab-size').value) || 34)))
+        }
+      }, function (d) { if (d && d.error) status(d.error); });
+    }, 300);
+  }
+  $('zb-fab-mode') && $('zb-fab-mode').addEventListener('change', function () {
+    reflectFabRows(this.value);
+    pushFabLook();
+  });
+  $('zb-fab-size') && $('zb-fab-size').addEventListener('input', function () {
+    $('zb-fab-size-val').textContent = this.value;
+    applyFabLook(); // live ball resize, no push spam
+  });
+  $('zb-fab-size') && $('zb-fab-size').addEventListener('change', pushFabLook);
+  $('zb-fab-pick') && $('zb-fab-pick').addEventListener('click', function () {
+    $('zb-fab-file').click();
+  });
+  $('zb-fab-file') && $('zb-fab-file').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    this.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { status('图片超过 2MB,悬浮球请选小一点的文件'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      post('/api/spinner', { dataUri: fr.result, name: f.name, slot: 'fab' }, function (d) {
+        if (d && d.error) { status(d.error); return; }
+        if (d && d.fabLook && d.fabLook.image) {
+          fabImageRef = d.fabLook.image;
+          lastConfig = d; // resolved preview URL rides on the same payload
+          $('zb-fab-mode').value = 'image';
+          reflectFabRows('image');
+        }
+        status(d && d.windows > 0 ? '设置按钮已应用' : '设置按钮已保存(ZCode 未连接)');
+      });
+    };
+    fr.readAsDataURL(f);
+  });
+  $('zb-fab-clear') && $('zb-fab-clear').addEventListener('click', function () {
+    $('zb-fab-mode').value = 'default';
+    reflectFabRows('default');
+    pushFabLook();
+    status('已恢复默认 🎨 设置按钮');
   });
 
   // --- custom bubble CSS editor WINDOW + sandboxed live preview --------------
