@@ -218,7 +218,8 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     check("C6 native button retired by the full render-ahead", !list.querySelector(":scope > button[data-task-list-show-more]") && !list.contains(btn));
     const bar = list.querySelector(":scope > div[data-zb-list-bar]");
     const totalEl = bar?.querySelector("[data-zb-list-total]") as any;
-    check("C6 total indicator shows the settled count", totalEl && totalEl.style.display !== "none" && totalEl.textContent === "共 12 条", `t=${totalEl && totalEl.textContent}`);
+    // Remaining-count semantics: the indicator reads the still-hidden rows.
+    check("C6 indicator shows the hidden count (12 mounted, 4 visible)", totalEl && totalEl.style.display !== "none" && totalEl.textContent === "还有 8 条", `t=${totalEl && totalEl.textContent}`);
     check("C6 indicator sits right after MORE, before 收起", bar?.querySelector("[data-zb-list-total]").nextSibling?.getAttribute?.("data-zb-list-less") === "1");
     check("C6 count styled auxiliary (12px, nowrap)", totalEl.style.fontSize === "12px" && totalEl.style.whiteSpace === "nowrap");
     check("C6 MORE still offered (rows hidden)", (bar?.querySelector("[data-zb-list-more]") as any).style.display !== "none");
@@ -226,10 +227,10 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     const moreC6 = bar?.querySelector("[data-zb-list-more]") as any;
     const lessC6 = bar?.querySelector("[data-zb-list-less]") as any;
     moreC6.click();
-    check("C6 MORE reveals +3, count unchanged", visibleRows(list) === 7 && totalEl.textContent === "共 12 条", `v=${visibleRows(list)}`);
+    check("C6 MORE reveals +3, count shrinks", visibleRows(list) === 7 && totalEl.textContent === "还有 5 条", `v=${visibleRows(list)} t=${totalEl.textContent}`);
     check("C6 收起 appears once expanded", lessC6.style.display !== "none");
     lessC6.click();
-    check("C6 收起 snaps back, count still the total", visibleRows(list) === 4 && totalEl.textContent === "共 12 条");
+    check("C6 收起 snaps back, count back to the baseline hidden count", visibleRows(list) === 4 && totalEl.textContent === "还有 8 条");
     // A new session arrives (React appends a row): the observer rescans and
     // the count follows.
     const row13 = w.document.createElement("div");
@@ -237,7 +238,12 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     row13.textContent = "row-12";
     list.insertBefore(row13, bar);
     await sleep(150);
-    check("C6 count follows a newly arrived row", visibleRows(list) === 4 && totalEl.textContent === "共 13 条" && moreC6.style.display !== "none", `t=${totalEl.textContent}`);
+    check("C6 count follows a newly arrived row", visibleRows(list) === 4 && totalEl.textContent === "还有 9 条" && moreC6.style.display !== "none", `t=${totalEl.textContent}`);
+    // Reveal everything: the indicator disappears at zero (nothing hidden).
+    for (let i = 7; i < 13; i++) moreC6.click();
+    check("C6 full reveal hides the indicator (nothing left)", visibleRows(list) === 13 && totalEl.textContent === "" && totalEl.style.display === "none" && moreC6.style.display === "none" && lessC6.style.display !== "none");
+    lessC6.click();
+    check("C6 收起 brings the indicator back", visibleRows(list) === 4 && totalEl.textContent === "还有 9 条" && totalEl.style.display !== "none");
     // showTotal=0 keeps the stock render-ahead: native survives, no indicator.
     const w2 = makeWindow();
     const { list: list2 } = mountSidebar(w2);
@@ -274,7 +280,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     const bar3 = list3.querySelector(":scope > div[data-zb-list-bar]");
     const tot3 = bar3?.querySelector("[data-zb-list-total]") as any;
     check("C6 legacy bar gains the grafted span with the count",
-      !!tot3 && tot3.textContent === "共 12 条" && tot3.previousSibling === oldMore && tot3.nextSibling === oldLess,
+      !!tot3 && tot3.textContent === "还有 8 条" && tot3.previousSibling === oldMore && tot3.nextSibling === oldLess,
       `t=${tot3 && tot3.textContent}`);
     check("C6 grafted span restyled to the current values", tot3.style.fontSize === "12px" && tot3.style.whiteSpace === "nowrap" && tot3.style.opacity === "0.65");
   }

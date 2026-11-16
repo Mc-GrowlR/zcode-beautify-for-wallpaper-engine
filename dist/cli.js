@@ -2354,11 +2354,13 @@ function buildBootstrapScript(payload) {
       // condition a \u6536\u8D77 would leave the hidden rows unreachable.
       var needMore = Boolean(native) || rows.length > state.visible;
       var needCollapse = window.__zcodeBeautify.listCollapse && state.visible > window.__zcodeBeautify.listInit;
-      // \u5171 N \u6761: once the native button is retired the mounted row count IS
-      // the total \u2014 while React still offers pages we have not pulled, the
-      // settled count is unknown and the indicator stays hidden (showTotal
-      // render-aheads to that end on every scan).
-      var needTotal = window.__zcodeBeautify.listShowTotal && rows.length > 0 && !native;
+      // \u8FD8\u6709 N \u6761: once the native button is retired the mounted row count IS
+      // the total, so the still-hidden count is exact \u2014 the indicator reads
+      // rows.length - visible and shrinks per \u663E\u793A\u66F4\u591A click until it
+      // disappears at full reveal. While React still offers pages we have not
+      // pulled, the settled count is unknown and the indicator stays hidden
+      // (showTotal render-aheads to that end on every scan).
+      var needTotal = window.__zcodeBeautify.listShowTotal && !native && rows.length > state.visible;
       var bar = container.querySelector(':scope > div[data-zb-list-bar]');
       if (!needMore && !needCollapse && !needTotal) {
         if (bar) bar.remove();
@@ -2437,7 +2439,7 @@ function buildBootstrapScript(payload) {
       if (lessB) lessB.style.display = needCollapse ? '' : 'none';
       var totB = bar.querySelector('[data-zb-list-total]');
       if (totB) {
-        var label = needTotal ? (zh ? '\u5171 ' + rows.length + ' \u6761' : rows.length + ' total') : '';
+        var label = needTotal ? (zh ? '\u8FD8\u6709 ' + (rows.length - state.visible) + ' \u6761' : (rows.length - state.visible) + ' more') : '';
         if (totB.textContent !== label) totB.textContent = label;
         totB.style.display = needTotal ? '' : 'none';
       }
@@ -2741,7 +2743,7 @@ var init_cdp = __esm({
         }
       }
     };
-    LIST_PAGING_VER = 5;
+    LIST_PAGING_VER = 6;
   }
 });
 
@@ -112569,7 +112571,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.2";
+    VERSION = "6.3.3";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -115573,8 +115575,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="\u6BCF\u6B21\u70B9\u51FB\u663E\u793A\u66F4\u591A\u8FFD\u52A0\u7684\u884C\u6570(1-100)"><span style="opacity:.6">\u6761</span></div></div>' +
     '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u6536\u8D77\u6309\u94AE</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u52A0\u4E00\u4E2A"\u6536\u8D77",\u4E00\u952E\u6298\u56DE\u521D\u59CB\u6761\u6570(\u539F\u751F\u5C55\u5F00\u540E\u65E0\u6CD5\u6536\u56DE)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="\u663E\u793A\u6536\u8D77\u6309\u94AE:\u70B9\u51FB\u540E\u5217\u8868\u6298\u56DE\u521D\u59CB\u5C55\u5F00\u6761\u6570"></label></div>' +
-    '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u663E\u793A\u603B\u6570</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u663E\u793A\u8BE5\u5217\u8868\u7684\u4F1A\u8BDD\u603B\u6570(\u9ED8\u8BA4\u5F00\u542F;\u4E3A\u53D6\u51C6\u786E\u603B\u6570,\u5217\u8868\u7684\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u8F7D\u5165,\u591A\u4F59\u7684\u4ECD\u9690\u85CF)</span></div>' +
-    '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="\u663E\u793A\u66F4\u591A\u65C1\u7684\u5171 N \u6761\u6307\u793A:\u5F00\u542F\u540E\u8BE5\u5217\u8868\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u6302\u8F7D(\u591A\u4F59\u7684\u4ECD\u9690\u85CF),\u603B\u6570\u624D\u53EF\u77E5"></label></div>' +
+    '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u663E\u793A\u5269\u4F59</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u663E\u793A\u8FD8\u6709\u591A\u5C11\u6761\u672A\u663E\u793A,\u968F\u5C55\u5F00\u9012\u51CF\u3001\u5168\u90E8\u663E\u793A\u540E\u81EA\u52A8\u6D88\u5931(\u9ED8\u8BA4\u5F00\u542F;\u4E3A\u51C6\u786E\u8BA1\u6570,\u5217\u8868\u7684\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u8F7D\u5165,\u591A\u4F59\u7684\u4ECD\u9690\u85CF)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="\u663E\u793A\u66F4\u591A\u65C1\u7684\u8FD8\u6709 N \u6761\u6307\u793A:\u5F00\u542F\u540E\u8BE5\u5217\u8868\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u6302\u8F7D(\u591A\u4F59\u7684\u4ECD\u9690\u85CF),\u5269\u4F59\u6570\u624D\u53EF\u77E5"></label></div>' +
     '      </div>' +
     '    </div>' +
     '    </div>' +

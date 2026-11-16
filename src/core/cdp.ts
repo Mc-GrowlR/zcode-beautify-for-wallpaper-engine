@@ -2199,11 +2199,13 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       // condition a 收起 would leave the hidden rows unreachable.
       var needMore = Boolean(native) || rows.length > state.visible;
       var needCollapse = window.__zcodeBeautify.listCollapse && state.visible > window.__zcodeBeautify.listInit;
-      // 共 N 条: once the native button is retired the mounted row count IS
-      // the total — while React still offers pages we have not pulled, the
-      // settled count is unknown and the indicator stays hidden (showTotal
-      // render-aheads to that end on every scan).
-      var needTotal = window.__zcodeBeautify.listShowTotal && rows.length > 0 && !native;
+      // 还有 N 条: once the native button is retired the mounted row count IS
+      // the total, so the still-hidden count is exact — the indicator reads
+      // rows.length - visible and shrinks per 显示更多 click until it
+      // disappears at full reveal. While React still offers pages we have not
+      // pulled, the settled count is unknown and the indicator stays hidden
+      // (showTotal render-aheads to that end on every scan).
+      var needTotal = window.__zcodeBeautify.listShowTotal && !native && rows.length > state.visible;
       var bar = container.querySelector(':scope > div[data-zb-list-bar]');
       if (!needMore && !needCollapse && !needTotal) {
         if (bar) bar.remove();
@@ -2282,7 +2284,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       if (lessB) lessB.style.display = needCollapse ? '' : 'none';
       var totB = bar.querySelector('[data-zb-list-total]');
       if (totB) {
-        var label = needTotal ? (zh ? '共 ' + rows.length + ' 条' : rows.length + ' total') : '';
+        var label = needTotal ? (zh ? '还有 ' + (rows.length - state.visible) + ' 条' : (rows.length - state.visible) + ' more') : '';
         if (totB.textContent !== label) totB.textContent = label;
         totB.style.display = needTotal ? '' : 'none';
       }
@@ -2468,7 +2470,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
  * css/chat/list keys are unchanged (older generations' registrations re-run
  * first and would otherwise mask the fix). Bump on any paging-code change.
  */
-export const LIST_PAGING_VER = 5;
+export const LIST_PAGING_VER = 6;
 
 export function buildResetScript(marker = "zcode-beautify"): string {
   return `(function(){

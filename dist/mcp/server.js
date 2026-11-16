@@ -9501,11 +9501,13 @@ function buildBootstrapScript(payload) {
       // condition a \u6536\u8D77 would leave the hidden rows unreachable.
       var needMore = Boolean(native) || rows.length > state.visible;
       var needCollapse = window.__zcodeBeautify.listCollapse && state.visible > window.__zcodeBeautify.listInit;
-      // \u5171 N \u6761: once the native button is retired the mounted row count IS
-      // the total \u2014 while React still offers pages we have not pulled, the
-      // settled count is unknown and the indicator stays hidden (showTotal
-      // render-aheads to that end on every scan).
-      var needTotal = window.__zcodeBeautify.listShowTotal && rows.length > 0 && !native;
+      // \u8FD8\u6709 N \u6761: once the native button is retired the mounted row count IS
+      // the total, so the still-hidden count is exact \u2014 the indicator reads
+      // rows.length - visible and shrinks per \u663E\u793A\u66F4\u591A click until it
+      // disappears at full reveal. While React still offers pages we have not
+      // pulled, the settled count is unknown and the indicator stays hidden
+      // (showTotal render-aheads to that end on every scan).
+      var needTotal = window.__zcodeBeautify.listShowTotal && !native && rows.length > state.visible;
       var bar = container.querySelector(':scope > div[data-zb-list-bar]');
       if (!needMore && !needCollapse && !needTotal) {
         if (bar) bar.remove();
@@ -9584,7 +9586,7 @@ function buildBootstrapScript(payload) {
       if (lessB) lessB.style.display = needCollapse ? '' : 'none';
       var totB = bar.querySelector('[data-zb-list-total]');
       if (totB) {
-        var label = needTotal ? (zh ? '\u5171 ' + rows.length + ' \u6761' : rows.length + ' total') : '';
+        var label = needTotal ? (zh ? '\u8FD8\u6709 ' + (rows.length - state.visible) + ' \u6761' : (rows.length - state.visible) + ' more') : '';
         if (totB.textContent !== label) totB.textContent = label;
         totB.style.display = needTotal ? '' : 'none';
       }
@@ -9888,7 +9890,7 @@ var init_cdp = __esm({
         }
       }
     };
-    LIST_PAGING_VER = 5;
+    LIST_PAGING_VER = 6;
   }
 });
 
@@ -119677,7 +119679,7 @@ var VERSION;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.2";
+    VERSION = "6.3.3";
   }
 });
 
@@ -151736,7 +151738,7 @@ server.registerTool("apply_options", {
     list_initial: external_exports.number().min(0).max(100).optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: how many session rows a project card shows when expanded (\u521D\u59CB\u5C55\u5F00\u6761\u6570, 1-100). 0 = stock behaviour (ZCode's hardcoded 5, +5 per click, no collapse)"),
     list_step: external_exports.number().min(1).max(100).optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: how many rows each \u663E\u793A\u66F4\u591A click adds (\u6BCF\u6B21\u52A0\u8F7D\u6761\u6570, 1-100). Only meaningful with list_initial > 0"),
     list_collapse: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: whether a \u6536\u8D77 button sits next to \u663E\u793A\u66F4\u591A (true, default) snapping the list back to list_initial rows; false hides it. Only meaningful with list_initial > 0"),
-    list_show_total: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: whether a \u5171 N \u6761 total count shows after \u663E\u793A\u66F4\u591A (true, default). Enabling it pre-loads every row of the list (extras stay hidden) so the exact total is known. Only meaningful with list_initial > 0"),
+    list_show_total: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: whether a \u8FD8\u6709 N \u6761 count shows after \u663E\u793A\u66F4\u591A (true, default) \u2014 the number of still-hidden rows, shrinking per click and disappearing once everything is shown. Enabling it pre-loads every row of the list (extras stay hidden) so the exact count is known. Only meaningful with list_initial > 0"),
     fab: external_exports.object({
       mode: external_exports.enum(["default", "image"]).optional().describe("\u8BBE\u7F6E\u6309\u94AE (panel-opener FAB): default = the stock \u{1F3A8} ball, image = a user picture/GIF"),
       image_path: external_exports.string().optional().describe("Absolute path or file name of the image for the FAB (resolved serve-side; required when mode = image; \u22642MB when uploaded via the panel)"),

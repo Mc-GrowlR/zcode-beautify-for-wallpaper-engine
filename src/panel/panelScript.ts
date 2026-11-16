@@ -831,8 +831,8 @@ export function buildPanelScript(
     '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="每次点击显示更多追加的行数(1-100)"><span style="opacity:.6">条</span></div></div>' +
     '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">收起按钮</span><span class="zb-set-sub">在"显示更多"旁加一个"收起",一键折回初始条数(原生展开后无法收回)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="显示收起按钮:点击后列表折回初始展开条数"></label></div>' +
-    '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">显示总数</span><span class="zb-set-sub">在"显示更多"旁显示该列表的会话总数(默认开启;为取准确总数,列表的全部会话行会预先载入,多余的仍隐藏)</span></div>' +
-    '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="显示更多旁的共 N 条指示:开启后该列表全部会话行会预先挂载(多余的仍隐藏),总数才可知"></label></div>' +
+    '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">显示剩余</span><span class="zb-set-sub">在"显示更多"旁显示还有多少条未显示,随展开递减、全部显示后自动消失(默认开启;为准确计数,列表的全部会话行会预先载入,多余的仍隐藏)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="显示更多旁的还有 N 条指示:开启后该列表全部会话行会预先挂载(多余的仍隐藏),剩余数才可知"></label></div>' +
     '      </div>' +
     '    </div>' +
     '    </div>' +
