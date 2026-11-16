@@ -554,13 +554,13 @@ async function holdSession(
     startupProbe: payload.startupProbe,
     previewApi: payload.previewApi,
   });
-  const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
+  const { identifier } = await boundedSend(conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
-  });
+  }));
   session.themeScriptId = identifier;
   // Runtime.evaluate does NOT reject when the script throws — same check as
   // the panel below, or a broken theme fails silently.
-  const bootEval = await conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+  const bootEval = await boundedSend(conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true }));
   if (bootEval?.exceptionDetails) {
     console.error(`serve: theme bootstrap threw — ${JSON.stringify(bootEval.exceptionDetails).slice(0, 400)}`);
   }
@@ -581,7 +581,7 @@ async function holdSession(
   await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
   // Runtime.evaluate does NOT reject when the script itself throws — surface
   // exceptionDetails or a broken panel fails silently ("injected" in the log).
-  const panelEval = await conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true });
+  const panelEval = await boundedSend(conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true }));
   if (panelEval?.exceptionDetails) {
     console.error(`serve: panel script threw — ${JSON.stringify(panelEval.exceptionDetails).slice(0, 400)}`);
   }
@@ -590,6 +590,20 @@ async function holdSession(
 }
 
 /** Re-evaluates the theme bootstrap in every live session after a config change. */
+/**
+ * CDP sends have NO built-in timeout: an evaluate issued while the renderer is
+ * mid-reload (its execution context destroyed) can answer NEVER, and every
+ * later send on that connection queues behind it — panel/user pushes hang
+ * forever and poll stops re-injecting. Every push/inject send is therefore
+ * time-bounded; a timeout drops the session so the next poll re-holds it.
+ */
+function boundedSend<T>(p: Promise<T>, ms = 8000): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('CDP send timed out')), ms)),
+  ]);
+}
+
 async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
   const assets = await getAssets(config);
   const payload = buildPayload(lookConfigFor(config), assets, mediaToken);
@@ -619,8 +633,8 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
           .send("Page.removeScriptToEvaluateOnNewDocument", { identifier: session.themeScriptId })
           .catch(() => {});
       }
-      session.themeScriptId = await registerScript(session, bootstrap);
-      const evalRes = await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      session.themeScriptId = await boundedSend(registerScript(session, bootstrap));
+      const evalRes = await boundedSend(session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true }));
       // Runtime.evaluate does NOT reject on script errors — without this the
       // fast paths can fail silently while the caller reports success.
       if (evalRes?.exceptionDetails) {
@@ -631,12 +645,13 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
       // the wild (a stray null write); this idempotent pass guarantees the
       // <video> ends up at the configured volume whatever happened before.
       const vv = Math.max(0, Math.min(100, Math.round(payload.videoVolume ?? 0)));
-      await session.conn
-        .send("Runtime.evaluate", {
-          expression: `(function(){var v=document.getElementById('zcode-beautify-video');if(v){v.muted=${JSON.stringify(vv === 0)};v.volume=${(vv / 100).toFixed(3)};}})()`,
-          returnByValue: true,
-        })
-        .catch(() => {});
+      await boundedSend(
+        session.conn
+          .send("Runtime.evaluate", {
+            expression: `(function(){var v=document.getElementById('zcode-beautify-video');if(v){v.muted=${JSON.stringify(vv === 0)};v.volume=${(vv / 100).toFixed(3)};}})()`,
+            returnByValue: true,
+          }),
+      ).catch(() => {});
       ok++;
     } catch {
       session.conn.close();

@@ -7566,10 +7566,11 @@ function buildBootstrapScript(payload) {
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
-  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse, showTotal} \u2014
-  // initial 0 = the stock 5/+5 paging with no collapse control; showTotal 1
-  // renders a \u5171 N \u6761 indicator after \u663E\u793A\u66F4\u591A.
-  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0 }))};
+  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse, showTotal,
+  // collapseAll} \u2014 initial 0 = the stock 5/+5 paging with no collapse control;
+  // showTotal 1 renders a \u8FD8\u6709 N \u6761 indicator after \u663E\u793A\u66F4\u591A; collapseAll 0
+  // makes \u6536\u8D77 step back by the step size per click instead of one shot.
+  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0, collapseAll: 0 }))};
   // Generation stamp: the BUILD version of the paging engine. Older
   // generations (their addScriptToEvaluateOnNewDocument registrations outlive
   // the serve restart that shipped fixed code) leave identical css/chat/list
@@ -9456,6 +9457,7 @@ function buildBootstrapScript(payload) {
     window.__zcodeBeautify.listStep = Math.max(1, Math.round(Number(L && L.step) || 5));
     window.__zcodeBeautify.listCollapse = Number(L && L.collapse) === 1;
     window.__zcodeBeautify.listShowTotal = Number(L && L.showTotal) === 1;
+    window.__zcodeBeautify.listCollapseAll = Number(L && L.collapseAll) === 1;
 
     // Static rule: the native button is replaced by our toolbar row. Its
     // element STAYS in the DOM (display:none) \u2014 render-ahead clicks it.
@@ -9537,7 +9539,11 @@ function buildBootstrapScript(payload) {
         less.textContent = (zh ? '\u6536\u8D77' : 'Show less');
         less.setAttribute('data-zb-list-less', '1');
         less.addEventListener('click', function() {
-          state.visible = window.__zcodeBeautify.listInit;
+          // collapseAll (default): one click snaps back to the initial count;
+          // otherwise each \u6536\u8D77 steps back by the step size, floor at initial.
+          state.visible = window.__zcodeBeautify.listCollapseAll
+            ? window.__zcodeBeautify.listInit
+            : Math.max(window.__zcodeBeautify.listInit, state.visible - window.__zcodeBeautify.listStep);
           applyListContainer(container);
         });
         var total = document.createElement('span');
@@ -9890,7 +9896,7 @@ var init_cdp = __esm({
         }
       }
     };
-    LIST_PAGING_VER = 6;
+    LIST_PAGING_VER = 7;
   }
 });
 
@@ -119679,7 +119685,7 @@ var VERSION;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.3";
+    VERSION = "6.3.4";
   }
 });
 
@@ -119811,11 +119817,13 @@ function normalizeListPaging(raw) {
   const initial = typeof raw?.initial === "number" && Number.isFinite(raw.initial) && raw.initial >= 1 ? Math.min(LIST_PAGING_MAX, Math.round(raw.initial)) : 0;
   const collapse = raw?.collapse;
   const showTotal = raw?.showTotal;
+  const collapseAll = raw?.collapseAll;
   return {
     initial,
     step: initial > 0 ? num(raw?.step, 5) : 0,
     collapse: initial > 0 && collapse !== 0 && collapse !== false ? 1 : 0,
-    showTotal: initial > 0 && showTotal !== 0 && showTotal !== false ? 1 : 0
+    showTotal: initial > 0 && showTotal !== 0 && showTotal !== false ? 1 : 0,
+    collapseAll: initial > 0 && collapseAll !== 0 && collapseAll !== false ? 1 : 0
   };
 }
 function normalizeChatLook(raw) {
@@ -151738,6 +151746,7 @@ server.registerTool("apply_options", {
     list_initial: external_exports.number().min(0).max(100).optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: how many session rows a project card shows when expanded (\u521D\u59CB\u5C55\u5F00\u6761\u6570, 1-100). 0 = stock behaviour (ZCode's hardcoded 5, +5 per click, no collapse)"),
     list_step: external_exports.number().min(1).max(100).optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: how many rows each \u663E\u793A\u66F4\u591A click adds (\u6BCF\u6B21\u52A0\u8F7D\u6761\u6570, 1-100). Only meaningful with list_initial > 0"),
     list_collapse: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: whether a \u6536\u8D77 button sits next to \u663E\u793A\u66F4\u591A (true, default) snapping the list back to list_initial rows; false hides it. Only meaningful with list_initial > 0"),
+    list_collapse_all: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: whether \u6536\u8D77 snaps all the way back to list_initial in ONE click (true, default); false makes each \u6536\u8D77 click step back by list_step rows until it reaches list_initial (then the button hides). Only meaningful with list_collapse on"),
     list_show_total: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u5217\u8868\u5206\u9875: whether a \u8FD8\u6709 N \u6761 count shows after \u663E\u793A\u66F4\u591A (true, default) \u2014 the number of still-hidden rows, shrinking per click and disappearing once everything is shown. Enabling it pre-loads every row of the list (extras stay hidden) so the exact count is known. Only meaningful with list_initial > 0"),
     fab: external_exports.object({
       mode: external_exports.enum(["default", "image"]).optional().describe("\u8BBE\u7F6E\u6309\u94AE (panel-opener FAB): default = the stock \u{1F3A8} ball, image = a user picture/GIF"),
@@ -151745,7 +151754,7 @@ server.registerTool("apply_options", {
       size: external_exports.number().min(20).max(64).optional().describe("Ball diameter in px (stock 34)")
     }).optional().describe("Panel-opener button look; omitted fields keep their current value")
   }
-}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, fab }) => {
+}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, list_collapse_all, fab }) => {
   try {
     if (!experimentalEnabled(loadConfig()))
       return disabledNotice();
@@ -151762,11 +151771,12 @@ server.registerTool("apply_options", {
       ...chat_composer_fade !== void 0 ? { composerFade: chat_composer_fade } : {}
     };
     const chatLoadLook = chat_loading_icon === void 0 ? void 0 : Object.fromEntries(Object.entries(chat_loading_icon).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k, v]));
-    const listPaging = list_initial === void 0 && list_step === void 0 && list_collapse === void 0 && list_show_total === void 0 ? void 0 : {
+    const listPaging = list_initial === void 0 && list_step === void 0 && list_collapse === void 0 && list_show_total === void 0 && list_collapse_all === void 0 ? void 0 : {
       ...list_initial !== void 0 ? { initial: list_initial } : {},
       ...list_step !== void 0 ? { step: list_step } : {},
       ...list_collapse !== void 0 ? { collapse: list_collapse ? 1 : 0 } : {},
-      ...list_show_total !== void 0 ? { showTotal: list_show_total ? 1 : 0 } : {}
+      ...list_show_total !== void 0 ? { showTotal: list_show_total ? 1 : 0 } : {},
+      ...list_collapse_all !== void 0 ? { collapseAll: list_collapse_all ? 1 : 0 } : {}
     };
     const fabLook = fab === void 0 ? void 0 : Object.fromEntries(Object.entries(fab).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k, v]));
     const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook, listPaging, fabLook });

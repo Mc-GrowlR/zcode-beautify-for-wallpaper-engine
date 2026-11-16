@@ -60,11 +60,13 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
   check("collapse defaults to ON when omitted", normalizeListPaging({ initial: 5 }).collapse === 1);
   check("showTotal defaults to ON when omitted", normalizeListPaging({ initial: 5 }).showTotal === 1);
   check("explicit showTotal off sticks", normalizeListPaging({ initial: 5, showTotal: 0 }).showTotal === 0 && normalizeListPaging({ initial: 5, showTotal: false }).showTotal === 0);
+  check("collapseAll defaults to ON when omitted (one-shot 收起)", normalizeListPaging({ initial: 5 }).collapseAll === 1);
+  check("explicit collapseAll=false sticks (step-wise 收起)", normalizeListPaging({ initial: 5, collapseAll: 0 }).collapseAll === 0 && normalizeListPaging({ initial: 5, collapseAll: false }).collapseAll === 0);
   check("step defaults to 5 when omitted", normalizeListPaging({ initial: 5 }).step === 5);
   check("initial clamps to 100", normalizeListPaging({ initial: 500, step: 5 }).initial === 100);
   check("step clamps to 1-100", normalizeListPaging({ initial: 5, step: 0 }).step === 1 && normalizeListPaging({ initial: 5, step: 999 }).step === 100);
-  const offIgn = normalizeListPaging({ initial: 0, step: 50, collapse: 1, showTotal: 1 });
-  check("initial 0 forces everything off", offIgn.initial === 0 && offIgn.step === 0 && offIgn.collapse === 0 && offIgn.showTotal === 0);
+  const offIgn = normalizeListPaging({ initial: 0, step: 50, collapse: 1, showTotal: 1, collapseAll: 1 });
+  check("initial 0 forces everything off", offIgn.initial === 0 && offIgn.step === 0 && offIgn.collapse === 0 && offIgn.showTotal === 0 && offIgn.collapseAll === 0);
   check("garbage initial falls back to off", normalizeListPaging({ initial: NaN }).initial === 0);
 }
 
@@ -72,10 +74,10 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
 {
   setTarget("zcode");
   const payload = buildPayload({ ...base, listPaging: { initial: 6, step: 10, collapse: false } }, assets);
-  check("zcode payload carries the normalized paging", payload.listPaging?.initial === 6 && payload.listPaging?.step === 10 && payload.listPaging?.collapse === 0 && payload.listPaging?.showTotal === 1);
+  check("zcode payload carries the normalized paging", payload.listPaging?.initial === 6 && payload.listPaging?.step === 10 && payload.listPaging?.collapse === 0 && payload.listPaging?.showTotal === 1 && payload.listPaging?.collapseAll === 1);
   setTarget("workbuddy");
   const wb = buildPayload({ ...base, listPaging: { initial: 6, step: 10, collapse: true } }, assets);
-  check("workbuddy is forced to stock paging", wb.listPaging?.initial === 0 && wb.listPaging?.step === 0 && wb.listPaging?.showTotal === 0);
+  check("workbuddy is forced to stock paging", wb.listPaging?.initial === 0 && wb.listPaging?.step === 0 && wb.listPaging?.showTotal === 0 && wb.listPaging?.collapseAll === 0);
   setTarget("zcode");
 }
 
@@ -152,7 +154,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
   {
     const w = makeWindow();
     const { list, btn } = mountSidebar(w);
-    w.eval(buildBootstrapScript({ css: "", listPaging: { initial: 4, step: 3, collapse: 1 } }));
+    w.eval(buildBootstrapScript({ css: "", listPaging: { initial: 4, step: 3, collapse: 1, collapseAll: 1 } }));
     check("C1 style element mounted", !!w.document.getElementById("zcode-beautify-list-style"));
     // Stock first page mounts 5 rows; init=4 hides exactly one.
     check("C1 initial=4 rows visible (one hidden of the stock 5)", visibleRows(list) === 4 && hiddenRows(list) === 1, `v=${visibleRows(list)} h=${hiddenRows(list)}`);
@@ -186,7 +188,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
 
     check("C1 creating row never paged", !w.document.querySelector(".py-px > [data-testid='worktree-creating-row']").closest("[data-zb-paging]"));
     check("C1 observer registered", !!(w as any).__zcodeBeautify?.listObs);
-    check("C1 slots published", (w as any).__zcodeBeautify?.listInit === 4 && (w as any).__zcodeBeautify?.listStep === 3 && (w as any).__zcodeBeautify?.listCollapse === true && (w as any).__zcodeBeautify?.listShowTotal === false);
+    check("C1 slots published", (w as any).__zcodeBeautify?.listInit === 4 && (w as any).__zcodeBeautify?.listStep === 3 && (w as any).__zcodeBeautify?.listCollapse === true && (w as any).__zcodeBeautify?.listShowTotal === false && (w as any).__zcodeBeautify?.listCollapseAll === true);
   }
 
   // C2: second eval with different counts rides the listKey fast path and
@@ -213,7 +215,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     const w = makeWindow();
     const { list, btn } = mountSidebar(w);
     const boot = (lp: any) => buildBootstrapScript({ css: "", listPaging: lp });
-    w.eval(boot({ initial: 4, step: 3, collapse: 1, showTotal: 1 }));
+    w.eval(boot({ initial: 4, step: 3, collapse: 1, showTotal: 1, collapseAll: 1 }));
     check("C6 showTotal mounts the whole list on first scan", visibleRows(list) === 4 && hiddenRows(list) === 8, `v=${visibleRows(list)} h=${hiddenRows(list)}`);
     check("C6 native button retired by the full render-ahead", !list.querySelector(":scope > button[data-task-list-show-more]") && !list.contains(btn));
     const bar = list.querySelector(":scope > div[data-zb-list-bar]");
@@ -283,6 +285,30 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
       !!tot3 && tot3.textContent === "还有 8 条" && tot3.previousSibling === oldMore && tot3.nextSibling === oldLess,
       `t=${tot3 && tot3.textContent}`);
     check("C6 grafted span restyled to the current values", tot3.style.fontSize === "12px" && tot3.style.whiteSpace === "nowrap" && tot3.style.opacity === "0.65");
+  }
+
+  // C7: collapseAll=0 — 收起 steps back by `step` per click instead of one
+  // shot, floor at the initial count; the button hides once it gets there.
+  {
+    const w = makeWindow();
+    const { list } = mountSidebar(w);
+    const boot = (lp: any) => buildBootstrapScript({ css: "", listPaging: lp });
+    w.eval(boot({ initial: 4, step: 3, collapse: 1, collapseAll: 0 }));
+    check("C7 slot published (step-wise)", (w as any).__zcodeBeautify?.listCollapseAll === false);
+    const bar = list.querySelector(":scope > div[data-zb-list-bar]");
+    const moreC7 = bar?.querySelector("[data-zb-list-more]") as any;
+    const lessC7 = bar?.querySelector("[data-zb-list-less]") as any;
+    moreC7.click();
+    moreC7.click();
+    check("C7 expanded to 10 (4+3+3)", visibleRows(list) === 10, `v=${visibleRows(list)}`);
+    lessC7.click();
+    check("C7 first 收起 steps back one page (10→7)", visibleRows(list) === 7, `v=${visibleRows(list)}`);
+    lessC7.click();
+    check("C7 second 收起 reaches the initial (7→4)", visibleRows(list) === 4, `v=${visibleRows(list)}`);
+    check("C7 收起 hides once nothing remains to collapse", lessC7.style.display === "none");
+    moreC7.click();
+    check("C7 MORE re-expands normally afterwards", visibleRows(list) === 7, `v=${visibleRows(list)}`);
+    check("C7 收起 returns while expanded", lessC7.style.display !== "none");
   }
 
   // C3: initial=0 cleans everything up (also from the fast path).
@@ -369,9 +395,9 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
 {
   const panel = buildPanelScript(9223, "tok", true, { appName: "ZCode", chatUi: true, hasUpdater: false });
   check("panel ships the 会话列表分页 block", panel.includes("会话列表分页"));
-  check("panel carries the on/init/step/collapse/total controls",
-    panel.includes('id="zb-list-on"') && panel.includes('id="zb-list-init"') && panel.includes('id="zb-list-step"') && panel.includes('id="zb-list-collapse"') && panel.includes('id="zb-list-total"'));
-  check("panel posts the full listPaging object", panel.includes("listPaging: {") && panel.includes("initial: on ?") && panel.includes("showTotal: $('zb-list-total')"));
+  check("panel carries the on/init/step/collapse/total/collapseall controls",
+    panel.includes('id="zb-list-on"') && panel.includes('id="zb-list-init"') && panel.includes('id="zb-list-step"') && panel.includes('id="zb-list-collapse"') && panel.includes('id="zb-list-total"') && panel.includes('id="zb-list-collapseall"'));
+  check("panel posts the full listPaging object", panel.includes("listPaging: {") && panel.includes("initial: on ?") && panel.includes("showTotal: $('zb-list-total')") && panel.includes("collapseAll: $('zb-list-collapseall')"));
   const wbPanel = buildPanelScript(9223, "tok", true, { appName: "WorkBuddy", chatUi: false, hasUpdater: false });
   // Non-ZCode clients lose the whole chat TAB at runtime (t28's source-string
   // approach — the pane is unreachable without its tab button).
@@ -387,7 +413,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
   const sessionSrc = read(path.join(root, "src/core/session.ts"));
   check("baseConfig merges listPaging partials", sessionSrc.includes("opts.listPaging ? { ...stored.listPaging, ...opts.listPaging } : stored.listPaging"));
   const mcpSrc = read(path.join(root, "src/mcp/server.ts"));
-  check("apply_options exposes the list knobs incl. the total toggle", mcpSrc.includes("list_initial") && mcpSrc.includes("list_step") && mcpSrc.includes("list_collapse") && mcpSrc.includes("list_show_total") && mcpSrc.includes("showTotal: list_show_total ? 1 : 0"));
+  check("apply_options exposes the list knobs incl. the total toggle", mcpSrc.includes("list_initial") && mcpSrc.includes("list_step") && mcpSrc.includes("list_collapse") && mcpSrc.includes("list_show_total") && mcpSrc.includes("list_collapse_all") && mcpSrc.includes("showTotal: list_show_total ? 1 : 0") && mcpSrc.includes("collapseAll: list_collapse_all ? 1 : 0"));
   const injectSrc = read(path.join(root, "src/core/inject.ts"));
   check("payload normalizes per-target like the other chat extras", injectSrc.includes("chatUi ? normalizeListPaging(config.listPaging) : normalizeListPaging(undefined)"));
 }
@@ -404,6 +430,9 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
   // showTotal: stored configs from before 6.3.1 lack the key — normalize
   // treats it as ON (the shipped default), and an explicit off is kept.
   check("legacy stored config normalizes showTotal ON", baseConfig({}, stored).listPaging?.showTotal === 1);
+  check("legacy stored config normalizes collapseAll ON", baseConfig({}, stored).listPaging?.collapseAll === 1);
+  const stepwise = baseConfig({ listPaging: { collapseAll: 0 } }, stored);
+  check("collapseAll off persists a one-field merge", stepwise.listPaging?.collapse === 1 && stepwise.listPaging?.collapseAll === 0);
   const noTotal = baseConfig({ listPaging: { showTotal: 0 } }, stored);
   check("showTotal off persists a one-field merge", noTotal.listPaging?.initial === 8 && noTotal.listPaging?.showTotal === 0);
 }

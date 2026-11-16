@@ -419,10 +419,11 @@ function buildBootstrapScript(payload) {
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
-  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse, showTotal} \u2014
-  // initial 0 = the stock 5/+5 paging with no collapse control; showTotal 1
-  // renders a \u5171 N \u6761 indicator after \u663E\u793A\u66F4\u591A.
-  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0 }))};
+  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse, showTotal,
+  // collapseAll} \u2014 initial 0 = the stock 5/+5 paging with no collapse control;
+  // showTotal 1 renders a \u8FD8\u6709 N \u6761 indicator after \u663E\u793A\u66F4\u591A; collapseAll 0
+  // makes \u6536\u8D77 step back by the step size per click instead of one shot.
+  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0, collapseAll: 0 }))};
   // Generation stamp: the BUILD version of the paging engine. Older
   // generations (their addScriptToEvaluateOnNewDocument registrations outlive
   // the serve restart that shipped fixed code) leave identical css/chat/list
@@ -2309,6 +2310,7 @@ function buildBootstrapScript(payload) {
     window.__zcodeBeautify.listStep = Math.max(1, Math.round(Number(L && L.step) || 5));
     window.__zcodeBeautify.listCollapse = Number(L && L.collapse) === 1;
     window.__zcodeBeautify.listShowTotal = Number(L && L.showTotal) === 1;
+    window.__zcodeBeautify.listCollapseAll = Number(L && L.collapseAll) === 1;
 
     // Static rule: the native button is replaced by our toolbar row. Its
     // element STAYS in the DOM (display:none) \u2014 render-ahead clicks it.
@@ -2390,7 +2392,11 @@ function buildBootstrapScript(payload) {
         less.textContent = (zh ? '\u6536\u8D77' : 'Show less');
         less.setAttribute('data-zb-list-less', '1');
         less.addEventListener('click', function() {
-          state.visible = window.__zcodeBeautify.listInit;
+          // collapseAll (default): one click snaps back to the initial count;
+          // otherwise each \u6536\u8D77 steps back by the step size, floor at initial.
+          state.visible = window.__zcodeBeautify.listCollapseAll
+            ? window.__zcodeBeautify.listInit
+            : Math.max(window.__zcodeBeautify.listInit, state.visible - window.__zcodeBeautify.listStep);
           applyListContainer(container);
         });
         var total = document.createElement('span');
@@ -2743,7 +2749,7 @@ var init_cdp = __esm({
         }
       }
     };
-    LIST_PAGING_VER = 6;
+    LIST_PAGING_VER = 7;
   }
 });
 
@@ -112571,7 +112577,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.3";
+    VERSION = "6.3.4";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -112786,11 +112792,13 @@ function normalizeListPaging(raw) {
   const initial = typeof raw?.initial === "number" && Number.isFinite(raw.initial) && raw.initial >= 1 ? Math.min(LIST_PAGING_MAX, Math.round(raw.initial)) : 0;
   const collapse = raw?.collapse;
   const showTotal = raw?.showTotal;
+  const collapseAll = raw?.collapseAll;
   return {
     initial,
     step: initial > 0 ? num(raw?.step, 5) : 0,
     collapse: initial > 0 && collapse !== 0 && collapse !== false ? 1 : 0,
-    showTotal: initial > 0 && showTotal !== 0 && showTotal !== false ? 1 : 0
+    showTotal: initial > 0 && showTotal !== 0 && showTotal !== false ? 1 : 0,
+    collapseAll: initial > 0 && collapseAll !== 0 && collapseAll !== false ? 1 : 0
   };
 }
 function normalizeChatLook(raw) {
@@ -115575,6 +115583,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="\u6BCF\u6B21\u70B9\u51FB\u663E\u793A\u66F4\u591A\u8FFD\u52A0\u7684\u884C\u6570(1-100)"><span style="opacity:.6">\u6761</span></div></div>' +
     '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u6536\u8D77\u6309\u94AE</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u52A0\u4E00\u4E2A"\u6536\u8D77",\u4E00\u952E\u6298\u56DE\u521D\u59CB\u6761\u6570(\u539F\u751F\u5C55\u5F00\u540E\u65E0\u6CD5\u6536\u56DE)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="\u663E\u793A\u6536\u8D77\u6309\u94AE:\u70B9\u51FB\u540E\u5217\u8868\u6298\u56DE\u521D\u59CB\u5C55\u5F00\u6761\u6570"></label></div>' +
+    '      <div class="zb-set" id="zb-list-collapseall-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u4E00\u6B21\u6027\u6536\u56DE</span><span class="zb-set-sub">\u6536\u8D77\u662F\u5426\u4E00\u6B21\u6298\u56DE\u521D\u59CB\u6761\u6570(\u9ED8\u8BA4\u662F);\u5426\u65F6\u6BCF\u70B9\u4E00\u6B21\u6536\u8D77,\u6309"\u6BCF\u6B21\u52A0\u8F7D"\u7684\u6761\u6570\u9010\u6B65\u6536\u56DE,\u6536\u5230\u521D\u59CB\u6761\u6570\u540E\u6309\u94AE\u6D88\u5931</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapseall" title="\u662F:\u6536\u8D77\u4E00\u952E\u6298\u56DE\u521D\u59CB\u5C55\u5F00\u6761\u6570;\u5426:\u6BCF\u70B9\u4E00\u6B21\u6536\u8D77\u6309\u6BCF\u6B21\u52A0\u8F7D\u7684\u6761\u6570\u9010\u6B65\u6536\u56DE"></label></div>' +
     '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u663E\u793A\u5269\u4F59</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u663E\u793A\u8FD8\u6709\u591A\u5C11\u6761\u672A\u663E\u793A,\u968F\u5C55\u5F00\u9012\u51CF\u3001\u5168\u90E8\u663E\u793A\u540E\u81EA\u52A8\u6D88\u5931(\u9ED8\u8BA4\u5F00\u542F;\u4E3A\u51C6\u786E\u8BA1\u6570,\u5217\u8868\u7684\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u8F7D\u5165,\u591A\u4F59\u7684\u4ECD\u9690\u85CF)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="\u663E\u793A\u66F4\u591A\u65C1\u7684\u8FD8\u6709 N \u6761\u6307\u793A:\u5F00\u542F\u540E\u8BE5\u5217\u8868\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u6302\u8F7D(\u591A\u4F59\u7684\u4ECD\u9690\u85CF),\u5269\u4F59\u6570\u624D\u53EF\u77E5"></label></div>' +
     '      </div>' +
@@ -116410,10 +116420,16 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     if (colEl) colEl.checked = lp ? lp.collapse !== 0 : true;
     var totEl = $('zb-list-total');
     if (totEl) totEl.checked = lp ? lp.showTotal !== 0 : true;
+    var calEl = $('zb-list-collapseall');
+    if (calEl) calEl.checked = lp ? lp.collapseAll !== 0 : true;
     ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row', 'zb-list-total-row'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.hidden = !on;
     });
+    // \u4E00\u6B21\u6027\u6536\u56DE is a sub-option of \u6536\u8D77\u6309\u94AE: only visible while both the
+    // paging takeover and the \u6536\u8D77 button are on.
+    var calRowEl = document.getElementById('zb-list-collapseall-row');
+    if (calRowEl) calRowEl.hidden = !on || !colEl || !colEl.checked;
   }
   var listPushTimer = null;
   function pushListPaging() {
@@ -116425,7 +116441,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
           initial: on ? Math.max(1, Math.round(Number($('zb-list-init').value) || 5)) : 0,
           step: Math.max(1, Math.round(Number($('zb-list-step').value) || 5)),
           collapse: $('zb-list-collapse') && $('zb-list-collapse').checked ? 1 : 0,
-          showTotal: $('zb-list-total') && $('zb-list-total').checked ? 1 : 0
+          showTotal: $('zb-list-total') && $('zb-list-total').checked ? 1 : 0,
+          collapseAll: $('zb-list-collapseall') && $('zb-list-collapseall').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -116435,6 +116452,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       var el = document.getElementById(id);
       if (el) el.hidden = !this.checked;
     }, this);
+    var calRowEl = document.getElementById('zb-list-collapseall-row');
+    if (calRowEl) calRowEl.hidden = !this.checked || !($('zb-list-collapse') && $('zb-list-collapse').checked);
     pushListPaging();
   });
   $('zb-list-init') && $('zb-list-init').addEventListener('input', pushListPaging);
@@ -116444,8 +116463,13 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       this.value = Math.max(1, Math.min(100, Math.round(Number(this.value) || 5)));
     });
   });
-  $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', pushListPaging);
+  $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', function () {
+    var calRowEl = document.getElementById('zb-list-collapseall-row');
+    if (calRowEl) calRowEl.hidden = !(($('zb-list-on') && $('zb-list-on').checked) && this.checked);
+    pushListPaging();
+  });
   $('zb-list-total') && $('zb-list-total').addEventListener('change', pushListPaging);
+  $('zb-list-collapseall') && $('zb-list-collapseall').addEventListener('change', pushListPaging);
 
 
   // --- user message bubble look (\u804A\u5929\u6C14\u6CE1) -----------------------------------
@@ -120018,11 +120042,11 @@ async function holdSession(target2, config, apiPort, opts = {}) {
     startupProbe: payload.startupProbe,
     previewApi: payload.previewApi
   });
-  const { identifier } = await conn.send("Page.addScriptToEvaluateOnNewDocument", {
+  const { identifier } = await boundedSend(conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap
-  });
+  }));
   session.themeScriptId = identifier;
-  const bootEval = await conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+  const bootEval = await boundedSend(conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true }));
   if (bootEval?.exceptionDetails) {
     console.error(`serve: theme bootstrap threw \u2014 ${JSON.stringify(bootEval.exceptionDetails).slice(0, 400)}`);
   }
@@ -120037,11 +120061,17 @@ async function holdSession(target2, config, apiPort, opts = {}) {
     hasUpdater: app.updaterUrlIncludes.length > 0
   });
   await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
-  const panelEval = await conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true });
+  const panelEval = await boundedSend(conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true }));
   if (panelEval?.exceptionDetails) {
     console.error(`serve: panel script threw \u2014 ${JSON.stringify(panelEval.exceptionDetails).slice(0, 400)}`);
   }
   held.set(target2.id, session);
+}
+function boundedSend(p2, ms = 8e3) {
+  return Promise.race([
+    p2,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("CDP send timed out")), ms))
+  ]);
 }
 async function pushConfigToSessions(config) {
   const assets = await getAssets(config);
@@ -120071,16 +120101,16 @@ async function pushConfigToSessions(config) {
         await session.conn.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: session.themeScriptId }).catch(() => {
         });
       }
-      session.themeScriptId = await registerScript(session, bootstrap);
-      const evalRes = await session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true });
+      session.themeScriptId = await boundedSend(registerScript(session, bootstrap));
+      const evalRes = await boundedSend(session.conn.send("Runtime.evaluate", { expression: bootstrap, returnByValue: true }));
       if (evalRes?.exceptionDetails) {
         console.warn(`serve: bootstrap threw in a held session: ${JSON.stringify(evalRes.exceptionDetails).slice(0, 300)}`);
       }
       const vv = Math.max(0, Math.min(100, Math.round(payload.videoVolume ?? 0)));
-      await session.conn.send("Runtime.evaluate", {
+      await boundedSend(session.conn.send("Runtime.evaluate", {
         expression: `(function(){var v=document.getElementById('zcode-beautify-video');if(v){v.muted=${JSON.stringify(vv === 0)};v.volume=${(vv / 100).toFixed(3)};}})()`,
         returnByValue: true
-      }).catch(() => {
+      })).catch(() => {
       });
       ok++;
     } catch {

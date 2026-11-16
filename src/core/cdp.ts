@@ -173,7 +173,7 @@ export interface InjectionPayload {
   spinnerLook?: { mode: "default" | "image"; image: string; spin: boolean; size: number };
   chatLoadLook?: { mode: "default" | "classic" | "image"; image: string; spin: boolean; size: number };
   /** Sidebar session-list paging (会话列表分页); initial 0 = stock behaviour. */
-  listPaging?: { initial: number; step: number; collapse: number; showTotal: number };
+  listPaging?: { initial: number; step: number; collapse: number; showTotal: number; collapseAll: number };
   /** Defer mounting until the app's startup screen finished (default true). */
   startupClean?: boolean;
   /** False when the client has no chat-area extras wired (non-ZCode targets). */
@@ -264,10 +264,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
-  // 会话列表分页 (sidebar list paging): {initial, step, collapse, showTotal} —
-  // initial 0 = the stock 5/+5 paging with no collapse control; showTotal 1
-  // renders a 共 N 条 indicator after 显示更多.
-  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0 }))};
+  // 会话列表分页 (sidebar list paging): {initial, step, collapse, showTotal,
+  // collapseAll} — initial 0 = the stock 5/+5 paging with no collapse control;
+  // showTotal 1 renders a 还有 N 条 indicator after 显示更多; collapseAll 0
+  // makes 收起 step back by the step size per click instead of one shot.
+  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0, collapseAll: 0 }))};
   // Generation stamp: the BUILD version of the paging engine. Older
   // generations (their addScriptToEvaluateOnNewDocument registrations outlive
   // the serve restart that shipped fixed code) leave identical css/chat/list
@@ -2154,6 +2155,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     window.__zcodeBeautify.listStep = Math.max(1, Math.round(Number(L && L.step) || 5));
     window.__zcodeBeautify.listCollapse = Number(L && L.collapse) === 1;
     window.__zcodeBeautify.listShowTotal = Number(L && L.showTotal) === 1;
+    window.__zcodeBeautify.listCollapseAll = Number(L && L.collapseAll) === 1;
 
     // Static rule: the native button is replaced by our toolbar row. Its
     // element STAYS in the DOM (display:none) — render-ahead clicks it.
@@ -2235,7 +2237,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         less.textContent = (zh ? '收起' : 'Show less');
         less.setAttribute('data-zb-list-less', '1');
         less.addEventListener('click', function() {
-          state.visible = window.__zcodeBeautify.listInit;
+          // collapseAll (default): one click snaps back to the initial count;
+          // otherwise each 收起 steps back by the step size, floor at initial.
+          state.visible = window.__zcodeBeautify.listCollapseAll
+            ? window.__zcodeBeautify.listInit
+            : Math.max(window.__zcodeBeautify.listInit, state.visible - window.__zcodeBeautify.listStep);
           applyListContainer(container);
         });
         var total = document.createElement('span');
@@ -2470,7 +2476,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
  * css/chat/list keys are unchanged (older generations' registrations re-run
  * first and would otherwise mask the fix). Bump on any paging-code change.
  */
-export const LIST_PAGING_VER = 6;
+export const LIST_PAGING_VER = 7;
 
 export function buildResetScript(marker = "zcode-beautify"): string {
   return `(function(){

@@ -831,6 +831,8 @@ export function buildPanelScript(
     '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="每次点击显示更多追加的行数(1-100)"><span style="opacity:.6">条</span></div></div>' +
     '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">收起按钮</span><span class="zb-set-sub">在"显示更多"旁加一个"收起",一键折回初始条数(原生展开后无法收回)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="显示收起按钮:点击后列表折回初始展开条数"></label></div>' +
+    '      <div class="zb-set" id="zb-list-collapseall-row" hidden><div class="zb-set-main"><span class="zb-set-name">一次性收回</span><span class="zb-set-sub">收起是否一次折回初始条数(默认是);否时每点一次收起,按"每次加载"的条数逐步收回,收到初始条数后按钮消失</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapseall" title="是:收起一键折回初始展开条数;否:每点一次收起按每次加载的条数逐步收回"></label></div>' +
     '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">显示剩余</span><span class="zb-set-sub">在"显示更多"旁显示还有多少条未显示,随展开递减、全部显示后自动消失(默认开启;为准确计数,列表的全部会话行会预先载入,多余的仍隐藏)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="显示更多旁的还有 N 条指示:开启后该列表全部会话行会预先挂载(多余的仍隐藏),剩余数才可知"></label></div>' +
     '      </div>' +
@@ -1666,10 +1668,16 @@ export function buildPanelScript(
     if (colEl) colEl.checked = lp ? lp.collapse !== 0 : true;
     var totEl = $('zb-list-total');
     if (totEl) totEl.checked = lp ? lp.showTotal !== 0 : true;
+    var calEl = $('zb-list-collapseall');
+    if (calEl) calEl.checked = lp ? lp.collapseAll !== 0 : true;
     ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row', 'zb-list-total-row'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.hidden = !on;
     });
+    // 一次性收回 is a sub-option of 收起按钮: only visible while both the
+    // paging takeover and the 收起 button are on.
+    var calRowEl = document.getElementById('zb-list-collapseall-row');
+    if (calRowEl) calRowEl.hidden = !on || !colEl || !colEl.checked;
   }
   var listPushTimer = null;
   function pushListPaging() {
@@ -1681,7 +1689,8 @@ export function buildPanelScript(
           initial: on ? Math.max(1, Math.round(Number($('zb-list-init').value) || 5)) : 0,
           step: Math.max(1, Math.round(Number($('zb-list-step').value) || 5)),
           collapse: $('zb-list-collapse') && $('zb-list-collapse').checked ? 1 : 0,
-          showTotal: $('zb-list-total') && $('zb-list-total').checked ? 1 : 0
+          showTotal: $('zb-list-total') && $('zb-list-total').checked ? 1 : 0,
+          collapseAll: $('zb-list-collapseall') && $('zb-list-collapseall').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
@@ -1691,6 +1700,8 @@ export function buildPanelScript(
       var el = document.getElementById(id);
       if (el) el.hidden = !this.checked;
     }, this);
+    var calRowEl = document.getElementById('zb-list-collapseall-row');
+    if (calRowEl) calRowEl.hidden = !this.checked || !($('zb-list-collapse') && $('zb-list-collapse').checked);
     pushListPaging();
   });
   $('zb-list-init') && $('zb-list-init').addEventListener('input', pushListPaging);
@@ -1700,8 +1711,13 @@ export function buildPanelScript(
       this.value = Math.max(1, Math.min(100, Math.round(Number(this.value) || 5)));
     });
   });
-  $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', pushListPaging);
+  $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', function () {
+    var calRowEl = document.getElementById('zb-list-collapseall-row');
+    if (calRowEl) calRowEl.hidden = !(($('zb-list-on') && $('zb-list-on').checked) && this.checked);
+    pushListPaging();
+  });
   $('zb-list-total') && $('zb-list-total').addEventListener('change', pushListPaging);
+  $('zb-list-collapseall') && $('zb-list-collapseall').addEventListener('change', pushListPaging);
 
 
   // --- user message bubble look (聊天气泡) -----------------------------------
