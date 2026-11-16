@@ -299,6 +299,7 @@ server.registerTool(
       list_initial: z.number().min(0).max(100).optional().describe("会话列表分页: how many session rows a project card shows when expanded (初始展开条数, 1-100). 0 = stock behaviour (ZCode's hardcoded 5, +5 per click, no collapse)"),
       list_step: z.number().min(1).max(100).optional().describe("会话列表分页: how many rows each 显示更多 click adds (每次加载条数, 1-100). Only meaningful with list_initial > 0"),
       list_collapse: z.boolean().optional().describe("会话列表分页: whether a 收起 button sits next to 显示更多 (true, default) snapping the list back to list_initial rows; false hides it. Only meaningful with list_initial > 0"),
+      list_show_total: z.boolean().optional().describe("会话列表分页: whether a 共 N 条 total count shows after 显示更多 (true, default). Enabling it pre-loads every row of the list (extras stay hidden) so the exact total is known. Only meaningful with list_initial > 0"),
       fab: z.object({
         mode: z.enum(["default", "image"]).optional().describe("设置按钮 (panel-opener FAB): default = the stock 🎨 ball, image = a user picture/GIF"),
         image_path: z.string().optional().describe("Absolute path or file name of the image for the FAB (resolved serve-side; required when mode = image; ≤2MB when uploaded via the panel)"),
@@ -306,7 +307,7 @@ server.registerTool(
       }).optional().describe("Panel-opener button look; omitted fields keep their current value"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, fab }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, fab }) => {
     try {
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       // Send only the fields the caller provided: the session layer merges
@@ -344,12 +345,13 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k, v]),
             ) as Partial<ChatLoadLookConfig>);
       const listPaging: Partial<ListPagingConfig> | undefined =
-        list_initial === undefined && list_step === undefined && list_collapse === undefined
+        list_initial === undefined && list_step === undefined && list_collapse === undefined && list_show_total === undefined
           ? undefined
           : {
               ...(list_initial !== undefined ? { initial: list_initial } : {}),
               ...(list_step !== undefined ? { step: list_step } : {}),
               ...(list_collapse !== undefined ? { collapse: list_collapse ? 1 : 0 } : {}),
+              ...(list_show_total !== undefined ? { showTotal: list_show_total ? 1 : 0 } : {}),
             };
       const fabLook =
         fab === undefined

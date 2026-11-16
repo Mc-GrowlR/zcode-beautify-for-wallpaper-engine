@@ -173,7 +173,7 @@ export interface InjectionPayload {
   spinnerLook?: { mode: "default" | "image"; image: string; spin: boolean; size: number };
   chatLoadLook?: { mode: "default" | "classic" | "image"; image: string; spin: boolean; size: number };
   /** Sidebar session-list paging (会话列表分页); initial 0 = stock behaviour. */
-  listPaging?: { initial: number; step: number; collapse: number };
+  listPaging?: { initial: number; step: number; collapse: number; showTotal: number };
   /** Defer mounting until the app's startup screen finished (default true). */
   startupClean?: boolean;
   /** False when the client has no chat-area extras wired (non-ZCode targets). */
@@ -264,9 +264,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
-  // 会话列表分页 (sidebar list paging): {initial, step, collapse} — initial 0
-  // = the stock 5/+5 paging with no collapse control.
-  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0 }))};
+  // 会话列表分页 (sidebar list paging): {initial, step, collapse, showTotal} —
+  // initial 0 = the stock 5/+5 paging with no collapse control; showTotal 1
+  // renders a 共 N 条 indicator after 显示更多.
+  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0 }))};
   // Generation stamp: the BUILD version of the paging engine. Older
   // generations (their addScriptToEvaluateOnNewDocument registrations outlive
   // the serve restart that shipped fixed code) leave identical css/chat/list
@@ -2152,6 +2153,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     window.__zcodeBeautify.listInit = init;
     window.__zcodeBeautify.listStep = Math.max(1, Math.round(Number(L && L.step) || 5));
     window.__zcodeBeautify.listCollapse = Number(L && L.collapse) === 1;
+    window.__zcodeBeautify.listShowTotal = Number(L && L.showTotal) === 1;
 
     // Static rule: the native button is replaced by our toolbar row. Its
     // element STAYS in the DOM (display:none) — render-ahead clicks it.
@@ -2197,11 +2199,17 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       // condition a 收起 would leave the hidden rows unreachable.
       var needMore = Boolean(native) || rows.length > state.visible;
       var needCollapse = window.__zcodeBeautify.listCollapse && state.visible > window.__zcodeBeautify.listInit;
+      // 共 N 条: once the native button is retired the mounted row count IS
+      // the total — while React still offers pages we have not pulled, the
+      // settled count is unknown and the indicator stays hidden (showTotal
+      // render-aheads to that end on every scan).
+      var needTotal = window.__zcodeBeautify.listShowTotal && rows.length > 0 && !native;
       var bar = container.querySelector(':scope > div[data-zb-list-bar]');
-      if (!needMore && !needCollapse) {
+      if (!needMore && !needCollapse && !needTotal) {
         if (bar) bar.remove();
         return;
       }
+      var zh = (document.documentElement.lang || '').indexOf('zh') === 0;
       if (!bar) {
         bar = document.createElement('div');
         bar.setAttribute('data-zb-list-bar', '1');
@@ -2212,7 +2220,6 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         // (classes ship whatever theme tokens the row buttons use).
         var tpl = native ? native.cloneNode(true) : null;
         if (tpl) tpl.removeAttribute('data-task-list-show-more');
-        var zh = (document.documentElement.lang || '').indexOf('zh') === 0;
         var more = tpl || document.createElement('button');
         more.type = 'button';
         more.textContent = native && native.textContent ? native.textContent : (zh ? '显示更多' : 'Show more');
@@ -2229,7 +2236,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           state.visible = window.__zcodeBeautify.listInit;
           applyListContainer(container);
         });
+        var total = document.createElement('span');
+        total.setAttribute('data-zb-list-total', '1');
+        total.style.opacity = '0.65';
         bar.appendChild(more);
+        bar.appendChild(total);
         bar.appendChild(less);
       } else {
         // Refresh the cloned label from the live native button (locale swaps).
@@ -2237,11 +2248,28 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         if (moreBtn && native && native.textContent && moreBtn.textContent !== native.textContent) {
           moreBtn.textContent = native.textContent;
         }
+        // A bar built by an older generation predates the total indicator —
+        // graft the span in, or the count below would silently no-op forever.
+        var tot = bar.querySelector('[data-zb-list-total]');
+        if (!tot) {
+          tot = document.createElement('span');
+          tot.setAttribute('data-zb-list-total', '1');
+          tot.style.opacity = '0.65';
+          var mref = bar.querySelector('[data-zb-list-more]');
+          if (mref && mref.nextSibling) bar.insertBefore(tot, mref.nextSibling);
+          else bar.appendChild(tot);
+        }
       }
       var moreB = bar.querySelector('[data-zb-list-more]');
       if (moreB) moreB.style.display = needMore ? '' : 'none';
       var lessB = bar.querySelector('[data-zb-list-less]');
       if (lessB) lessB.style.display = needCollapse ? '' : 'none';
+      var totB = bar.querySelector('[data-zb-list-total]');
+      if (totB) {
+        var label = needTotal ? (zh ? '共 ' + rows.length + ' 条' : rows.length + ' total') : '';
+        if (totB.textContent !== label) totB.textContent = label;
+        totB.style.display = needTotal ? '' : 'none';
+      }
       // Keep the toolbar the LAST child (React appends new rows at the end).
       if (container.lastElementChild !== bar) container.appendChild(bar);
     }
@@ -2263,9 +2291,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       // (hidden) native button — React raises its own limit by pageSize each
       // time. Discrete clicks flush synchronously; the cap only bounds a
       // pathological no-op loop, the observer self-heals any deferral.
+      // showTotal needs the exact total, which only exists once every row is
+      // mounted (React's hasMore gate) — with it on, render-ahead runs to the
+      // end of the list (native retires) instead of stopping at visible.
       var guard = 0;
       var native = container.querySelector(':scope > button[data-task-list-show-more]');
-      while (rows.length < state.visible && native && guard < 100) {
+      while (native && (SLOTS.listShowTotal || rows.length < state.visible) && guard < 400) {
         native.click();
         guard++;
         rows = zbListRows(container);
@@ -2421,7 +2452,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
  * css/chat/list keys are unchanged (older generations' registrations re-run
  * first and would otherwise mask the fix). Bump on any paging-code change.
  */
-export const LIST_PAGING_VER = 2;
+export const LIST_PAGING_VER = 4;
 
 export function buildResetScript(marker = "zcode-beautify"): string {
   return `(function(){

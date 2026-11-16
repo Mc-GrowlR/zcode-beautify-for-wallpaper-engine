@@ -419,9 +419,10 @@ function buildBootstrapScript(payload) {
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
-  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse} \u2014 initial 0
-  // = the stock 5/+5 paging with no collapse control.
-  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0 }))};
+  // \u4F1A\u8BDD\u5217\u8868\u5206\u9875 (sidebar list paging): {initial, step, collapse, showTotal} \u2014
+  // initial 0 = the stock 5/+5 paging with no collapse control; showTotal 1
+  // renders a \u5171 N \u6761 indicator after \u663E\u793A\u66F4\u591A.
+  var LIST = ${JSON.stringify(JSON.stringify(payload.listPaging ?? { initial: 0, step: 0, collapse: 0, showTotal: 0 }))};
   // Generation stamp: the BUILD version of the paging engine. Older
   // generations (their addScriptToEvaluateOnNewDocument registrations outlive
   // the serve restart that shipped fixed code) leave identical css/chat/list
@@ -2307,6 +2308,7 @@ function buildBootstrapScript(payload) {
     window.__zcodeBeautify.listInit = init;
     window.__zcodeBeautify.listStep = Math.max(1, Math.round(Number(L && L.step) || 5));
     window.__zcodeBeautify.listCollapse = Number(L && L.collapse) === 1;
+    window.__zcodeBeautify.listShowTotal = Number(L && L.showTotal) === 1;
 
     // Static rule: the native button is replaced by our toolbar row. Its
     // element STAYS in the DOM (display:none) \u2014 render-ahead clicks it.
@@ -2352,11 +2354,17 @@ function buildBootstrapScript(payload) {
       // condition a \u6536\u8D77 would leave the hidden rows unreachable.
       var needMore = Boolean(native) || rows.length > state.visible;
       var needCollapse = window.__zcodeBeautify.listCollapse && state.visible > window.__zcodeBeautify.listInit;
+      // \u5171 N \u6761: once the native button is retired the mounted row count IS
+      // the total \u2014 while React still offers pages we have not pulled, the
+      // settled count is unknown and the indicator stays hidden (showTotal
+      // render-aheads to that end on every scan).
+      var needTotal = window.__zcodeBeautify.listShowTotal && rows.length > 0 && !native;
       var bar = container.querySelector(':scope > div[data-zb-list-bar]');
-      if (!needMore && !needCollapse) {
+      if (!needMore && !needCollapse && !needTotal) {
         if (bar) bar.remove();
         return;
       }
+      var zh = (document.documentElement.lang || '').indexOf('zh') === 0;
       if (!bar) {
         bar = document.createElement('div');
         bar.setAttribute('data-zb-list-bar', '1');
@@ -2367,7 +2375,6 @@ function buildBootstrapScript(payload) {
         // (classes ship whatever theme tokens the row buttons use).
         var tpl = native ? native.cloneNode(true) : null;
         if (tpl) tpl.removeAttribute('data-task-list-show-more');
-        var zh = (document.documentElement.lang || '').indexOf('zh') === 0;
         var more = tpl || document.createElement('button');
         more.type = 'button';
         more.textContent = native && native.textContent ? native.textContent : (zh ? '\u663E\u793A\u66F4\u591A' : 'Show more');
@@ -2384,7 +2391,11 @@ function buildBootstrapScript(payload) {
           state.visible = window.__zcodeBeautify.listInit;
           applyListContainer(container);
         });
+        var total = document.createElement('span');
+        total.setAttribute('data-zb-list-total', '1');
+        total.style.opacity = '0.65';
         bar.appendChild(more);
+        bar.appendChild(total);
         bar.appendChild(less);
       } else {
         // Refresh the cloned label from the live native button (locale swaps).
@@ -2392,11 +2403,28 @@ function buildBootstrapScript(payload) {
         if (moreBtn && native && native.textContent && moreBtn.textContent !== native.textContent) {
           moreBtn.textContent = native.textContent;
         }
+        // A bar built by an older generation predates the total indicator \u2014
+        // graft the span in, or the count below would silently no-op forever.
+        var tot = bar.querySelector('[data-zb-list-total]');
+        if (!tot) {
+          tot = document.createElement('span');
+          tot.setAttribute('data-zb-list-total', '1');
+          tot.style.opacity = '0.65';
+          var mref = bar.querySelector('[data-zb-list-more]');
+          if (mref && mref.nextSibling) bar.insertBefore(tot, mref.nextSibling);
+          else bar.appendChild(tot);
+        }
       }
       var moreB = bar.querySelector('[data-zb-list-more]');
       if (moreB) moreB.style.display = needMore ? '' : 'none';
       var lessB = bar.querySelector('[data-zb-list-less]');
       if (lessB) lessB.style.display = needCollapse ? '' : 'none';
+      var totB = bar.querySelector('[data-zb-list-total]');
+      if (totB) {
+        var label = needTotal ? (zh ? '\u5171 ' + rows.length + ' \u6761' : rows.length + ' total') : '';
+        if (totB.textContent !== label) totB.textContent = label;
+        totB.style.display = needTotal ? '' : 'none';
+      }
       // Keep the toolbar the LAST child (React appends new rows at the end).
       if (container.lastElementChild !== bar) container.appendChild(bar);
     }
@@ -2418,9 +2446,12 @@ function buildBootstrapScript(payload) {
       // (hidden) native button \u2014 React raises its own limit by pageSize each
       // time. Discrete clicks flush synchronously; the cap only bounds a
       // pathological no-op loop, the observer self-heals any deferral.
+      // showTotal needs the exact total, which only exists once every row is
+      // mounted (React's hasMore gate) \u2014 with it on, render-ahead runs to the
+      // end of the list (native retires) instead of stopping at visible.
       var guard = 0;
       var native = container.querySelector(':scope > button[data-task-list-show-more]');
-      while (rows.length < state.visible && native && guard < 100) {
+      while (native && (SLOTS.listShowTotal || rows.length < state.visible) && guard < 400) {
         native.click();
         guard++;
         rows = zbListRows(container);
@@ -2694,7 +2725,7 @@ var init_cdp = __esm({
         }
       }
     };
-    LIST_PAGING_VER = 2;
+    LIST_PAGING_VER = 4;
   }
 });
 
@@ -112522,7 +112553,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.0";
+    VERSION = "6.3.1";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -112736,10 +112767,12 @@ function normalizeListPaging(raw) {
   const num = (v, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(1, Math.min(LIST_PAGING_MAX, Math.round(v))) : dflt;
   const initial = typeof raw?.initial === "number" && Number.isFinite(raw.initial) && raw.initial >= 1 ? Math.min(LIST_PAGING_MAX, Math.round(raw.initial)) : 0;
   const collapse = raw?.collapse;
+  const showTotal = raw?.showTotal;
   return {
     initial,
     step: initial > 0 ? num(raw?.step, 5) : 0,
-    collapse: initial > 0 && collapse !== 0 && collapse !== false ? 1 : 0
+    collapse: initial > 0 && collapse !== 0 && collapse !== false ? 1 : 0,
+    showTotal: initial > 0 && showTotal !== 0 && showTotal !== false ? 1 : 0
   };
 }
 function normalizeChatLook(raw) {
@@ -115524,6 +115557,8 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="\u6BCF\u6B21\u70B9\u51FB\u663E\u793A\u66F4\u591A\u8FFD\u52A0\u7684\u884C\u6570(1-100)"><span style="opacity:.6">\u6761</span></div></div>' +
     '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u6536\u8D77\u6309\u94AE</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u52A0\u4E00\u4E2A"\u6536\u8D77",\u4E00\u952E\u6298\u56DE\u521D\u59CB\u6761\u6570(\u539F\u751F\u5C55\u5F00\u540E\u65E0\u6CD5\u6536\u56DE)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="\u663E\u793A\u6536\u8D77\u6309\u94AE:\u70B9\u51FB\u540E\u5217\u8868\u6298\u56DE\u521D\u59CB\u5C55\u5F00\u6761\u6570"></label></div>' +
+    '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">\u663E\u793A\u603B\u6570</span><span class="zb-set-sub">\u5728"\u663E\u793A\u66F4\u591A"\u65C1\u663E\u793A\u8BE5\u5217\u8868\u7684\u4F1A\u8BDD\u603B\u6570(\u9ED8\u8BA4\u5F00\u542F;\u4E3A\u53D6\u51C6\u786E\u603B\u6570,\u5217\u8868\u7684\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u8F7D\u5165,\u591A\u4F59\u7684\u4ECD\u9690\u85CF)</span></div>' +
+    '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="\u663E\u793A\u66F4\u591A\u65C1\u7684\u5171 N \u6761\u6307\u793A:\u5F00\u542F\u540E\u8BE5\u5217\u8868\u5168\u90E8\u4F1A\u8BDD\u884C\u4F1A\u9884\u5148\u6302\u8F7D(\u591A\u4F59\u7684\u4ECD\u9690\u85CF),\u603B\u6570\u624D\u53EF\u77E5"></label></div>' +
     '      </div>' +
     '    </div>' +
     '    </div>' +
@@ -116355,7 +116390,9 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     if (stepEl) stepEl.value = String(Math.max(1, Math.round(Number(lp && lp.step) || 5)));
     var colEl = $('zb-list-collapse');
     if (colEl) colEl.checked = lp ? lp.collapse !== 0 : true;
-    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row'].forEach(function (id) {
+    var totEl = $('zb-list-total');
+    if (totEl) totEl.checked = lp ? lp.showTotal !== 0 : true;
+    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row', 'zb-list-total-row'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.hidden = !on;
     });
@@ -116369,13 +116406,14 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
         listPaging: {
           initial: on ? Math.max(1, Math.round(Number($('zb-list-init').value) || 5)) : 0,
           step: Math.max(1, Math.round(Number($('zb-list-step').value) || 5)),
-          collapse: $('zb-list-collapse') && $('zb-list-collapse').checked ? 1 : 0
+          collapse: $('zb-list-collapse') && $('zb-list-collapse').checked ? 1 : 0,
+          showTotal: $('zb-list-total') && $('zb-list-total').checked ? 1 : 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
     }, 300);
   }
   $('zb-list-on') && $('zb-list-on').addEventListener('change', function () {
-    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row'].forEach(function (id) {
+    ['zb-list-init-row', 'zb-list-step-row', 'zb-list-collapse-row', 'zb-list-total-row'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.hidden = !this.checked;
     }, this);
@@ -116389,6 +116427,7 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
     });
   });
   $('zb-list-collapse') && $('zb-list-collapse').addEventListener('change', pushListPaging);
+  $('zb-list-total') && $('zb-list-total').addEventListener('change', pushListPaging);
 
 
   // --- user message bubble look (\u804A\u5929\u6C14\u6CE1) -----------------------------------
