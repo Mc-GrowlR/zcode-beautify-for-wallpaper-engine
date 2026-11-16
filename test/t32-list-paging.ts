@@ -220,6 +220,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     const totalEl = bar?.querySelector("[data-zb-list-total]") as any;
     check("C6 total indicator shows the settled count", totalEl && totalEl.style.display !== "none" && totalEl.textContent === "共 12 条", `t=${totalEl && totalEl.textContent}`);
     check("C6 indicator sits right after MORE, before 收起", bar?.querySelector("[data-zb-list-total]").nextSibling?.getAttribute?.("data-zb-list-less") === "1");
+    check("C6 count styled auxiliary (12px, nowrap)", totalEl.style.fontSize === "12px" && totalEl.style.whiteSpace === "nowrap");
     check("C6 MORE still offered (rows hidden)", (bar?.querySelector("[data-zb-list-more]") as any).style.display !== "none");
     check("C6 收起 hidden at the baseline", (bar?.querySelector("[data-zb-list-less]") as any).style.display === "none");
     const moreC6 = bar?.querySelector("[data-zb-list-more]") as any;
@@ -275,6 +276,7 @@ const base: BeautifyConfig = { ...DEFAULT_CONFIG, monet: true, wallpaperVisible:
     check("C6 legacy bar gains the grafted span with the count",
       !!tot3 && tot3.textContent === "共 12 条" && tot3.previousSibling === oldMore && tot3.nextSibling === oldLess,
       `t=${tot3 && tot3.textContent}`);
+    check("C6 grafted span restyled to the current values", tot3.style.fontSize === "12px" && tot3.style.whiteSpace === "nowrap" && tot3.style.opacity === "0.65");
   }
 
   // C3: initial=0 cleans everything up (also from the fast path).

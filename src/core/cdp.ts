@@ -2239,6 +2239,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         var total = document.createElement('span');
         total.setAttribute('data-zb-list-total', '1');
         total.style.opacity = '0.65';
+        // Auxiliary scale: the span inherits the row font otherwise, which
+        // reads bigger than the ghost buttons and wraps inside the narrow
+        // sidebar column (共 162 条 broke across lines).
+        total.style.fontSize = '12px';
+        total.style.whiteSpace = 'nowrap';
+        total.style.flexShrink = '0';
         bar.appendChild(more);
         bar.appendChild(total);
         bar.appendChild(less);
@@ -2255,9 +2261,19 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           tot = document.createElement('span');
           tot.setAttribute('data-zb-list-total', '1');
           tot.style.opacity = '0.65';
+          tot.style.fontSize = '12px';
+          tot.style.whiteSpace = 'nowrap';
+          tot.style.flexShrink = '0';
           var mref = bar.querySelector('[data-zb-list-more]');
           if (mref && mref.nextSibling) bar.insertBefore(tot, mref.nextSibling);
           else bar.appendChild(tot);
+        } else {
+          // Grafted-or-not, keep the style at the current values (an older
+          // generation's span may carry stale inline styles).
+          tot.style.opacity = '0.65';
+          tot.style.fontSize = '12px';
+          tot.style.whiteSpace = 'nowrap';
+          tot.style.flexShrink = '0';
         }
       }
       var moreB = bar.querySelector('[data-zb-list-more]');
@@ -2452,7 +2468,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
  * css/chat/list keys are unchanged (older generations' registrations re-run
  * first and would otherwise mask the fix). Bump on any paging-code change.
  */
-export const LIST_PAGING_VER = 4;
+export const LIST_PAGING_VER = 5;
 
 export function buildResetScript(marker = "zcode-beautify"): string {
   return `(function(){

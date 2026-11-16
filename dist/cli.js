@@ -2394,6 +2394,12 @@ function buildBootstrapScript(payload) {
         var total = document.createElement('span');
         total.setAttribute('data-zb-list-total', '1');
         total.style.opacity = '0.65';
+        // Auxiliary scale: the span inherits the row font otherwise, which
+        // reads bigger than the ghost buttons and wraps inside the narrow
+        // sidebar column (\u5171 162 \u6761 broke across lines).
+        total.style.fontSize = '12px';
+        total.style.whiteSpace = 'nowrap';
+        total.style.flexShrink = '0';
         bar.appendChild(more);
         bar.appendChild(total);
         bar.appendChild(less);
@@ -2410,9 +2416,19 @@ function buildBootstrapScript(payload) {
           tot = document.createElement('span');
           tot.setAttribute('data-zb-list-total', '1');
           tot.style.opacity = '0.65';
+          tot.style.fontSize = '12px';
+          tot.style.whiteSpace = 'nowrap';
+          tot.style.flexShrink = '0';
           var mref = bar.querySelector('[data-zb-list-more]');
           if (mref && mref.nextSibling) bar.insertBefore(tot, mref.nextSibling);
           else bar.appendChild(tot);
+        } else {
+          // Grafted-or-not, keep the style at the current values (an older
+          // generation's span may carry stale inline styles).
+          tot.style.opacity = '0.65';
+          tot.style.fontSize = '12px';
+          tot.style.whiteSpace = 'nowrap';
+          tot.style.flexShrink = '0';
         }
       }
       var moreB = bar.querySelector('[data-zb-list-more]');
@@ -2725,7 +2741,7 @@ var init_cdp = __esm({
         }
       }
     };
-    LIST_PAGING_VER = 4;
+    LIST_PAGING_VER = 5;
   }
 });
 
@@ -112553,7 +112569,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.1";
+    VERSION = "6.3.2";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
