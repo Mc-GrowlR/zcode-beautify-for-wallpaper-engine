@@ -4379,8 +4379,16 @@ export function buildPanelScript(
       }
     }
     function onScrollAway(e) {
-      // Only scroll events OUTSIDE the popup itself detach it from the button.
-      if (!(e.target === pop || (e.target && e.target.contains && pop.contains(e.target)))) close();
+      // The button and the popup are both fixed-position: only a scroll that
+      // happens INSIDE the panel can move the anchor out from under the popup.
+      // Closing on every document scroll (the old rule) made dropdowns flash
+      // shut at random moments — ZCode's chat transcript scrolls itself while
+      // a reply streams, and every such scroll yanked an open list closed.
+      // Unrelated app panes leave the fixed popup exactly where it was.
+      var t = e.target;
+      if (!t || t.nodeType !== 1) return;            // document/window scroll
+      if (t === pop || pop.contains(t)) return;      // the list's own scroll
+      if (t === root || root.contains(t)) close();   // the anchor moved
     }
     btn.addEventListener('click', function () {
       if (btn.getAttribute('aria-expanded') === 'true') close(); else open();

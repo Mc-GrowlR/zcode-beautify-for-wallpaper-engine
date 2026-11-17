@@ -112577,7 +112577,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.4";
+    VERSION = "6.3.5";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -119131,8 +119131,16 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
       }
     }
     function onScrollAway(e) {
-      // Only scroll events OUTSIDE the popup itself detach it from the button.
-      if (!(e.target === pop || (e.target && e.target.contains && pop.contains(e.target)))) close();
+      // The button and the popup are both fixed-position: only a scroll that
+      // happens INSIDE the panel can move the anchor out from under the popup.
+      // Closing on every document scroll (the old rule) made dropdowns flash
+      // shut at random moments \u2014 ZCode's chat transcript scrolls itself while
+      // a reply streams, and every such scroll yanked an open list closed.
+      // Unrelated app panes leave the fixed popup exactly where it was.
+      var t = e.target;
+      if (!t || t.nodeType !== 1) return;            // document/window scroll
+      if (t === pop || pop.contains(t)) return;      // the list's own scroll
+      if (t === root || root.contains(t)) close();   // the anchor moved
     }
     btn.addEventListener('click', function () {
       if (btn.getAttribute('aria-expanded') === 'true') close(); else open();

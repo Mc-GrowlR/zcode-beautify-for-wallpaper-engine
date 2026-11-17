@@ -255,6 +255,10 @@ w.fetch = (input: unknown, init?: { method?: string; body?: string }) => {
   return Promise.resolve({ ok: true, json: async () => data });
 };
 
+// jsdom has no scrollIntoView; the dropdown's open() uses it to bring the
+// current option into view. A no-op keeps the behavioural click test alive.
+(dom.window as unknown as { Element: { prototype: Record<string, unknown> } }).Element.prototype.scrollIntoView = () => {};
+
 w.eval(SCRIPT);
 await sleep(150); // mount + initial refresh + first-open loaders settle
 
@@ -298,6 +302,26 @@ check("look pane visible, others hidden",
   !$id("zb-tab-look").hidden && $id("zb-tab-main").hidden && $id("zb-tab-chat").hidden && $id("zb-tab-sched").hidden && $id("zb-tab-settings").hidden && $id("zb-tab-about").hidden);
 check("active nav highlight follows", tabButton("外观").getAttribute("data-active") === "1");
 check("tab choice persisted", w.localStorage.getItem("zcode-beautify:tab") === "look");
+
+// custom <select> dropdowns: only panel-internal scrolls may close the list.
+// Regression: the enhancer closed on EVERY document scroll, so the chat
+// transcript auto-scrolling while a reply streamed shut any open dropdown
+// within a frame ("click the option, the list flashes and vanishes").
+{
+  const ddBtn = $id("zb-fit-dd") as HTMLElement;
+  const ddPop = doc.querySelector("body > .zb-dd-pop") as HTMLElement;
+  check("custom dropdown built for the fit select", !!ddBtn && !!ddPop);
+  ddBtn.click();
+  check("dropdown opens on click", !ddPop.hidden && ddBtn.getAttribute("aria-expanded") === "true");
+  const appPane = doc.createElement("div");
+  appPane.className = "app-chat-scroll";
+  doc.body.appendChild(appPane);
+  appPane.dispatchEvent(new w.Event("scroll"));
+  check("unrelated app scroll keeps the dropdown open", !ddPop.hidden);
+  $id("zb-body").dispatchEvent(new w.Event("scroll"));
+  check("panel scroll closes the dropdown", ddPop.hidden && ddBtn.getAttribute("aria-expanded") === "false");
+  appPane.remove();
+}
 
 // sidebar search
 const search = input("zb-nav-search");
