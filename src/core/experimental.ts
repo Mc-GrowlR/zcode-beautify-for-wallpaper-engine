@@ -14,8 +14,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { dataDir, ensureExperimentalGate, loadConfig, saveConfig } from "./launch.js";
-import { resetZCode } from "./inject.js";
-import { target } from "./target.js";
+import { fallbackCdpPorts, target } from "./target.js";
 import { VERSION } from "../version.js";
 import type { RepairReport } from "./launchers.js";
 
@@ -106,26 +105,56 @@ async function teardownLive(): Promise<DisableTeardown> {
     /* service not running */
   }
   try {
-    const windows = await resetZCode(port);
-    return { via: "cdp", windows };
+    // Deferred: inject.ts brings the whole CDP + jimp chain, and the gate
+    // bootstrap imports this module on every MCP start just for the opt-in
+    // check. Only an actual disable needs the reset path.
+    const { resetZCode } = await import("./inject.js");
+    // The configured port may be closed while an unpackaged ZCode runs on its
+    // built-in 9229 dev port; try the same fallbacks serve uses.
+    for (const candidate of [port, ...fallbackCdpPorts()]) {
+      try {
+        const windows = await resetZCode(candidate, { disable: true });
+        if (windows > 0) return { via: "cdp", windows };
+      } catch {
+        /* next candidate */
+      }
+    }
+    return { via: "none", windows: 0 };
   } catch {
     return { via: "none", windows: 0 };
   }
+}
+
+/**
+ * Closes the opt-in gate in the persisted config. Split from the launcher
+ * pass because the daemon's disable route must flip this FIRST (so a session
+ * starting during teardown cannot respawn it) and because launcher repair is
+ * slow enough (~1s of PowerShell) to report separately.
+ */
+export function markExperimentalDisabled(): { port: number; apiPort: number } {
+  const cfg = loadConfig();
+  const port = cfg.port ?? target().cdpPort;
+  const apiPort = cfg.apiPort ?? target().apiPort;
+  cfg.experimental = { enabled: false };
+  saveConfig(cfg);
+  return { port, apiPort };
+}
+
+/** Strips the CDP flag from launch entries. */
+export async function cleanupLaunchEntries(port: number): Promise<RepairReport> {
+  const { repairLaunchers } = await import("./launchers.js");
+  return repairLaunchers({ port, action: "remove" });
 }
 
 /** Gate off + live teardown + (by default) strip the flag from launch entries. */
 export async function disableExperimental(
   opts: { cleanLaunchers?: boolean } = {}
 ): Promise<GateReport & { teardown: DisableTeardown }> {
-  const cfg = loadConfig();
-  const port = cfg.port ?? target().cdpPort;
+  // Close the gate before probing the service: the old code wrote it after the
+  // teardown, leaving a window where a concurrent MCP bootstrap could spawn a
+  // fresh daemon just as this one exited.
+  const gate = markExperimentalDisabled();
   const teardown = await teardownLive();
-  cfg.experimental = { enabled: false };
-  saveConfig(cfg);
-  let launchers: RepairReport | undefined;
-  if (opts.cleanLaunchers ?? true) {
-    const { repairLaunchers } = await import("./launchers.js");
-    launchers = await repairLaunchers({ port, action: "remove" });
-  }
-  return { enabled: false, port, apiPort: cfg.apiPort ?? target().apiPort, launchers, teardown };
+  const launchers = (opts.cleanLaunchers ?? true) ? await cleanupLaunchEntries(gate.port) : undefined;
+  return { enabled: false, ...gate, launchers, teardown };
 }

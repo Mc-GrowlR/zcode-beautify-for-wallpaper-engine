@@ -3,17 +3,17 @@
  * the model can set a wallpaper / re-theme / reset on the user's behalf.
  */
 
-import { existsSync, statSync } from "node:fs";
+import fs, { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { applyColorsOnly, applyWallpaper, applySceneWallpaper, reapplyStored, resetAppearance } from "../core/session.js";
 import { detectWallpaperType } from "../core/wallpaperType.js";
-import { ensureExperimentalGate, experimentalEnabled, loadConfig } from "../core/launch.js";
+import { dataDir, ensureExperimentalGate, experimentalEnabled, loadConfig } from "../core/launch.js";
 import { target } from "../core/target.js";
-import { DEFAULT_CONFIG, type ChatLoadLookConfig, type ChatLookConfig, type FabLookConfig, type ListPagingConfig, type TaskSpinnerLookConfig } from "../core/inject.js";
+import type { ChatLoadLookConfig, ChatLookConfig, FabLookConfig, ListPagingConfig, TaskSpinnerLookConfig } from "../core/inject.js";
 import { spawnServeDetached } from "../core/experimental.js";
+import { hostPluginState } from "../core/pluginGate.js";
 import { BUBBLE_STUDIO_URI, bubbleLookPatchFromTool, bubbleStudioResultMeta, bubbleStudioState, deleteBubbleRecipe, saveBubbleRecipe } from "../core/bubbleStudio.js";
 import { bubbleStudioHtml } from "./bubbleStudioHtml.js";
 import { VERSION } from "../version.js";
@@ -31,6 +31,14 @@ const absoluteExisting = (p: string): string => {
   return p;
 };
 
+/**
+ * The injection pipeline is loaded on first tool use, not at startup: the
+ * plugin host spawns one MCP process per chat session, and session.ts pulls
+ * inject → monet → jimp plus the CDP client — tens of megabytes of modules an
+ * idle session never touches. Same reason launch/experimental defer cdp/inject.
+ */
+const loadSession = () => import("../core/session.js");
+
 /** Path of the bundled dist/cli.js next to this server, or null under tsx. */
 function cliJsPath(): string | null {
   const serverFile = path.resolve(process.argv[1] ?? "");
@@ -38,6 +46,56 @@ function cliJsPath(): string | null {
   // tsx from src/ there is nothing to point at, so skip quietly.
   const cliJs = path.join(path.dirname(serverFile), "..", "cli.js");
   return path.basename(serverFile) === "server.js" && existsSync(cliJs) ? cliJs : null;
+}
+
+/** A launch-entry scan is a PowerShell run over shortcuts + registry keys;
+ *  once per this window is plenty when several sessions start together. */
+const LAUNCHER_CHECK_INTERVAL_MS = 10 * 60_000;
+
+function launcherCheckStamp(): string {
+  return path.join(dataDir(), "launcher-check.stamp");
+}
+
+/**
+ * Claim the launch-entry self-heal for this burst of session starts. Returns
+ * false when another MCP process already ran it recently (or is running it
+ * right now) — 3 sessions opening together otherwise run 3 identical
+ * PowerShell scans. The stamp carries the plugin version so an update always
+ * triggers a fresh check, and a stale stamp is replaced.
+ */
+function claimLauncherCheck(): boolean {
+  const stamp = launcherCheckStamp();
+  try {
+    const st = statSync(stamp);
+    let fresh = Date.now() - st.mtimeMs < LAUNCHER_CHECK_INTERVAL_MS;
+    try {
+      const [stampVersion] = fs.readFileSync(stamp, "utf8").trim().split(/\s+/);
+      if (stampVersion !== VERSION) fresh = false;
+    } catch {
+      fresh = false;
+    }
+    if (fresh) return false;
+  } catch {
+    /* no stamp yet: due */
+  }
+  try {
+    fs.mkdirSync(dataDir(), { recursive: true });
+    fs.rmSync(stamp, { force: true });
+    // wx: two processes bootstrapping together — exactly one wins the claim.
+    fs.writeFileSync(stamp, `${VERSION} ${Date.now()}`, { flag: "wx" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A failed scan must not buy 10 minutes of silence: let the next session retry. */
+function releaseLauncherCheck(): void {
+  try {
+    fs.rmSync(launcherCheckStamp(), { force: true });
+  } catch {
+    /* best effort */
+  }
 }
 
 /**
@@ -54,6 +112,15 @@ function bootstrapServe(): void {
   try {
     const cliJs = cliJsPath();
     if (!cliJs) return;
+    // The host plugin manager's switch is authoritative. A session can still
+    // start this MCP process when a workspace config overrides a global
+    // disable, or right after the user toggles the plugin off — neither must
+    // spawn the detached daemon or re-add the CDP flag.
+    const host = hostPluginState();
+    if (host.known && !host.enabled) {
+      console.error(`beautify: plugin disabled in ${target().appName}'s plugin manager — nothing started`);
+      return;
+    }
     const cfg = ensureExperimentalGate();
     if (!cfg.experimental?.enabled) {
       console.error(
@@ -68,13 +135,17 @@ function bootstrapServe(): void {
     spawnServeDetached(apiPort, cliJs);
     // Self-heal launch entries: without the CDP flag a start-menu launch gets
     // no injection for the whole session — and ZCode's updater rebuilds the
-    // Start Menu shortcut WITHOUT the flag, so this must run at every
-    // bootstrap, not only when CDP is unreachable. Fire-and-forget, fail-soft
-    // (stderr carries the plugin log; stdout is the MCP protocol).
+    // Start Menu shortcut WITHOUT the flag, so this must run at every app
+    // start, not only when CDP is unreachable. It is throttled to one scan per
+    // 10 minutes across the session processes that start in that burst.
+    // Fire-and-forget, fail-soft (stderr carries the plugin log; stdout is
+    // the MCP protocol).
+    if (!claimLauncherCheck()) return;
     import("../core/launchers.js")
       .then((m) =>
         m.repairLaunchers({ port: loadConfig().port ?? target().cdpPort }).then((report) => {
           if (report.error) {
+            releaseLauncherCheck();
             console.error(`launcher check failed: ${report.error}`);
             return;
           }
@@ -85,12 +156,35 @@ function bootstrapServe(): void {
           }
         })
       )
-      .catch(() => undefined);
+      .catch(() => releaseLauncherCheck());
   } catch {
     /* best effort */
   }
 }
 bootstrapServe();
+
+/**
+ * Host re-enable recovery: the plugin manager can switch the plugin off and
+ * back on without restarting the app. ZCode does not launch a fresh MCP
+ * process for an already-running session on re-enable, so bootstrapServe()
+ * (startup-only) never runs again and the serve daemon stays down. Poll the
+ * same two gates and re-bootstrap when both are on; health probing and the
+ * launcher stamp keep this idempotent across every session's MCP process.
+ */
+function watchHostReenable(): void {
+  const timer = setInterval(() => {
+    try {
+      const host = hostPluginState();
+      if (host.known && !host.enabled) return;
+      if (!experimentalEnabled(loadConfig())) return;
+      bootstrapServe();
+    } catch {
+      /* best effort */
+    }
+  }, 5000);
+  timer.unref?.();
+}
+watchHostReenable();
 
 /** Shared refusal for the injection tools while the opt-in gate is closed. */
 function disabledNotice(): { content: Array<{ type: "text"; text: string }> } {
@@ -102,6 +196,22 @@ function disabledNotice(): { content: Array<{ type: "text"; text: string }> } {
         "To opt in, call `enable_experimental` once: it records consent, adds --remote-debugging-port to the client's " +
         "launch entries and starts the local service (see the README security notes for what that exposes).\n" +
         "`disable_experimental` undoes all of it, including stripping the flag from the launch entries again.",
+    }],
+  };
+}
+
+/**
+ * Refusal for every acting tool while the plugin itself is switched off in the
+ * host's plugin manager. `beautify_status` and `disable_experimental` stay
+ * callable: the former is read-only and the latter is the cleanup path.
+ */
+function hostDisabledNotice(): { content: Array<{ type: "text"; text: string }> } {
+  return {
+    content: [{
+      type: "text",
+      text:
+        `The plugin is disabled in ${APP}'s plugin manager — nothing was changed.\n` +
+        "Re-enable zcode-beautify there (then restart the client) before using its tools.",
     }],
   };
 }
@@ -130,7 +240,18 @@ server.registerTool = ((name: string, meta: Record<string, unknown>, handler: un
           description:
             typeof meta.description === "string" ? meta.description.replace(/ZCode/g, APP) : meta.description,
         };
-  return rawRegister(name, branded as never, handler as never);
+  // A disabled plugin can still get an MCP process launched when a workspace
+  // config overrides the global switch. Never let that stale process act:
+  // only the read-only status tool and the disable/cleanup tool stay open.
+  const guarded =
+    name === "beautify_status" || name === "disable_experimental"
+      ? handler
+      : async (...args: unknown[]) => {
+          const host = hostPluginState();
+          if (host.known && !host.enabled) return hostDisabledNotice();
+          return (handler as (...inner: unknown[]) => unknown)(...args);
+        };
+  return rawRegister(name, branded as never, guarded as never);
 }) as typeof server.registerTool;
 
 /** Registry of the tools this server exposes (used by tests / docs). */
@@ -185,6 +306,7 @@ server.registerTool(
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       const abs = absoluteExisting(image_path);
       const kind = detectWallpaperType(abs);
+      const { applySceneWallpaper, applyWallpaper } = await loadSession();
       const { windows } =
         kind === "scene" || kind === "video"
           ? await applySceneWallpaper(abs, { blur, dim })
@@ -223,6 +345,7 @@ server.registerTool(
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       const abs = absoluteExisting(scenePath);
       const stages: string[] = [];
+      const { applySceneWallpaper } = await loadSession();
       const { windows, served, scene } = await applySceneWallpaper(abs, {
         blur,
         dim,
@@ -288,8 +411,9 @@ server.registerTool(
       chat_drag_resize: z.boolean().optional().describe("Drag handles on both edges of the conversation column (两侧拖拽调宽): true mounts two hidden vertical strips — hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips"),
       chat_session_hover: z.boolean().optional().describe("会话概览悬停卡: true shows a preview card when the mouse rests on a sidebar session row, listing that conversation's real user prompts (oldest → newest, newest bold, served from ZCode's local session db by the beautify daemon; ZCode's own workspace hover card is hidden while on); false restores stock"),
       chat_session_hover_side: z.boolean().optional().describe("侧栏标题悬停: whether the LEFT task-list session rows trigger the 会话概览 hover card (true, default); false = only the conversation's turn ticks (对话概要标示) open it and the sidebar keeps ZCode's own workspace hover card. Only meaningful with chat_session_hover on"),
-      chat_session_hover_max: z.number().min(1).max(60).optional().describe("会话概览卡最多显示几条提问 (1-60, default 10): the card grows up to this many visible rows; excess prompts live in the card's scrollable list (auto-landed on the newest). Only meaningful with chat_session_hover on"),
+      chat_session_hover_max: z.number().min(1).max(60).optional().describe("会话概览卡可见行数 (1-60, default 10): the card window grows up to this many visible rows; ALL prompts stay in the scrollable list (auto-landed on the newest — scroll up for older questions), never a data cap. Only meaningful with chat_session_hover on"),
       chat_composer_fade: z.number().min(0).max(100).optional().describe("输入框透明度: 0 = stock composer background, 1-100 fades the chat input box's paint toward transparent so the wallpaper shows through (text and border untouched)"),
+      chat_title_cites: z.boolean().optional().describe("标题引用与 goal 标记: sidebar session titles that ZCode auto-generates from a message containing a referenced file currently show the raw Markdown ([file.lua](./path/file.lua)); true (default) renders them like the message bubble — the file icon plus the file name as an inline chip — and also converts skill/session/plugin/command mention tokens. Sessions started with /goal get the goal chip put back in front of their generated title (read from ZCode's session db by the serve daemon; hover shows the goal status). false keeps the raw Markdown and no goal marker"),
       chat_loading_icon: z.object({
         mode: z.enum(["default", "classic", "image"]).optional().describe("会话底部加载图标: default = ZCode 3.18's stock brand-colored orbit glyph, classic = the pre-3.18 3×3 pixel-wave dots, image = a user picture/GIF"),
         image_path: z.string().optional().describe("Absolute path of the image/GIF to paint over the loading icon (resolved serve-side; required when mode = image)"),
@@ -308,7 +432,7 @@ server.registerTool(
       }).optional().describe("Panel-opener button look; omitted fields keep their current value"),
     },
   },
-  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, list_collapse_all, fab }) => {
+  async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_title_cites, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, list_collapse_all, fab }) => {
     try {
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
       // Send only the fields the caller provided: the session layer merges
@@ -325,7 +449,7 @@ server.registerTool(
                 .map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]),
             ) as Partial<TaskSpinnerLookConfig>);
       const chatLook: Partial<ChatLookConfig> | undefined =
-        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined && chat_composer_fade === undefined && chat_session_hover === undefined && chat_session_hover_side === undefined && chat_session_hover_max === undefined
+        chat_width_cap_rem === undefined && chat_width_inset_rem === undefined && chat_hide_elapsed_decimal === undefined && chat_drag_resize === undefined && chat_composer_fade === undefined && chat_title_cites === undefined && chat_session_hover === undefined && chat_session_hover_side === undefined && chat_session_hover_max === undefined
           ? undefined
           : {
               ...(chat_width_cap_rem !== undefined ? { widthCapRem: chat_width_cap_rem } : {}),
@@ -336,6 +460,7 @@ server.registerTool(
               ...(chat_session_hover_side !== undefined ? { sessionHoverSide: chat_session_hover_side ? 1 : 0 } : {}),
               ...(chat_session_hover_max !== undefined ? { sessionHoverMax: chat_session_hover_max } : {}),
               ...(chat_composer_fade !== undefined ? { composerFade: chat_composer_fade } : {}),
+              ...(chat_title_cites !== undefined ? { titleCites: chat_title_cites ? 1 : 0 } : {}),
             };
       const chatLoadLook =
         chat_loading_icon === undefined
@@ -363,6 +488,7 @@ server.registerTool(
                 .filter(([, v]) => v !== undefined)
                 .map(([k, v]) => [k === "image_path" ? "image" : k, v]),
             ) as Partial<FabLookConfig>);
+      const { applyColorsOnly } = await loadSession();
       const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook, listPaging, fabLook });
       // Bubble changes surface the interactive Bubble Studio gallery (MCP
       // Apps hosts render it; plain hosts just show the text card below).
@@ -451,6 +577,7 @@ server.registerTool(
   async () => {
     try {
       if (!experimentalEnabled(loadConfig())) return disabledNotice();
+      const { reapplyStored } = await loadSession();
       const windows = await reapplyStored();
       return { content: [{ type: "text", text: `Theme re-injected into ${windows} window(s).` }] };
     } catch (err) {
@@ -468,6 +595,7 @@ server.registerTool(
   },
   async () => {
     try {
+      const { resetAppearance } = await loadSession();
       await resetAppearance();
       return { content: [{ type: "text", text: "Appearance restored to default." }] };
     } catch (err) {
@@ -603,7 +731,10 @@ server.registerTool(
   async ({ action, dry_run }) => {
     try {
       const mode = action ?? "add";
-      const port = loadConfig().port ?? DEFAULT_CONFIG.port;
+      // target().cdpPort is the same per-target default DEFAULT_CONFIG.port
+      // hardcoded for ZCode; importing inject.ts only for that constant would
+      // pull the whole injection/jimp chain into this process.
+      const port = loadConfig().port ?? target().cdpPort;
       const { repairLaunchers } = await import("../core/launchers.js");
       const report = await repairLaunchers({ port, action: mode, dryRun: dry_run });
 

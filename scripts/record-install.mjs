@@ -12,9 +12,16 @@
 // identity from the repo manifests, merges into the existing registry, validates
 // installPath, backs the old file up and writes atomically.
 //
+// Repair: a previous upgrade may have copied the current files into an older
+// cache folder (record 0.6.0, manifest 6.3.6). When the version-named cache
+// folder is absent and exactly one sibling folder carries the same manifest
+// version, write mode atomically copies that folder to
+// cache/<marketplace>/<name>/<version> before saving the record. The old folder
+// is retained; dry-run prints the planned migration and touches nothing.
+//
 // Usage:
 //   node scripts/record-install.mjs                 # merge + validate + write
-//   node scripts/record-install.mjs --dry-run       # validate + print, write nothing
+//   node scripts/record-install.mjs --dry-run       # validate + print (planned repair), write nothing
 //   node scripts/record-install.mjs --verify        # only check the registry as-is
 //   node scripts/record-install.mjs --plugins-root <dir>   # default ~/.zcode/cli/plugins
 //
@@ -30,7 +37,7 @@ const argv = process.argv.slice(2);
 const USAGE = `usage: node scripts/record-install.mjs [--dry-run | --verify] [--plugins-root <dir>]
 
   (no flags)            merge this repo's record into the registry, validate, write
-  --dry-run             print the record that would be written; touches nothing
+  --dry-run             print the record (and any planned cache repair); touches nothing
   --verify              validate the registry as it is; exits 1 on fatal problems
   --plugins-root <dir>  registry location (default ~/.zcode/cli/plugins)
   -h, --help            show this text
@@ -130,6 +137,55 @@ function inspect(record) {
   return { fatal, warnings };
 }
 
+function manifestAt(dir) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(dir, ".zcode-plugin", "plugin.json"), "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy a mis-versioned cache folder to the version-named path without ever
+ * leaving a half-written target: copy to a sibling stage, verify the staged
+ * manifest, then rename. The source folder is kept as a backup; a concurrent
+ * writer that already produced a valid target wins.
+ */
+function migrateCache(source, target) {
+  const stage = `${target}.staging-${process.pid}-${Date.now()}`;
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.cpSync(source, stage, { recursive: true, dereference: false, errorOnExist: true });
+    const staged = manifestAt(stage);
+    if (!staged || staged.name !== name || staged.version !== version) {
+      throw new Error(`staged copy at ${stage} does not carry ${name} ${version}`);
+    }
+    try {
+      fs.renameSync(stage, target);
+    } catch (err) {
+      const existing = manifestAt(target);
+      if (existing && existing.name === name && existing.version === version) {
+        fs.rmSync(stage, { recursive: true, force: true });
+        console.log(`cache:       ${target} appeared during the repair; using it`);
+        return;
+      }
+      throw err;
+    }
+    console.log(`cache:       migrated ${source} -> ${target} (old folder kept as a backup)`);
+  } catch (err) {
+    try {
+      fs.rmSync(stage, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+    fail(
+      `cannot migrate cache folder ${source} -> ${target}: ${err.code ?? err.message}; ` +
+        `the source folder was left untouched`,
+    );
+  }
+}
+
 function readRegistry() {
   if (!fs.existsSync(registryPath)) return { version: 1, plugins: [] };
   const parsed = readJson(registryPath, "installed_plugins.json");
@@ -181,12 +237,47 @@ if (typeof name !== "string" || !name || typeof version !== "string" || !version
   fail(".zcode-plugin/plugin.json must declare a name and a version");
 }
 
-const installPath = path.join(pluginsRoot, "cache", marketplaceId, name, version);
-if (!fs.existsSync(path.join(installPath, ".zcode-plugin", "plugin.json"))) {
-  fail(
-    `cache folder ${installPath} is missing or incomplete — finish step 4 first ` +
-      `(copy the repo, including .zcode-plugin/, to that exact folder, whose name must equal the version)`,
-  );
+const cacheRoot = path.join(pluginsRoot, "cache", marketplaceId, name);
+const installPath = path.join(cacheRoot, version);
+const installedManifest = manifestAt(installPath);
+let cacheSource = null;
+if (installedManifest) {
+  if (installedManifest.name !== name || installedManifest.version !== version) {
+    fail(
+      `cache folder ${installPath} carries ${installedManifest.name ?? "?"} ` +
+        `${installedManifest.version ?? "?"}, expected ${name} ${version} — ` +
+        `fix that folder or remove it before recording this version`,
+    );
+  }
+} else {
+  // Drift repair: an older cache folder can contain the current build's bytes
+  // (record 0.6.0 + manifest 6.3.6). Adopt it only when the match is unique.
+  let candidates = [];
+  try {
+    candidates = fs
+      .readdirSync(cacheRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(cacheRoot, entry.name))
+      .filter((dir) => {
+        const manifest = manifestAt(dir);
+        return manifest && manifest.name === name && manifest.version === version;
+      });
+  } catch {
+    /* cache root absent: fall through to the actionable error */
+  }
+  if (candidates.length === 1) {
+    cacheSource = candidates[0];
+  } else if (candidates.length > 1) {
+    fail(
+      `multiple cache folders carry ${name} ${version}: ${candidates.join(", ")} — ` +
+        `remove or rename the stale copies first`,
+    );
+  } else {
+    fail(
+      `cache folder ${installPath} is missing or incomplete — finish step 4 first ` +
+        `(copy the repo, including .zcode-plugin/, to that exact folder, whose name must equal the version)`,
+    );
+  }
 }
 
 const id = `${name}@${marketplaceId}`;
@@ -204,7 +295,11 @@ const record = {
   source: { source: "directory", path: repoRoot },
 };
 
-const { fatal, warnings } = inspect(record);
+if (cacheSource && !dryRun) migrateCache(cacheSource, installPath);
+// Dry-run validates the existing source folder; the printed record still points
+// at the version-named target that write mode would create.
+const inspected = dryRun && cacheSource ? { ...record, installPath: cacheSource } : record;
+const { fatal, warnings } = inspect(inspected);
 if (fatal.length) fail(`refusing to write an invalid record:\n  - ${fatal.join("\n  - ")}`);
 for (const warning of warnings) console.warn(`warn: ${warning}`);
 
@@ -215,6 +310,9 @@ const payload = `${JSON.stringify(registry, null, 2)}\n`;
 console.log(`registry:    ${registryPath}`);
 console.log(`record:      ${id} ${version}`);
 console.log(`installPath: ${installPath}`);
+if (cacheSource && dryRun) {
+  console.log(`cache:       would migrate ${cacheSource} -> ${installPath} (old folder kept)`);
+}
 console.log(`action:      ${previous ? "update existing record" : "append new record"} (${plugins.length} total)`);
 
 if (dryRun) {

@@ -163,7 +163,7 @@ export interface InjectionPayload {
   /** Video wallpaper audio 0-100 (0/absent = muted). */
   videoVolume?: number;
   /** Zone-refined chat-area masks + column width (聊天界面); absent = stock. */
-  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number; hideElapsedDecimal: number; dragResize: number; sessionHover: number; sessionHoverSide: number; sessionHoverMax: number };
+  chatLook?: { chatDim: number; maskTop: number; maskBottom: number; frost: number; widthCapRem: number; widthInsetRem: number; perfSmooth: number; hideElapsedDecimal: number; dragResize: number; sessionHover: number; sessionHoverSide: number; sessionHoverMax: number; titleCites: number };
   /** User message bubble look (聊天气泡); absent/preset default = stock. */
   bubbleLook?: BubbleLookConfig;
   /**
@@ -185,6 +185,11 @@ export interface InjectionPayload {
    * per-start token. Empty/absent = feature off (no listeners mounted).
    */
   previewApi?: string;
+  /**
+   * 标题 goal 标记 data source: serve's /api/goal-sessions URL incl. the
+   * per-start token. Empty/absent = no goal chips in the sidebar titles.
+   */
+  goalApi?: string;
 }
 
 /**
@@ -224,6 +229,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
+  // Disable teardown marker: old Page.addScriptToEvaluateOnNewDocument
+  // registrations replay on every reload, so a disabled plugin would otherwise
+  // repaint the wallpaper/theme from a previous generation's baked payload.
+  // A live serve clears the marker before injecting again.
+  try { if (localStorage.getItem(MARKER + ':disabled') === '1') return; } catch (e) {}
   var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
   var CHAT_UI = ${JSON.stringify(payload.chatUi !== false)};
   var PROBE = ${JSON.stringify(payload.startupProbe ?? "zcode-body-class")};
@@ -248,7 +258,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10, titleCites: 1 }))};
   // 会话概览悬停卡: the serve endpoint (token included) the hover card
   // fetches its prompt list from; empty = the feature stays unmounted.
   // A serve restart rotates the token while css/chat stay identical — the
@@ -261,6 +271,13 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var PREVIEW_API = ${JSON.stringify(payload.previewApi ?? "")};
   var PREV_API = window.__zcodeBeautify.previewApi;
   window.__zcodeBeautify.previewApi = PREVIEW_API;
+  // 标题 goal 标记: goal sessions get a generated title without the /goal
+  // command; this endpoint (token included) maps session ids → goal status so
+  // the title engine can put the chip back. Refreshed by every eval (same
+  // stale-closure defense as previewApi).
+  var GOAL_API = ${JSON.stringify(payload.goalApi ?? "")};
+  var PREV_GOAL_API = window.__zcodeBeautify.goalApi || '';
+  window.__zcodeBeautify.goalApi = GOAL_API;
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
@@ -302,6 +319,109 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var zbHoverRowEl = null;
   var zbHoverRectTop = 0;
   var zbHoverRectLeft = 0;
+  // 标题文件引用 (title file citations) state + tables — top-of-body for the
+  // same hoisting reason as the hover slots above: applyChatLook calls into
+  // the title engine from the fast paths, before the helper section below
+  // has run, so every table it reads must already be initialized here.
+  // The grammar mirrors the message bubble's own mention parser
+  // (packages/ui mentions/mentionMarkdown.ts) — a title auto-generated from
+  // "[file](./path/file)" must convert into the same icon+label chip.
+  // Version stamp: the BUILD version of the title-cite engine. Older
+  // generations' addScriptToEvaluateOnNewDocument registrations replay after a
+  // reload / serve restart and bind their own observer first; without the
+  // stamp the newest eval would keep that stale closure (which, e.g., knows
+  // nothing about goal markers and restores plain titles). Bump whenever the
+  // title engine's behavior changes.
+  var TC_VER = '3';
+  var TC_SEL = '[data-task-title-copy]';
+  var TC_SRC_CLS = 'zb-tc-src';
+  var TC_VIEW_CLS = 'zb-tc-view';
+  var TC_LINK = /\\[((?:\\\\.|[^\\\\\\]])*)\\]\\((?:<((?:\\\\.|[^>])*?)>|((?:\\\\.|[^)])*))\\)/g;
+  var TC_INLINE = /(^|\\s)(\\$[a-zA-Z0-9._-]+|\\/[a-zA-Z0-9._-]+|@[a-zA-Z0-9._-]+|#(?:sess|session)_[a-zA-Z0-9._-]+)(?=$|\\s)/g;
+  // Extension → material-icons/<name>.svg, ported from ZCode's
+  // lib/fileDisplayHelpers.ts (aliases only where the extension and the asset
+  // name differ; everything else resolves by extension name).
+  var TC_EXT_ICONS = ${JSON.stringify({
+    backup: "document",
+    bash: "console",
+    cjs: "javascript",
+    cts: "typescript",
+    css: "css",
+    doc: "word",
+    docx: "word",
+    js: "javascript",
+    jsx: "react",
+    jsonl: "json",
+    mjs: "javascript",
+    md: "markdown",
+    m4a: "audio",
+    m4v: "video",
+    flac: "audio",
+    mov: "video",
+    mp3: "audio",
+    mp4: "video",
+    ogg: "audio",
+    opus: "audio",
+    mts: "typescript",
+    jpeg: "image",
+    jpg: "image",
+    png: "image",
+    gif: "image",
+    webp: "image",
+    avif: "image",
+    bmp: "image",
+    ico: "image",
+    pdf: "pdf",
+    pptx: "powerpoint",
+    ppt: "powerpoint",
+    py: "python",
+    rs: "rust",
+    sh: "console",
+    zsh: "console",
+    sql: "database",
+    svg: "svg",
+    toml: "toml",
+    ts: "typescript",
+    tsx: "react_ts",
+    txt: "document",
+    wav: "audio",
+    weba: "audio",
+    webm: "video",
+    xlsx: "table",
+    xls: "table",
+    csv: "table",
+    yaml: "yaml",
+    yml: "yaml",
+  } as Record<string, string>)};
+  var TC_NAME_ICONS = ${JSON.stringify({
+    ".editorconfig": "editorconfig",
+    ".env": "settings",
+    ".gitattributes": "git",
+    ".gitignore": "git",
+    ".npmrc": "npm",
+    ".nvmrc": "nodejs_alt",
+    ".prettierrc": "prettier",
+    ".yarnrc": "yarn",
+    dockerfile: "docker",
+    makefile: "makefile",
+    readme: "readme",
+    tsconfig: "tsconfig",
+  } as Record<string, string>)};
+  // Non-file mention chips reuse the bubble's lucide glyphs, inlined as
+  // static SVG (fixed markup — never user data).
+  var TC_SVG = {
+    skill: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 20.5 15 9"/><path d="M15.5 3.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/><path d="M19.5 12.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>',
+    session: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    plugin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>',
+    subagent: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="2.5"/><path d="M12 3v4M9 13h.01M15 13h.01M9.5 16.5h5"/></svg>',
+    element: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 3l7.2 17 2.6-7.2 7.2-2.6z"/></svg>',
+    command: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4 8 20"/></svg>',
+    goal: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>',
+  };
+  // rAF-coalesced work list: streaming + marquee rebuilds mutate the sidebar
+  // often; a Set-like array keeps each span processed once per frame.
+  var tcQueue = [];
+  var tcRaf = false;
   // --zb-bubble-tint holds 0-1; the mixes scale it back to a percentage.
   // Recipes + custom CSS are baked serve-side from core/bubbleRecipes.ts so
   // this table and the panel preview share one source of truth. The custom
@@ -449,7 +569,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && window.__zcodeBeautify.listKey === LIST && window.__zcodeBeautify.listStamp === LIST_VER && PREV_API === PREVIEW_API && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && window.__zcodeBeautify.listKey === LIST && window.__zcodeBeautify.listStamp === LIST_VER && PREV_API === PREVIEW_API && PREV_GOAL_API === GOAL_API && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -753,6 +873,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // 标题文件引用: sidebar titles parse like the message bubble (default on).
+    var tcOn = Number(C.titleCites) === 1;
     // 会话概览悬停卡: needs the serve endpoint; without it the toggle is a
     // no-op (nothing mounts, the native hover card stays).
     var hoverOn = Number(C.sessionHover) === 1 && typeof PREVIEW_API === 'string' && PREVIEW_API.length > 0;
@@ -878,6 +1000,24 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           // to min-content (~40px strip) while block-parented message holders
           // just fill. A literal floor can never go invalid).
           + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{min-width:460px!important}'
+        : '')
+      // 标题文件引用 chips: the sidebar title is plain text, so the converted
+      // parts render through these rules. Colors ride the same
+      // --color-*-node-foreground tokens the bubble's mention chips use (a
+      // Monet re-theme restyles them with zero extra work); metrics mirror
+      // the bubble chip (16px icon, 4px gap, 500 weight, inherited size).
+      + (tcOn
+        ? '.zb-tc{display:inline-flex;max-width:100%;align-items:center;gap:4px;'
+          + 'margin:0 2px;vertical-align:middle;font-weight:500;line-height:inherit;'
+          + 'white-space:nowrap;cursor:default}'
+          + '.zb-tc[data-k="file"],.zb-tc[data-k="dir"],.zb-tc[data-k="element"]{color:var(--color-file-node-foreground,#8fc5ef)}'
+          + '.zb-tc[data-k="skill"]{color:var(--color-skill-node-foreground,#bda5e6)}'
+          + '.zb-tc[data-k="session"]{color:var(--color-session-node-foreground,#93d8d2)}'
+          + '.zb-tc[data-k="plugin"]{color:var(--color-plugin-node-foreground,#efc58f)}'
+          + '.zb-tc[data-k="subagent"]{color:var(--color-subagent-node-foreground,#c8cd90)}'
+          + '.zb-tc[data-k="command"]{color:var(--color-command-node-foreground,#b5c0cc)}'
+          + '.zb-tc>img,.zb-tc>svg{flex:none;display:block;width:16px;height:16px}'
+          + '.zb-tc>.zb-tc-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
         : '');
     if (masksOn) {
       if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
@@ -1025,6 +1165,11 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     }
     // 会话概览悬停卡: idempotent mount/unmount riding the chat-look push.
     zbHoverApply(hoverOn);
+    // 标题文件引用: idempotent observer mount + immediate sweep; off restores
+    // the raw markdown text (no wrappers left behind). The slot mirrors
+    // perfOn/dragOn so tests and one-off probes can see the live state.
+    window.__zcodeBeautify.tcOn = tcOn ? 1 : 0;
+    zbTcApply(tcOn);
   }
 
   // --- 会话概览悬停卡 (session hover preview) ---------------------------------
@@ -1160,10 +1305,14 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
       if (!data) {
         // serve down / token stale / db unreadable: still useful — the row's
         // marquee carries the FULL untruncated title (tick anchors fall back
-        // to the selected sidebar row's marquee).
-        var fbSrc = (row.querySelector('[data-task-title-copy="original"]') || {}).textContent
-          || (document.querySelector('[data-testid^="task-item-"].bg-selected [data-task-title-copy="original"]') || {}).textContent
-          || '';
+        // to the selected sidebar row's marquee). 标题文件引用 blanks the
+        // title's text node to '' and keeps the real string on the span —
+        // read that first (textContent would lose it).
+        var fbCopy = (row.querySelector('[data-task-title-copy="original"]')
+          || document.querySelector('[data-testid^="task-item-"].bg-selected [data-task-title-copy="original"]'));
+        var fbSrc = fbCopy
+          ? (fbCopy.__zbTc && fbCopy.__zbTc.raw) || fbCopy.textContent || ''
+          : '';
         if (fbSrc) {
           var fb = document.createElement('div');
           fb.className = MARKER + '-hov-row';
@@ -1184,23 +1333,36 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         list.appendChild(empty);
         return;
       }
-      // 最多显示行数 (sessionHoverMax): the card lists EXACTLY the newest N
-      // prompts — a short, naturally-ending list (reference design), not a
-      // tall scroll area carrying the whole history. Older prompts are simply
-      // not listed; the CSS max-height below stays only as a viewport guard
-      // for very large N.
+      // 可见行数 (sessionHoverMax) is a WINDOW HEIGHT, not a data cap: every
+      // returned prompt stays in the list and older ones are reachable by
+      // scrolling. The old implementation sliced to the newest N, so a long
+      // session's overview silently lost all earlier questions (user report).
       var cap = window.__zcodeBeautify ? Number(window.__zcodeBeautify.hoverMax) : NaN;
       cap = Number.isFinite(cap) && cap >= 1 ? Math.min(60, Math.round(cap)) : 10;
-      if (ps.length > cap) ps = ps.slice(ps.length - cap);
+      // ~28px per single-line row; keep the card compact but tall enough for
+      // at least a few rows, and never taller than the CSS viewport guard.
+      var maxH = Math.max(72, Math.min(470, Math.round((window.innerHeight || 800) * 0.56), cap * 28));
+      list.style.maxHeight = maxH + 'px';
+      var frag = document.createDocumentFragment();
+      var omitted = Math.max(0, Math.round(Number(data.omitted) || 0));
+      if (omitted > 0) {
+        // Safety cap only: tell the user older prompts exist beyond the
+        // server's MAX_PROMPTS (1000), instead of silently dropping them.
+        var older = document.createElement('div');
+        older.className = MARKER + '-hov-hint';
+        older.textContent = '还有 ' + omitted + ' 条更早的提问未载入';
+        frag.appendChild(older);
+      }
       for (var i = 0; i < ps.length; i++) {
         var r = document.createElement('div');
         r.className = MARKER + '-hov-row' + (i === ps.length - 1 ? ' ' + MARKER + '-hov-last' : '');
         r.textContent = zbHoverText(ps[i].text);
         if (ps[i].mid) r.setAttribute('data-mid', ps[i].mid);
-        list.appendChild(r);
+        frag.appendChild(r);
       }
-      // Newest sits at the bottom (image spec) — land the scroll there
-      // (only relevant when a very large N overflows the CSS max-height).
+      list.appendChild(frag);
+      // Newest sits at the bottom (image spec) — land the scroll there; the
+      // list is scrollable, so older prompts remain reachable above.
       list.scrollTop = list.scrollHeight;
     });
   }
@@ -1512,6 +1674,476 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     if (!root || !root.querySelectorAll) return;
     var spans = root.querySelectorAll('[data-zcode-chat-loading-animate="true"] > span[aria-hidden="true"]');
     for (var si = 0; si < spans.length; si++) zbStripElapsed(spans[si]);
+  }
+  // --- 标题文件引用 (title file citations) ----------------------------------
+  // ZCode auto-generates a session title from the first user message and keeps
+  // the message's mention markdown verbatim ("[穿戴引导表单.lua](./script/…)").
+  // The message bubble re-parses that markdown into icon+label chips
+  // (packages/ui mentions/mentionMarkdown.ts → ConversationUserInputContent),
+  // but the sidebar title (TaskTitleOverflowText) is a plain-text component —
+  // so the raw markdown leaks. This engine projects the bubble's grammar onto
+  // each [data-task-title-copy] span at the DOM level:
+  //   · the title's text node is NOT re-parented (React's reconciler keeps a
+  //     direct-child reference and would throw removeChild on a moved node);
+  //     it is blanked to '' and remembered — React's next title update writes
+  //     nodeValue, our characterData observer re-blanks + re-renders;
+  //   · a sibling .zb-tc-view layer renders the parsed parts (file/dir chips
+  //     reuse the same material-icons assets the bubble uses);
+  //   · the marquee's aria-hidden duplicate copy is processed the same way,
+  //     and the original span's scrollWidth still measures the chip layer, so
+  //     ZCode's own overflow/marquee logic stays intact.
+  function zbTcUnescape(s) {
+    return String(s == null ? '' : s).replace(/\\\\(.)/g, '$1');
+  }
+  function zbTcLeaf(path) {
+    var p = String(path == null ? '' : path).replace(/\\\\/g, '/').replace(/\\/+$/, '');
+    var seg = p.split('/');
+    for (var i = seg.length - 1; i >= 0; i--) if (seg[i]) return seg[i];
+    return String(path == null ? '' : path);
+  }
+  // A destination is a local file reference unless it carries a scheme. Anchors
+  // (#section) are not files; Windows drive letters look like schemes (C:) but
+  // are local; file:// URLs stay local.
+  function zbTcLocal(dest) {
+    if (!dest) return false;
+    if (dest.charAt(0) === '#') return false;
+    if (/^[a-zA-Z]:[\\\\/]/.test(dest)) return true;
+    if (dest.indexOf('file://') === 0) return true;
+    return !/^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(dest);
+  }
+  function zbTcIconName(path) {
+    var leaf = zbTcLeaf(path).toLowerCase();
+    if (!leaf) return 'document';
+    var dot = leaf.lastIndexOf('.');
+    var stem = dot === -1 ? leaf : leaf.slice(0, dot);
+    var cands = [leaf, stem];
+    var seg = stem;
+    while (seg.indexOf('.') !== -1) {
+      seg = seg.slice(0, seg.lastIndexOf('.'));
+      if (seg) cands.push(seg);
+    }
+    for (var i = 0; i < cands.length; i++) {
+      var hit = TC_NAME_ICONS[cands[i]];
+      if (hit) return hit;
+    }
+    if (dot === -1) return 'document';
+    var ext = leaf.slice(dot + 1);
+    return TC_EXT_ICONS[ext] || ext || 'document';
+  }
+  function zbTcSkillLabel(label) {
+    var t = String(label || '').trim();
+    if (!t || (t.indexOf(' ') !== -1 && t.indexOf('-') === -1 && t.indexOf('_') === -1)) return label;
+    var words = t.split(/[-_]/);
+    var out = [];
+    for (var i = 0; i < words.length; i++) {
+      if (!words[i]) continue;
+      out.push(words[i].charAt(0).toUpperCase() + words[i].slice(1).toLowerCase());
+    }
+    return out.length ? out.join(' ') : label;
+  }
+  // Inline tokens are the same fallback the bubble uses for plain "$skill",
+  // "/command", "@subagent" and "#sess_…" text outside markdown links.
+  function zbTcInline(parts, seg) {
+    if (!seg) return;
+    TC_INLINE.lastIndex = 0;
+    var cursor = 0;
+    var m;
+    while ((m = TC_INLINE.exec(seg))) {
+      var token = m[2] || '';
+      var start = m.index + (m[1] || '').length;
+      if (!token) continue;
+      if (start > cursor) parts.push({ t: 'text', v: seg.slice(cursor, start) });
+      var ch = token.charAt(0);
+      if (ch === '$') parts.push({ t: 'skill', label: zbTcSkillLabel(token.slice(1)) });
+      else if (ch === '/') parts.push({ t: 'command', label: token.slice(1), cmd: token.slice(1) });
+      else if (ch === '@') parts.push({ t: 'subagent', label: token.slice(1) });
+      else if (ch === '#') parts.push({ t: 'session', label: token.slice(1) });
+      else parts.push({ t: 'text', v: token });
+      cursor = start + token.length;
+    }
+    if (cursor < seg.length) parts.push({ t: 'text', v: seg.slice(cursor) });
+  }
+  // The bubble's grammar (mentionMarkdown.ts parseMentionMarkdown), minus the
+  // transport-only schemes: any markdown link becomes a colored chip; file
+  // chips need a local destination, web links keep their label as plain text.
+  function zbTcParts(text) {
+    var parts = [];
+    var cursor = 0;
+    TC_LINK.lastIndex = 0;
+    var m;
+    while ((m = TC_LINK.exec(text))) {
+      var full = m[0] || '';
+      if (m.index > cursor) zbTcInline(parts, text.slice(cursor, m.index));
+      var label = zbTcUnescape(m[1]);
+      var dest = m[2] != null ? m[2] : (m[3] != null ? m[3] : '');
+      var cleanLabel = label.replace(/^@/, '');
+      if (/^#(?:sess|session)_[a-zA-Z0-9._-]+$/.test(dest)) {
+        parts.push({ t: 'session', label: label.replace(/^#/, '') });
+      } else if (dest.indexOf('zcode-element://') === 0) {
+        parts.push({ t: 'element', label: cleanLabel, dest: dest });
+      } else if (dest.indexOf('plugin://') === 0) {
+        parts.push({ t: 'plugin', label: cleanLabel, dest: dest });
+      } else if (label.charAt(0) === '$') {
+        parts.push({ t: 'skill', label: zbTcSkillLabel(label.slice(1)) });
+      } else if (/[\\\\/]$/.test(dest)) {
+        parts.push({ t: 'dir', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: dest });
+      } else if (zbTcLocal(dest)) {
+        var href = dest.replace(/\\\\([\\\\()[\\]<>])/g, '$1');
+        parts.push({ t: 'file', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: href });
+      } else {
+        // Web link inside a title: show its label, never the markdown, and
+        // never a misleading file icon.
+        parts.push({ t: 'text', v: label });
+      }
+      cursor = m.index + full.length;
+    }
+    if (cursor < text.length) zbTcInline(parts, text.slice(cursor));
+    if (!parts.length) parts.push({ t: 'text', v: text });
+    return parts;
+  }
+  function zbTcHasPart(parts) {
+    for (var i = 0; i < parts.length; i++) if (parts[i].t !== 'text') return true;
+    return false;
+  }
+  // --- goal sessions (标题 goal 标记) ---------------------------------------
+  // A session started with /goal gets a generated title that no longer carries
+  // the command ("/goal 测试" → "测试"), so the sidebar row no longer shows
+  // that it is a goal session. The serve's /api/goal-sessions maps session
+  // ids → goal status/title; rows in that map get the same goal chip the
+  // verbatim "/goal …" titles already render.
+  function zbTcGoalRowId(span) {
+    var row = span && span.closest ? span.closest('[data-testid^="task-item-"]') : null;
+    if (!row) return '';
+    var tid = row.getAttribute('data-testid') || '';
+    return tid.indexOf('task-item-') === 0 ? tid.slice('task-item-'.length) : '';
+  }
+  function zbTcGoalOf(span) {
+    var S = window.__zcodeBeautify;
+    if (!S || !S.goals) return null;
+    var id = zbTcGoalRowId(span);
+    return (id && S.goals[id]) || null;
+  }
+  // Only the LEADING command counts as the marker: a title that merely
+  // mentions "/goal" later still gets the hook-in front chip.
+  function zbTcHasGoalCommand(parts) {
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.t === 'text') {
+        if (String(p.v || '').trim() === '') continue;
+        return false;
+      }
+      return p.t === 'command' && String(p.cmd || '').toLowerCase() === 'goal';
+    }
+    return false;
+  }
+  function zbTcGoalRefresh(force) {
+    var S = window.__zcodeBeautify;
+    if (!S || !GOAL_API || Number(S.tcOn) !== 1) return;
+    if (S.tcGoalBusy) return;
+    var now = Date.now();
+    if (!force && S.tcGoalAt && now - S.tcGoalAt < 8000) return;
+    S.tcGoalAt = now;
+    S.tcGoalBusy = true;
+    try {
+      fetch(GOAL_API, { cache: 'no-store' })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) {
+          S.tcGoalBusy = false;
+          if (!j || j.ok !== true || !j.sessions) return;
+          var next = j.sessions;
+          var changed = JSON.stringify(next) !== JSON.stringify(S.goals || {});
+          S.goals = next;
+          if (changed) zbTcSweep(document);
+        })
+        .catch(function() { S.tcGoalBusy = false; });
+    } catch (e) { S.tcGoalBusy = false; }
+  }
+  // A freshly created row's goal target lands in ZCode's db a beat after the
+  // session row itself; retry once shortly after so the marker is not stuck
+  // until the next poll.
+  function zbTcGoalWatch(span) {
+    var S = window.__zcodeBeautify;
+    if (!S || !GOAL_API || Number(S.tcOn) !== 1) return;
+    var id = zbTcGoalRowId(span);
+    if (!id) return;
+    zbTcGoalRefresh(false);
+    if (S.goals && S.goals[id]) return;
+    if (!S.tcGoalRetry) S.tcGoalRetry = {};
+    if (S.tcGoalRetry[id]) return;
+    S.tcGoalRetry[id] = 1;
+    setTimeout(function() {
+      delete S.tcGoalRetry[id];
+      zbTcGoalRefresh(true);
+    }, 2000);
+  }
+  function zbTcGoalStart() {
+    var S = window.__zcodeBeautify;
+    if (!GOAL_API || S.tcGoalTimer) return;
+    S.tcGoalTimer = setInterval(function() { zbTcGoalRefresh(true); }, 15000);
+  }
+  function zbTcGoalStop() {
+    var S = window.__zcodeBeautify;
+    if (S.tcGoalTimer) { clearInterval(S.tcGoalTimer); S.tcGoalTimer = null; }
+  }
+  function zbTcFileIcon(name) {
+    var img = document.createElement('img');
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    img.width = 16;
+    img.height = 16;
+    img.src = './material-icons/' + (name || 'document') + '.svg';
+    img.addEventListener('error', function() {
+      var cur = img.getAttribute('src') || '';
+      if (cur.indexOf('document.svg') === -1) img.setAttribute('src', './material-icons/document.svg');
+      else img.style.display = 'none';
+    });
+    return img;
+  }
+  function zbTcRender(view, parts) {
+    view.textContent = '';
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.t === 'text') { view.appendChild(document.createTextNode(p.v)); continue; }
+      var chip = document.createElement('span');
+      chip.className = 'zb-tc';
+      chip.setAttribute('data-k', p.t);
+      if (p.goalStatus || p.goalTitle) {
+        // Injected goal marker: hover reveals the goal state the generated
+        // title dropped (status + summary).
+        chip.title = 'goal' + (p.goalStatus ? ' · ' + p.goalStatus : '') + (p.goalTitle ? ' · ' + p.goalTitle : '');
+      } else if (p.dest) chip.title = p.dest;
+      if (p.t === 'file') chip.appendChild(zbTcFileIcon(zbTcIconName(p.dest || p.label)));
+      else if (p.t === 'dir') chip.appendChild(zbTcFileIcon('folder'));
+      else if (p.t === 'command') chip.insertAdjacentHTML('beforeend', p.cmd === 'goal' || p.cmd === 'target' ? TC_SVG.goal : TC_SVG.command);
+      else if (TC_SVG[p.t]) chip.insertAdjacentHTML('beforeend', TC_SVG[p.t]);
+      var lab = document.createElement('span');
+      lab.className = 'zb-tc-t';
+      lab.textContent = p.label || '';
+      chip.appendChild(lab);
+      view.appendChild(chip);
+    }
+  }
+  function zbTcDirectTexts(span) {
+    var out = [];
+    for (var n = span.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) out.push(n);
+    return out;
+  }
+  function zbTcKids(span) {
+    var src = null, view = null;
+    for (var n = span.firstElementChild; n; n = n.nextElementSibling) {
+      if (n.className === TC_SRC_CLS) src = n;
+      else if (n.className === TC_VIEW_CLS) view = n;
+    }
+    return { src: src, view: view };
+  }
+  // Read the current title WITHOUT blanking: a node we already blanked keeps
+  // its remembered value; a node React just rewrote reports its new text.
+  function zbTcRead(span, st) {
+    var nodes = zbTcDirectTexts(span);
+    var raw = '';
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var rec = null;
+      if (st) {
+        for (var j = 0; j < st.nodes.length; j++) {
+          if (st.nodes[j].n === n) { rec = st.nodes[j]; break; }
+        }
+      }
+      raw += rec && n.nodeValue === '' ? rec.v : (n.nodeValue || '');
+    }
+    return raw;
+  }
+  // Adopt the title text node(s), remember their values, and blank them so
+  // the chip layer is the only visible title. React keeps writing nodeValue
+  // into these same nodes; the observer below picks that up.
+  function zbTcCapture(span, st) {
+    var nodes = zbTcDirectTexts(span);
+    var next = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var rec = null;
+      for (var j = 0; j < st.nodes.length; j++) {
+        if (st.nodes[j].n === n) { rec = st.nodes[j]; break; }
+      }
+      if (!rec) {
+        if (!n.nodeValue) continue; // empty node: nothing to remember
+        rec = { n: n, v: n.nodeValue };
+      } else if (n.nodeValue !== '' && n.nodeValue !== rec.v) {
+        rec.v = n.nodeValue; // React wrote a fresh title
+      }
+      next.push(rec);
+      if (n.nodeValue !== '') n.nodeValue = '';
+    }
+    st.nodes = next;
+    var raw = '';
+    for (var k = 0; k < next.length; k++) raw += next[k].v;
+    span.__zbTcText = raw;
+    return raw;
+  }
+  function zbTcRestore(span) {
+    var kids = zbTcKids(span);
+    var st = span.__zbTc || null;
+    if (st) {
+      for (var i = 0; i < st.nodes.length; i++) {
+        var rec = st.nodes[i];
+        if (rec.n.parentNode !== span) continue;
+        // A title update may have landed between React's write and our
+        // blanking: a non-empty nodeValue is React's newest text — keep it,
+        // only fall back to the remembered value for OUR blank''.
+        var cur = rec.n.nodeValue;
+        var val = cur ? cur : rec.v;
+        if (cur !== val) rec.n.nodeValue = val;
+      }
+    } else if (kids.view || kids.src) {
+      // A previous generation left wrappers but no state: put SOMETHING back
+      // rather than leaving a blank title.
+      var saved = span.__zbTcText || (kids.view ? (kids.view.textContent || '') : '');
+      if (saved && !zbTcRead(span, null)) span.textContent = saved;
+    }
+    if (kids.src) kids.src.remove();
+    if (kids.view) kids.view.remove();
+    try { delete span.__zbTc; } catch (e) { span.__zbTc = null; }
+    span.removeAttribute('data-zb-tc');
+  }
+  function zbTcProcess(span) {
+    if (!span || !span.isConnected) return;
+    // Goal map may be stale (new /goal session, or a session that started
+    // using the goal command mid-life): refresh in the background — throttled
+    // — and let the changed-map sweep re-render.
+    zbTcGoalWatch(span);
+    var st = span.__zbTc || null;
+    var kids = zbTcKids(span);
+    var raw = zbTcRead(span, st);
+    var parts = zbTcParts(raw);
+    var goal = Number(window.__zcodeBeautify.tcOn) === 1 ? zbTcGoalOf(span) : null;
+    var needGoal = !!goal && !zbTcHasGoalCommand(parts);
+    if (!zbTcHasPart(parts) && !needGoal) {
+      if (st) zbTcRestore(span);
+      else if (kids.src || kids.view) zbTcRestore(span);
+      return;
+    }
+    if (!st) st = span.__zbTc = { nodes: [], raw: '', rendered: '', view: null };
+    raw = zbTcCapture(span, st);
+    parts = zbTcParts(raw);
+    needGoal = !!goal && !zbTcHasGoalCommand(parts);
+    if (needGoal) {
+      parts.unshift({
+        t: 'command',
+        label: 'goal',
+        cmd: 'goal',
+        goalStatus: goal.status || '',
+        goalTitle: goal.title || '',
+      });
+      // The marker is synthesized, so no source whitespace separates it from
+      // the (blanked) title text — add one (collapses with existing spaces).
+      parts.splice(1, 0, { t: 'text', v: ' ' });
+    }
+    var view = kids.view;
+    if (!view) {
+      view = document.createElement('span');
+      view.className = TC_VIEW_CLS;
+      span.appendChild(view);
+    }
+    st.view = view;
+    // The render key includes the engine version + goal marker: a map refresh
+    // OR a newer engine generation can change the output even when the title
+    // text is byte-identical (live hit: TC_VER bump alone left stale renders).
+    var key = TC_VER + '\\u0000' + raw + '\\u0000' + (needGoal ? 'g:' + (goal.status || '') + ':' + (goal.title || '') : '');
+    if (st.rendered !== key) {
+      zbTcRender(view, parts);
+      st.raw = raw;
+      st.rendered = key;
+    }
+    if (span.getAttribute('data-zb-tc') !== '1') span.setAttribute('data-zb-tc', '1');
+  }
+  function zbTcOwner(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (!el || !el.closest) return null;
+    if (el.closest('.zb-tc-view')) return null; // our own render churn
+    var sp = el.closest(TC_SEL);
+    return sp && sp.nodeType === 1 ? sp : null;
+  }
+  function zbTcQueue(sp) {
+    if (!sp || !sp.isConnected) return;
+    for (var i = 0; i < tcQueue.length; i++) if (tcQueue[i] === sp) return;
+    tcQueue.push(sp);
+    if (tcRaf) return;
+    tcRaf = true;
+    var run = function() {
+      tcRaf = false;
+      var list = tcQueue;
+      tcQueue = [];
+      for (var j = 0; j < list.length; j++) {
+        try { zbTcProcess(list[j]); } catch (e) {}
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 16);
+  }
+  function zbTcMutations(muts) {
+    for (var i = 0; i < muts.length; i++) {
+      var mu = muts[i];
+      if (mu.type === 'characterData') {
+        var sp = zbTcOwner(mu.target);
+        if (sp) zbTcQueue(sp);
+        continue;
+      }
+      var target = mu.target;
+      if (target && target.nodeType === 1) {
+        if (target.matches && target.matches(TC_SEL)) { zbTcQueue(target); continue; }
+        if (target.closest && target.closest('.zb-tc-view')) continue;
+      }
+      for (var j = 0; j < mu.addedNodes.length; j++) {
+        var el = mu.addedNodes[j];
+        if (!el || el.nodeType !== 1) continue;
+        if (el.matches && el.matches(TC_SEL)) { zbTcQueue(el); continue; }
+        // Titles only render inside the sidebar. Skipping chat-area subtrees
+        // here matters: streaming re-renders add many elements per frame and a
+        // querySelectorAll on each would scan the whole message body.
+        if (!el.closest || !el.closest('aside')) continue;
+        if (el.querySelectorAll) {
+          var inner = el.querySelectorAll(TC_SEL);
+          for (var k = 0; k < inner.length; k++) zbTcQueue(inner[k]);
+        }
+      }
+    }
+  }
+  function zbTcSweep(root) {
+    if (!root || !root.querySelectorAll) return;
+    var spans = root.querySelectorAll(TC_SEL);
+    for (var i = 0; i < spans.length; i++) zbTcProcess(spans[i]);
+  }
+  function zbTcApply(on) {
+    var S = window.__zcodeBeautify;
+    if (!on) {
+      zbTcGoalStop();
+      if (S.tcObs) {
+        try { S.tcObs.disconnect(); } catch (e) {}
+        S.tcObs = null;
+      }
+      var live = document.querySelectorAll(TC_SEL);
+      for (var i = 0; i < live.length; i++) {
+        try { zbTcRestore(live[i]); } catch (e2) {}
+      }
+      return;
+    }
+    // Generation handoff (same model as listObs): an observer bound by an
+    // older eval keeps firing that generation's closure after a serve
+    // restart, so the newest engine must own it.
+    if (!S.tcObs || S.tcObsStamp !== TC_VER) {
+      if (S.tcObs) {
+        try { S.tcObs.disconnect(); } catch (e3) {}
+      }
+      var obs = new MutationObserver(zbTcMutations);
+      obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      S.tcObs = obs;
+      S.tcObsStamp = TC_VER;
+    }
+    // Goal map: initial load now, then a slow poll for sessions that start
+    // using /goal after their row was already rendered.
+    zbTcGoalStart();
+    zbTcGoalRefresh(false);
+    zbTcSweep(document);
   }
   function perfSched() {
     if (window.__zcodeBeautify.perfTimer) return;
@@ -2478,7 +3110,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
  */
 export const LIST_PAGING_VER = 7;
 
-export function buildResetScript(marker = "zcode-beautify"): string {
+export function buildResetScript(
+  marker = "zcode-beautify",
+  opts: { disable?: boolean } = {}
+): string {
   return `(function(){
   document.getElementById(${JSON.stringify(marker)} + '-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-fade-style')?.remove();
@@ -2498,6 +3133,25 @@ export function buildResetScript(marker = "zcode-beautify"): string {
   });
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
+  // 标题文件引用 teardown: the sidebar title's text node was blanked in place
+  // and a chip layer rendered beside it — restore the raw text and drop the
+  // layer, or removing only the CSS would leave empty-looking titles.
+  document.querySelectorAll('[data-zb-tc]').forEach(function(n){
+    var st = n.__zbTc;
+    if (st && st.nodes) {
+      st.nodes.forEach(function(rec){
+        if (rec.n.parentNode !== n) return;
+        var cur = rec.n.nodeValue;
+        var val = cur ? cur : rec.v; // keep a newer React write; restore our blank'
+        if (cur !== val) rec.n.nodeValue = val;
+      });
+    } else if (n.__zbTcText && !n.textContent) {
+      n.textContent = n.__zbTcText;
+    }
+    n.querySelectorAll(':scope > .zb-tc-view,:scope > .zb-tc-src').forEach(function(c){ c.remove(); });
+    n.removeAttribute('data-zb-tc');
+    try { delete n.__zbTc; } catch (e) {}
+  });
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
   // a reset that left them would let the look walk right back after restart.
   try { localStorage.removeItem(${JSON.stringify(marker)} + ':css'); } catch (e) {}
@@ -2527,6 +3181,23 @@ export function buildResetScript(marker = "zcode-beautify"): string {
       try { window.__zcodeBeautify.listObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.listObs = null;
     }
+    if (window.__zcodeBeautify.tcObs) {
+      try { window.__zcodeBeautify.tcObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.tcObs = null;
+    }
+    if (window.__zcodeBeautify.tcGoalTimer) {
+      clearInterval(window.__zcodeBeautify.tcGoalTimer);
+      window.__zcodeBeautify.tcGoalTimer = null;
+    }
+    window.__zcodeBeautify.tcObsStamp = null;
   }
-})();`;
+${opts.disable ? `  // 停用（与「还原外观」不同）：留下持久禁用标记，旧代
+  // addScriptToEvaluateOnNewDocument 在下次 reload 时自检退出；同时把面板
+  // 本体、浮层和它自己的定时器一并收掉。新 serve 启动注入前会清掉标记。
+  try { localStorage.setItem(${JSON.stringify(marker + ":disabled")}, '1'); } catch (e) {}
+  document.querySelectorAll('[id^="' + ${JSON.stringify(marker)} + '-"]').forEach(function(n){ n.remove(); });
+  document.querySelectorAll('body > .zb-we-pop, body > .zb-dd-pop').forEach(function(n){ n.remove(); });
+  try { (window.__zbTimers || []).forEach(function(t){ clearInterval(t); }); window.__zbTimers = []; } catch (e) {}
+  if (window.__zcodeBeautify) window.__zcodeBeautify.disabled = true;
+` : ''}})();`;
 }

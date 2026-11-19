@@ -273,6 +273,19 @@ export function isTargetId(v: unknown): v is TargetId {
   return v === "zcode" || v === "workbuddy";
 }
 
+/**
+ * Built-in remote-debugging ports to probe when the configured one is closed.
+ * Unpackaged ZCode builds force `--remote-debugging-port=9229` on the main
+ * process (packages/desktop/src/main/index.ts), so the same renderer is
+ * reachable even when the launch shortcut carries no explicit CDP flag.
+ * Packaged builds do not open it, making the probe a harmless no-op. The
+ * caller only uses this when the preferred port equals the target default —
+ * tests pass random `--port` values and must never attach to a live client.
+ */
+export function fallbackCdpPorts(app: AppTarget = target()): number[] {
+  return app.id === "zcode" ? [9229] : [];
+}
+
 /** Executable candidates for a target, most specific first. */
 export function executableCandidates(app: AppTarget = target()): string[] {
   if (process.platform === "win32") {

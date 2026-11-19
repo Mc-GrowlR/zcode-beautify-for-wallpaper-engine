@@ -49,8 +49,10 @@ function config(extra: Partial<BeautifyConfig> = {}): BeautifyConfig {
 
   // Chat extras must be forced to stock, not merely ignored. sessionHover
   // (会话概览悬停卡) joins the normalized set — WorkBuddy forces it off too
-  // (the side/max dials ride along as inert defaults: 1 / 10).
-  check("chat look forced to stock", JSON.stringify(payload.chatLook) === JSON.stringify({ chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10, composerFade: 50 }));
+  // (the side/max dials ride along as inert defaults: 1 / 10). titleCites
+  // (标题文件引用) is inert default-on but applyChatLook bails on chatUi=false,
+  // so WorkBuddy never touches a title.
+  check("chat look forced to stock", JSON.stringify(payload.chatLook) === JSON.stringify({ chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10, composerFade: 50, titleCites: 1 }));
   check("bubble look forced to stock", payload.bubbleLook?.preset === "default");
   check("spinner look forced to stock", payload.taskSpinnerLook?.mode === "default");
   check("chat-load look forced to stock", payload.chatLoadLook?.mode === "default");

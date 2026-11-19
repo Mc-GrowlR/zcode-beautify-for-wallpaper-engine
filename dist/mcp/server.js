@@ -3276,8 +3276,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path14) {
-      let input2 = path14;
+    function removeDotSegments(path15) {
+      let input2 = path15;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3686,8 +3686,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path14 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path14 && path14 !== "/" ? path14 : void 0;
+        const path15 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path15 && path15 !== "/" ? path15 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7199,12 +7199,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs12, exportName) {
+    function addFormats(ajv, list, fs14, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs12[f2]);
+        ajv.addFormat(f2, fs14[f2]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -7212,45 +7212,92 @@ var require_dist = __commonJS({
   }
 });
 
-// dist/core/bubbleRecipes.js
-function bubbleRecipes(sel) {
-  return {
-    accent: sel + "{background:color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100%),var(--color-surface))!important;border:1px solid color-mix(in srgb,var(--color-primary) 55%,transparent)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
-    glass: sel + "{background:color-mix(in srgb,var(--color-surface) 55%,transparent)!important;border:1px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*60% + 15%),transparent)!important;backdrop-filter:blur(8px)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
-    outline: sel + "{background:transparent!important;border:1.5px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100% + 20%),transparent)!important}",
-    flat: sel + "{background:var(--color-surface)!important;border-color:transparent!important}"
-  };
+// dist/core/wallpaperType.js
+import fs from "node:fs";
+import path from "node:path";
+function detectWallpaperType(input2) {
+  const ext = path.extname(input2).toLowerCase();
+  if (IMAGE_EXTENSIONS.has(ext))
+    return "image";
+  if (VIDEO_EXTENSIONS.has(ext))
+    return "video";
+  if (ext === ".pkg")
+    return "scene";
+  let stat;
+  try {
+    stat = fs.statSync(input2);
+  } catch {
+    return "unknown";
+  }
+  if (!stat.isDirectory())
+    return "unknown";
+  return detectDirectoryType(input2);
 }
-function sanitizeCustomBubbleCss(raw) {
-  if (typeof raw !== "string")
-    return "";
-  let css = raw.slice(0, CUSTOM_CSS_MAX);
-  css = css.replace(/<\/style/gi, "");
-  css = css.replace(/@import[^;{]*[;{]?/gi, "");
-  css = css.replace(/javascript:/gi, "");
-  return css.trim();
+function detectDirectoryType(dir) {
+  const project = readProjectJson(path.join(dir, "project.json"));
+  const declared = typeof project?.type === "string" ? project.type.toLowerCase() : "";
+  if (declared === "scene" || declared === "video" || declared === "web") {
+    return declared;
+  }
+  const entryExt = path.extname(typeof project?.file === "string" ? project.file : "").toLowerCase();
+  if (SCENE_ENTRY_EXTENSIONS.has(entryExt))
+    return "scene";
+  if (VIDEO_EXTENSIONS.has(entryExt))
+    return "video";
+  if (entryExt === ".html" || entryExt === ".htm")
+    return "web";
+  return detectFromDirectoryContents(dir);
 }
-function rewriteCustomBubbleCss(css, sel, rowSel) {
-  return css.replace(/\.zb-bubble-row(?![\w-])/g, rowSel).replace(/\.zb-bubble(?![\w-])/g, sel);
+function readProjectJson(file2) {
+  try {
+    return JSON.parse(fs.readFileSync(file2, "utf8"));
+  } catch {
+    return void 0;
+  }
 }
-var BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL, BUBBLE_SELECTOR_PREVIEW, CUSTOM_CSS_MAX;
-var init_bubbleRecipes = __esm({
-  "dist/core/bubbleRecipes.js"() {
+function detectFromDirectoryContents(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return "unknown";
+  }
+  let nested = [];
+  if (entries.some((e2) => e2.toLowerCase() === "files")) {
+    try {
+      nested = fs.readdirSync(path.join(dir, "files")).map((e2) => path.join("files", e2));
+    } catch {
+    }
+  }
+  for (const name of [...entries, ...nested]) {
+    const lower = name.toLowerCase();
+    const ext = path.extname(lower);
+    if (lower === "scene.pkg" || lower === "scene.json")
+      return "scene";
+    if (ext === ".html" || ext === ".htm")
+      return "web";
+    if (VIDEO_EXTENSIONS.has(ext))
+      return "video";
+  }
+  return "unknown";
+}
+var IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, SCENE_ENTRY_EXTENSIONS;
+var init_wallpaperType = __esm({
+  "dist/core/wallpaperType.js"() {
     "use strict";
-    BUBBLE_SELECTOR_REAL = "[data-v4-user-input-bubble]";
-    BUBBLE_ROW_SELECTOR_REAL = '[class~="group/user-row"]';
-    BUBBLE_SELECTOR_PREVIEW = ".zb-bubble";
-    CUSTOM_CSS_MAX = 8e3;
+    IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp"]);
+    VIDEO_EXTENSIONS = /* @__PURE__ */ new Set([".mp4", ".webm"]);
+    SCENE_ENTRY_EXTENSIONS = /* @__PURE__ */ new Set([".pkg", ".json"]);
   }
 });
 
 // dist/core/target.js
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
+import fs2 from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import path2 from "node:path";
 function localAppData() {
-  return process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
+  return process.env.LOCALAPPDATA ?? path2.join(os.homedir(), "AppData", "Local");
 }
 function workbuddyCandidates() {
   const out = [];
@@ -7258,9 +7305,9 @@ function workbuddyCandidates() {
     const v = process.env[key];
     if (!v)
       continue;
-    out.push(v.toLowerCase().endsWith(".exe") ? v : path.join(v, "WorkBuddy.exe"));
+    out.push(v.toLowerCase().endsWith(".exe") ? v : path2.join(v, "WorkBuddy.exe"));
   }
-  out.push(path.join(localAppData(), "Programs", "WorkBuddy", "WorkBuddy.exe"), "C:\\Program Files\\WorkBuddy\\WorkBuddy.exe", path.join(os.homedir(), "AppData", "Local", "WorkBuddy", "WorkBuddy.exe"));
+  out.push(path2.join(localAppData(), "Programs", "WorkBuddy", "WorkBuddy.exe"), "C:\\Program Files\\WorkBuddy\\WorkBuddy.exe", path2.join(os.homedir(), "AppData", "Local", "WorkBuddy", "WorkBuddy.exe"));
   const discovered = readWindowsInstallPath("WorkBuddy");
   if (discovered)
     out.push(discovered);
@@ -7270,8 +7317,8 @@ function zcodeCandidates() {
   const out = [];
   const dir = process.env.ZCODE_WINDOWS_APP_INSTALL_DIR;
   if (dir)
-    out.push(path.join(dir, "ZCode.exe"));
-  out.push("C:\\Program Files\\ZCode\\ZCode.exe", path.join(localAppData(), "Programs", "ZCode", "ZCode.exe"));
+    out.push(path2.join(dir, "ZCode.exe"));
+  out.push("C:\\Program Files\\ZCode\\ZCode.exe", path2.join(localAppData(), "Programs", "ZCode", "ZCode.exe"));
   const discovered = readWindowsInstallPath("ZCode");
   if (discovered)
     out.push(discovered);
@@ -7279,7 +7326,7 @@ function zcodeCandidates() {
 }
 function safeIsFile(p2) {
   try {
-    return fs.statSync(p2).isFile();
+    return fs2.statSync(p2).isFile();
   } catch {
     return false;
   }
@@ -7356,6 +7403,9 @@ function queryRegistryViaPowerShell(product) {
 function isTargetId(v) {
   return v === "zcode" || v === "workbuddy";
 }
+function fallbackCdpPorts(app = target()) {
+  return app.id === "zcode" ? [9229] : [];
+}
 function executableCandidates(app = target()) {
   if (process.platform === "win32") {
     return app.id === "workbuddy" ? workbuddyCandidates() : zcodeCandidates();
@@ -7368,7 +7418,7 @@ function executableCandidates(app = target()) {
 function findExecutable(app = target()) {
   return executableCandidates(app).find((p2) => {
     try {
-      return fs.statSync(p2).isFile();
+      return fs2.statSync(p2).isFile();
     } catch {
       return false;
     }
@@ -7411,7 +7461,7 @@ var init_target = __esm({
       dataDirEnvVars: ["ZCODE_BEAUTIFY_DATA_DIR"],
       cdpPort: 9222,
       apiPort: 9223,
-      defaultDataDir: () => path.join(os.homedir(), ".zcode", "cli", "plugins", "data", "zcode-beautify"),
+      defaultDataDir: () => path2.join(os.homedir(), ".zcode", "cli", "plugins", "data", "zcode-beautify"),
       rendererUrlIncludes: ["out/renderer/index.html"],
       rendererTitles: ["ZCode"],
       updaterUrlIncludes: ["windowKind=update-status"],
@@ -7443,7 +7493,7 @@ var init_target = __esm({
       dataDirEnvVars: ["WORKBUDDY_BEAUTIFY_DATA_DIR"],
       cdpPort: 9333,
       apiPort: 9334,
-      defaultDataDir: () => path.join(os.homedir(), ".workbuddy", "plugins", "data", "zcode-beautify"),
+      defaultDataDir: () => path2.join(os.homedir(), ".workbuddy", "plugins", "data", "zcode-beautify"),
       // file:///<install>/resources/app.asar/renderer/index.html?windowTheme=…
       // …/resources/app.asar/renderer/index.html (ZCode's is app.asar/out/renderer,
       // so the anchored fragment keeps the two apart when both clients run).
@@ -7468,6 +7518,355 @@ var init_target = __esm({
       }
     };
     TARGETS = { zcode: ZCODE, workbuddy: WORKBUDDY };
+  }
+});
+
+// dist/version.js
+var VERSION;
+var init_version = __esm({
+  "dist/version.js"() {
+    "use strict";
+    VERSION = "6.3.6";
+  }
+});
+
+// dist/core/launch.js
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import fs3 from "node:fs";
+import path3 from "node:path";
+function dataDir() {
+  const t2 = target();
+  for (const name of t2.dataDirEnvVars) {
+    const v = process.env[name];
+    if (v && v.trim())
+      return v.trim();
+  }
+  return t2.defaultDataDir();
+}
+function configFile() {
+  return path3.join(dataDir(), "config.json");
+}
+function loadConfig() {
+  try {
+    return JSON.parse(fs3.readFileSync(configFile(), "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      try {
+        fs3.copyFileSync(configFile(), configFile() + `.corrupt-${Date.now().toString(36)}`);
+      } catch {
+      }
+    }
+    return {};
+  }
+}
+function withConfigLock(fn) {
+  const lock = configFile() + ".lock";
+  fs3.mkdirSync(dataDir(), { recursive: true });
+  const deadline = Date.now() + 1500;
+  let fd = null;
+  for (; ; ) {
+    try {
+      fd = fs3.openSync(lock, "wx");
+      break;
+    } catch {
+      try {
+        const age = Date.now() - fs3.statSync(lock).mtimeMs;
+        if (age > 5e3) {
+          fs3.rmSync(lock, { force: true });
+          continue;
+        }
+      } catch {
+      }
+      if (Date.now() > deadline)
+        return fn();
+      const waitMs = Date.now();
+      while (Date.now() - waitMs < 20) {
+      }
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs3.closeSync(fd);
+    } catch {
+    }
+    try {
+      fs3.rmSync(lock, { force: true });
+    } catch {
+    }
+  }
+}
+function saveConfig(config2) {
+  fs3.mkdirSync(dataDir(), { recursive: true });
+  withConfigLock(() => {
+    const file2 = configFile();
+    const tmp = file2 + ".tmp";
+    fs3.writeFileSync(tmp, JSON.stringify(config2, null, 2));
+    fs3.renameSync(tmp, file2);
+  });
+}
+function experimentalEnabled(cfg = loadConfig()) {
+  return cfg.experimental?.enabled === true;
+}
+function ensureExperimentalGate() {
+  const cfg = loadConfig();
+  if (cfg.experimental)
+    return cfg;
+  const used = PRIOR_USE_KEYS.some((k) => cfg[k] !== void 0);
+  if (!used)
+    return cfg;
+  const migrated = {
+    ...cfg,
+    experimental: { enabled: true, migrated: true, consentVersion: VERSION }
+  };
+  try {
+    saveConfig(migrated);
+  } catch {
+    return cfg;
+  }
+  return migrated;
+}
+var PRIOR_USE_KEYS, execFileAsync;
+var init_launch = __esm({
+  "dist/core/launch.js"() {
+    "use strict";
+    init_target();
+    init_version();
+    PRIOR_USE_KEYS = [
+      "wallpaperPath",
+      "sceneHash",
+      "sceneVideoUrl",
+      "rotation",
+      "themeColor",
+      "chatLook",
+      "bubbleLook",
+      "taskSpinnerLook",
+      "dayNight"
+    ];
+    execFileAsync = promisify(execFile);
+  }
+});
+
+// dist/core/launchers.js
+var launchers_exports = {};
+__export(launchers_exports, {
+  DEFAULT_REGISTRY_KEYS: () => DEFAULT_REGISTRY_KEYS,
+  psScript: () => psScript,
+  repairLaunchers: () => repairLaunchers
+});
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+function psScript(port, dryRun, registryKeys = DEFAULT_REGISTRY_KEYS, shortcutMatch = "*ZCode.exe", exeName = "ZCode.exe", action = "add") {
+  return `
+$ErrorActionPreference = 'Continue'
+# Without this, Chinese Windows error strings come back as mojibake through
+# Node's UTF-8 stdout decoding.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$port = ${port}
+$dryRun = $${dryRun ? "true" : "false"}
+$mode = '${action}'
+$flag = ' --remote-debugging-port=' + $port
+$exeMatch = '${shortcutMatch.replace(/'/g, "''")}'
+$exeName = '${exeName.replace(/'/g, "''")}'
+$results = New-Object System.Collections.ArrayList
+
+function Add-Result($kind, $p, $before, $after, $status, $reason) {
+  [void]$results.Add([pscustomobject]@{
+    kind = $kind; path = $p; before = $before; after = $after
+    status = $status; reason = $reason
+  })
+}
+
+# Strip any --remote-debugging-port=<digits> (any port, not just $port) and
+# the whitespace before it, so "app.exe --remote-debugging-port=9222" becomes
+# "app.exe" and quoted command strings stay intact.
+function Remove-Flag([string]$s) {
+  return ($s -replace '\\s*--remote-debugging-port=\\d+', '').Trim()
+}
+
+# --- shortcuts -------------------------------------------------------------
+$dirs = @(
+  (Join-Path $env:USERPROFILE 'Desktop'),
+  $(if ($env:OneDrive) { Join-Path $env:OneDrive 'Desktop' }),
+  (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'),
+  # Pinned taskbar shortcuts are plain .lnk files; start-menu search and most
+  # third-party launchers (Flow Launcher, PowerToys Run, \u2026) index the Start Menu
+  # copy, but users who pin the app read this one.
+  (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar'),
+  (Join-Path $env:PUBLIC 'Desktop'),
+  (Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs')
+)
+
+$lnks = @()
+foreach ($d in $dirs) {
+  if ($d -and (Test-Path -LiteralPath $d)) {
+    $lnks += @(Get-ChildItem -LiteralPath $d -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)
+  }
+}
+
+$wsh = New-Object -ComObject WScript.Shell
+foreach ($item in $lnks) {
+  try { $sc = $wsh.CreateShortcut($item.FullName) } catch { continue }
+  $target = [string]$sc.TargetPath
+  if ($target -notlike $exeMatch) { continue }
+
+  $before = [string]$sc.Arguments
+  if ($mode -eq 'add') {
+    if ($before -match 'remote-debugging-port') {
+      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+      continue
+    }
+    $after = ($before.Trim() + $flag).Trim()
+  } else {
+    if ($before -notmatch 'remote-debugging-port') {
+      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
+      continue
+    }
+    $after = Remove-Flag $before
+  }
+  if ($dryRun) {
+    Add-Result 'shortcut' $item.FullName $before $after 'updated' 'dry-run'
+    continue
+  }
+  try {
+    $sc.Arguments = $after
+    $sc.Save()
+    Add-Result 'shortcut' $item.FullName $before $after 'updated' $null
+  } catch {
+    Add-Result 'shortcut' $item.FullName $before $after 'failed' $_.Exception.Message
+  }
+}
+
+# --- HKCU protocol / shell handlers ----------------------------------------
+$keys = @(${registryKeys.map((k) => `'${k.replace(/'/g, "''")}'`).join(",")})
+
+foreach ($k in $keys) {
+  if (-not (Test-Path -LiteralPath $k)) { continue }
+  try {
+    $key = Get-Item -LiteralPath $k
+    $before = [string]$key.GetValue('')
+    if ($before -notmatch [regex]::Escape($exeName)) { continue }
+    if ($mode -eq 'add') {
+      if ($before -match 'remote-debugging-port') {
+        Add-Result 'registry' $k $before $before 'already-ok' $null
+        continue
+      }
+      # Insert the flag directly after the executable token, keeping any
+      # placeholders ("%1") and quoting untouched.
+      $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
+    } else {
+      if ($before -notmatch 'remote-debugging-port') {
+        Add-Result 'registry' $k $before $before 'already-ok' $null
+        continue
+      }
+      $after = Remove-Flag $before
+    }
+    if ($dryRun) {
+      Add-Result 'registry' $k $before $after 'updated' 'dry-run'
+      continue
+    }
+    try {
+      # Get-Item hands back a read-only handle, so the default value can only be
+      # changed through a .NET key opened with write access.
+      $sub = $k -replace '^HKCU:\\\\', ''
+      $writable = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($sub, $true)
+      if (-not $writable) { throw 'cannot open the key for writing' }
+      $writable.SetValue('', $after, [Microsoft.Win32.RegistryValueKind]::String)
+      $writable.Close()
+      Add-Result 'registry' $k $before $after 'updated' $null
+    } catch {
+      Add-Result 'registry' $k $before $after 'failed' $_.Exception.Message
+    }
+  } catch {
+    Add-Result 'registry' $k '' '' 'failed' $_.Exception.Message
+  }
+}
+
+@($results) | ConvertTo-Json -Depth 4 -Compress
+`;
+}
+async function repairLaunchers(opts) {
+  const dryRun = opts.dryRun ?? false;
+  const action = opts.action ?? "add";
+  if (process.platform !== "win32") {
+    return {
+      supported: false,
+      dryRun,
+      fixes: [],
+      error: "launcher repair is only implemented for Windows; on other platforms edit your app shortcut manually"
+    };
+  }
+  const app = target();
+  const keys = opts.registryKeys ?? app.launcher.registryKeys;
+  const encoded = Buffer.from(psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName, action), "utf16le").toString("base64");
+  try {
+    const { stdout } = await execFileAsync2("powershell", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { maxBuffer: 8 * 1024 * 1024, timeout: 12e4, windowsHide: true });
+    const trimmed = stdout.trim();
+    if (!trimmed)
+      return { supported: true, dryRun, fixes: [] };
+    const raw = JSON.parse(trimmed);
+    const list = Array.isArray(raw) ? raw : [raw];
+    return {
+      supported: true,
+      dryRun,
+      fixes: list.map((r2) => ({
+        kind: r2.kind === "registry" ? "registry" : "shortcut",
+        path: r2.path,
+        before: r2.before,
+        after: r2.after,
+        status: r2.status === "updated" || r2.status === "already-ok" ? r2.status : "failed",
+        reason: r2.reason ?? void 0
+      }))
+    };
+  } catch (err) {
+    return { supported: true, dryRun, fixes: [], error: err.message };
+  }
+}
+var execFileAsync2, DEFAULT_REGISTRY_KEYS;
+var init_launchers = __esm({
+  "dist/core/launchers.js"() {
+    "use strict";
+    init_target();
+    execFileAsync2 = promisify2(execFile2);
+    DEFAULT_REGISTRY_KEYS = [
+      "HKCU:\\Software\\Classes\\zcode\\shell\\open\\command",
+      "HKCU:\\Software\\Classes\\Directory\\shell\\ZCode.OpenInZCode\\command",
+      "HKCU:\\Software\\Classes\\Drive\\shell\\ZCode.OpenInZCode\\command"
+    ];
+  }
+});
+
+// dist/core/bubbleRecipes.js
+function bubbleRecipes(sel) {
+  return {
+    accent: sel + "{background:color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100%),var(--color-surface))!important;border:1px solid color-mix(in srgb,var(--color-primary) 55%,transparent)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
+    glass: sel + "{background:color-mix(in srgb,var(--color-surface) 55%,transparent)!important;border:1px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*60% + 15%),transparent)!important;backdrop-filter:blur(8px)!important;box-shadow:0 4px 18px rgb(0 0 0/0.28)!important}",
+    outline: sel + "{background:transparent!important;border:1.5px solid color-mix(in srgb,var(--color-primary) calc(var(--zb-bubble-tint)*100% + 20%),transparent)!important}",
+    flat: sel + "{background:var(--color-surface)!important;border-color:transparent!important}"
+  };
+}
+function sanitizeCustomBubbleCss(raw) {
+  if (typeof raw !== "string")
+    return "";
+  let css = raw.slice(0, CUSTOM_CSS_MAX);
+  css = css.replace(/<\/style/gi, "");
+  css = css.replace(/@import[^;{]*[;{]?/gi, "");
+  css = css.replace(/javascript:/gi, "");
+  return css.trim();
+}
+function rewriteCustomBubbleCss(css, sel, rowSel) {
+  return css.replace(/\.zb-bubble-row(?![\w-])/g, rowSel).replace(/\.zb-bubble(?![\w-])/g, sel);
+}
+var BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL, BUBBLE_SELECTOR_PREVIEW, CUSTOM_CSS_MAX;
+var init_bubbleRecipes = __esm({
+  "dist/core/bubbleRecipes.js"() {
+    "use strict";
+    BUBBLE_SELECTOR_REAL = "[data-v4-user-input-bubble]";
+    BUBBLE_ROW_SELECTOR_REAL = '[class~="group/user-row"]';
+    BUBBLE_SELECTOR_PREVIEW = ".zb-bubble";
+    CUSTOM_CSS_MAX = 8e3;
   }
 });
 
@@ -7526,6 +7925,11 @@ function buildBootstrapScript(payload) {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
+  // Disable teardown marker: old Page.addScriptToEvaluateOnNewDocument
+  // registrations replay on every reload, so a disabled plugin would otherwise
+  // repaint the wallpaper/theme from a previous generation's baked payload.
+  // A live serve clears the marker before injecting again.
+  try { if (localStorage.getItem(MARKER + ':disabled') === '1') return; } catch (e) {}
   var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
   var CHAT_UI = ${JSON.stringify(payload.chatUi !== false)};
   var PROBE = ${JSON.stringify(payload.startupProbe ?? "zcode-body-class")};
@@ -7550,7 +7954,7 @@ function buildBootstrapScript(payload) {
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
-  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10 }))};
+  var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10, titleCites: 1 }))};
   // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: the serve endpoint (token included) the hover card
   // fetches its prompt list from; empty = the feature stays unmounted.
   // A serve restart rotates the token while css/chat stay identical \u2014 the
@@ -7563,6 +7967,13 @@ function buildBootstrapScript(payload) {
   var PREVIEW_API = ${JSON.stringify(payload.previewApi ?? "")};
   var PREV_API = window.__zcodeBeautify.previewApi;
   window.__zcodeBeautify.previewApi = PREVIEW_API;
+  // \u6807\u9898 goal \u6807\u8BB0: goal sessions get a generated title without the /goal
+  // command; this endpoint (token included) maps session ids \u2192 goal status so
+  // the title engine can put the chip back. Refreshed by every eval (same
+  // stale-closure defense as previewApi).
+  var GOAL_API = ${JSON.stringify(payload.goalApi ?? "")};
+  var PREV_GOAL_API = window.__zcodeBeautify.goalApi || '';
+  window.__zcodeBeautify.goalApi = GOAL_API;
   var BUBBLE = ${JSON.stringify(JSON.stringify(payload.bubbleLook ?? { preset: "default", tint: 28, radius: 12, width: 70, align: "right" }))};
   var SPIN = ${JSON.stringify(JSON.stringify(payload.spinnerLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
   var LOAD = ${JSON.stringify(JSON.stringify(payload.chatLoadLook ?? { mode: "default", image: "", spin: true, size: 16 }))};
@@ -7604,6 +8015,109 @@ function buildBootstrapScript(payload) {
   var zbHoverRowEl = null;
   var zbHoverRectTop = 0;
   var zbHoverRectLeft = 0;
+  // \u6807\u9898\u6587\u4EF6\u5F15\u7528 (title file citations) state + tables \u2014 top-of-body for the
+  // same hoisting reason as the hover slots above: applyChatLook calls into
+  // the title engine from the fast paths, before the helper section below
+  // has run, so every table it reads must already be initialized here.
+  // The grammar mirrors the message bubble's own mention parser
+  // (packages/ui mentions/mentionMarkdown.ts) \u2014 a title auto-generated from
+  // "[file](./path/file)" must convert into the same icon+label chip.
+  // Version stamp: the BUILD version of the title-cite engine. Older
+  // generations' addScriptToEvaluateOnNewDocument registrations replay after a
+  // reload / serve restart and bind their own observer first; without the
+  // stamp the newest eval would keep that stale closure (which, e.g., knows
+  // nothing about goal markers and restores plain titles). Bump whenever the
+  // title engine's behavior changes.
+  var TC_VER = '3';
+  var TC_SEL = '[data-task-title-copy]';
+  var TC_SRC_CLS = 'zb-tc-src';
+  var TC_VIEW_CLS = 'zb-tc-view';
+  var TC_LINK = /\\[((?:\\\\.|[^\\\\\\]])*)\\]\\((?:<((?:\\\\.|[^>])*?)>|((?:\\\\.|[^)])*))\\)/g;
+  var TC_INLINE = /(^|\\s)(\\$[a-zA-Z0-9._-]+|\\/[a-zA-Z0-9._-]+|@[a-zA-Z0-9._-]+|#(?:sess|session)_[a-zA-Z0-9._-]+)(?=$|\\s)/g;
+  // Extension \u2192 material-icons/<name>.svg, ported from ZCode's
+  // lib/fileDisplayHelpers.ts (aliases only where the extension and the asset
+  // name differ; everything else resolves by extension name).
+  var TC_EXT_ICONS = ${JSON.stringify({
+    backup: "document",
+    bash: "console",
+    cjs: "javascript",
+    cts: "typescript",
+    css: "css",
+    doc: "word",
+    docx: "word",
+    js: "javascript",
+    jsx: "react",
+    jsonl: "json",
+    mjs: "javascript",
+    md: "markdown",
+    m4a: "audio",
+    m4v: "video",
+    flac: "audio",
+    mov: "video",
+    mp3: "audio",
+    mp4: "video",
+    ogg: "audio",
+    opus: "audio",
+    mts: "typescript",
+    jpeg: "image",
+    jpg: "image",
+    png: "image",
+    gif: "image",
+    webp: "image",
+    avif: "image",
+    bmp: "image",
+    ico: "image",
+    pdf: "pdf",
+    pptx: "powerpoint",
+    ppt: "powerpoint",
+    py: "python",
+    rs: "rust",
+    sh: "console",
+    zsh: "console",
+    sql: "database",
+    svg: "svg",
+    toml: "toml",
+    ts: "typescript",
+    tsx: "react_ts",
+    txt: "document",
+    wav: "audio",
+    weba: "audio",
+    webm: "video",
+    xlsx: "table",
+    xls: "table",
+    csv: "table",
+    yaml: "yaml",
+    yml: "yaml"
+  })};
+  var TC_NAME_ICONS = ${JSON.stringify({
+    ".editorconfig": "editorconfig",
+    ".env": "settings",
+    ".gitattributes": "git",
+    ".gitignore": "git",
+    ".npmrc": "npm",
+    ".nvmrc": "nodejs_alt",
+    ".prettierrc": "prettier",
+    ".yarnrc": "yarn",
+    dockerfile: "docker",
+    makefile: "makefile",
+    readme: "readme",
+    tsconfig: "tsconfig"
+  })};
+  // Non-file mention chips reuse the bubble's lucide glyphs, inlined as
+  // static SVG (fixed markup \u2014 never user data).
+  var TC_SVG = {
+    skill: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 20.5 15 9"/><path d="M15.5 3.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/><path d="M19.5 12.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>',
+    session: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    plugin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>',
+    subagent: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="2.5"/><path d="M12 3v4M9 13h.01M15 13h.01M9.5 16.5h5"/></svg>',
+    element: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 3l7.2 17 2.6-7.2 7.2-2.6z"/></svg>',
+    command: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4 8 20"/></svg>',
+    goal: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>',
+  };
+  // rAF-coalesced work list: streaming + marquee rebuilds mutate the sidebar
+  // often; a Set-like array keeps each span processed once per frame.
+  var tcQueue = [];
+  var tcRaf = false;
   // --zb-bubble-tint holds 0-1; the mixes scale it back to a percentage.
   // Recipes + custom CSS are baked serve-side from core/bubbleRecipes.ts so
   // this table and the panel preview share one source of truth. The custom
@@ -7751,7 +8265,7 @@ function buildBootstrapScript(payload) {
   // no-op and the page would never heal. kb participates too: toggling Ken
   // Burns alone changes no CSS, and without it the toggle would early-return
   // before applyKb ever runs.
-  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && window.__zcodeBeautify.listKey === LIST && window.__zcodeBeautify.listStamp === LIST_VER && PREV_API === PREVIEW_API && document.getElementById(MARKER + '-style')) return;
+  if (window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)} && window.__zcodeBeautify.videoSrc === VIDEO_SRC && window.__zcodeBeautify.wpImg === WP_IMG && window.__zcodeBeautify.kb === ${JSON.stringify(Boolean(payload.kenBurns))} && window.__zcodeBeautify.vol === VOL && window.__zcodeBeautify.chatKey === CHAT && window.__zcodeBeautify.bubbleKey === BUBBLE && window.__zcodeBeautify.spinnerKey === SPIN && window.__zcodeBeautify.loadKey === LOAD && window.__zcodeBeautify.listKey === LIST && window.__zcodeBeautify.listStamp === LIST_VER && PREV_API === PREVIEW_API && PREV_GOAL_API === GOAL_API && document.getElementById(MARKER + '-style')) return;
   window.__zcodeBeautify.cssText = ${JSON.stringify(payload.css)};
   window.__zcodeBeautify.videoSrc = VIDEO_SRC;
   window.__zcodeBeautify.wpImg = WP_IMG;
@@ -8055,6 +8569,8 @@ function buildBootstrapScript(payload) {
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // \u6807\u9898\u6587\u4EF6\u5F15\u7528: sidebar titles parse like the message bubble (default on).
+    var tcOn = Number(C.titleCites) === 1;
     // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: needs the serve endpoint; without it the toggle is a
     // no-op (nothing mounts, the native hover card stays).
     var hoverOn = Number(C.sessionHover) === 1 && typeof PREVIEW_API === 'string' && PREVIEW_API.length > 0;
@@ -8180,6 +8696,24 @@ function buildBootstrapScript(payload) {
           // to min-content (~40px strip) while block-parented message holders
           // just fill. A literal floor can never go invalid).
           + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{min-width:460px!important}'
+        : '')
+      // \u6807\u9898\u6587\u4EF6\u5F15\u7528 chips: the sidebar title is plain text, so the converted
+      // parts render through these rules. Colors ride the same
+      // --color-*-node-foreground tokens the bubble's mention chips use (a
+      // Monet re-theme restyles them with zero extra work); metrics mirror
+      // the bubble chip (16px icon, 4px gap, 500 weight, inherited size).
+      + (tcOn
+        ? '.zb-tc{display:inline-flex;max-width:100%;align-items:center;gap:4px;'
+          + 'margin:0 2px;vertical-align:middle;font-weight:500;line-height:inherit;'
+          + 'white-space:nowrap;cursor:default}'
+          + '.zb-tc[data-k="file"],.zb-tc[data-k="dir"],.zb-tc[data-k="element"]{color:var(--color-file-node-foreground,#8fc5ef)}'
+          + '.zb-tc[data-k="skill"]{color:var(--color-skill-node-foreground,#bda5e6)}'
+          + '.zb-tc[data-k="session"]{color:var(--color-session-node-foreground,#93d8d2)}'
+          + '.zb-tc[data-k="plugin"]{color:var(--color-plugin-node-foreground,#efc58f)}'
+          + '.zb-tc[data-k="subagent"]{color:var(--color-subagent-node-foreground,#c8cd90)}'
+          + '.zb-tc[data-k="command"]{color:var(--color-command-node-foreground,#b5c0cc)}'
+          + '.zb-tc>img,.zb-tc>svg{flex:none;display:block;width:16px;height:16px}'
+          + '.zb-tc>.zb-tc-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
         : '');
     if (masksOn) {
       if (!fr) { fr = document.createElement('div'); fr.id = MARKER + '-frost'; }
@@ -8327,6 +8861,11 @@ function buildBootstrapScript(payload) {
     }
     // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: idempotent mount/unmount riding the chat-look push.
     zbHoverApply(hoverOn);
+    // \u6807\u9898\u6587\u4EF6\u5F15\u7528: idempotent observer mount + immediate sweep; off restores
+    // the raw markdown text (no wrappers left behind). The slot mirrors
+    // perfOn/dragOn so tests and one-off probes can see the live state.
+    window.__zcodeBeautify.tcOn = tcOn ? 1 : 0;
+    zbTcApply(tcOn);
   }
 
   // --- \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361 (session hover preview) ---------------------------------
@@ -8462,10 +9001,14 @@ function buildBootstrapScript(payload) {
       if (!data) {
         // serve down / token stale / db unreadable: still useful \u2014 the row's
         // marquee carries the FULL untruncated title (tick anchors fall back
-        // to the selected sidebar row's marquee).
-        var fbSrc = (row.querySelector('[data-task-title-copy="original"]') || {}).textContent
-          || (document.querySelector('[data-testid^="task-item-"].bg-selected [data-task-title-copy="original"]') || {}).textContent
-          || '';
+        // to the selected sidebar row's marquee). \u6807\u9898\u6587\u4EF6\u5F15\u7528 blanks the
+        // title's text node to '' and keeps the real string on the span \u2014
+        // read that first (textContent would lose it).
+        var fbCopy = (row.querySelector('[data-task-title-copy="original"]')
+          || document.querySelector('[data-testid^="task-item-"].bg-selected [data-task-title-copy="original"]'));
+        var fbSrc = fbCopy
+          ? (fbCopy.__zbTc && fbCopy.__zbTc.raw) || fbCopy.textContent || ''
+          : '';
         if (fbSrc) {
           var fb = document.createElement('div');
           fb.className = MARKER + '-hov-row';
@@ -8486,23 +9029,36 @@ function buildBootstrapScript(payload) {
         list.appendChild(empty);
         return;
       }
-      // \u6700\u591A\u663E\u793A\u884C\u6570 (sessionHoverMax): the card lists EXACTLY the newest N
-      // prompts \u2014 a short, naturally-ending list (reference design), not a
-      // tall scroll area carrying the whole history. Older prompts are simply
-      // not listed; the CSS max-height below stays only as a viewport guard
-      // for very large N.
+      // \u53EF\u89C1\u884C\u6570 (sessionHoverMax) is a WINDOW HEIGHT, not a data cap: every
+      // returned prompt stays in the list and older ones are reachable by
+      // scrolling. The old implementation sliced to the newest N, so a long
+      // session's overview silently lost all earlier questions (user report).
       var cap = window.__zcodeBeautify ? Number(window.__zcodeBeautify.hoverMax) : NaN;
       cap = Number.isFinite(cap) && cap >= 1 ? Math.min(60, Math.round(cap)) : 10;
-      if (ps.length > cap) ps = ps.slice(ps.length - cap);
+      // ~28px per single-line row; keep the card compact but tall enough for
+      // at least a few rows, and never taller than the CSS viewport guard.
+      var maxH = Math.max(72, Math.min(470, Math.round((window.innerHeight || 800) * 0.56), cap * 28));
+      list.style.maxHeight = maxH + 'px';
+      var frag = document.createDocumentFragment();
+      var omitted = Math.max(0, Math.round(Number(data.omitted) || 0));
+      if (omitted > 0) {
+        // Safety cap only: tell the user older prompts exist beyond the
+        // server's MAX_PROMPTS (1000), instead of silently dropping them.
+        var older = document.createElement('div');
+        older.className = MARKER + '-hov-hint';
+        older.textContent = '\u8FD8\u6709 ' + omitted + ' \u6761\u66F4\u65E9\u7684\u63D0\u95EE\u672A\u8F7D\u5165';
+        frag.appendChild(older);
+      }
       for (var i = 0; i < ps.length; i++) {
         var r = document.createElement('div');
         r.className = MARKER + '-hov-row' + (i === ps.length - 1 ? ' ' + MARKER + '-hov-last' : '');
         r.textContent = zbHoverText(ps[i].text);
         if (ps[i].mid) r.setAttribute('data-mid', ps[i].mid);
-        list.appendChild(r);
+        frag.appendChild(r);
       }
-      // Newest sits at the bottom (image spec) \u2014 land the scroll there
-      // (only relevant when a very large N overflows the CSS max-height).
+      list.appendChild(frag);
+      // Newest sits at the bottom (image spec) \u2014 land the scroll there; the
+      // list is scrollable, so older prompts remain reachable above.
       list.scrollTop = list.scrollHeight;
     });
   }
@@ -8814,6 +9370,476 @@ function buildBootstrapScript(payload) {
     if (!root || !root.querySelectorAll) return;
     var spans = root.querySelectorAll('[data-zcode-chat-loading-animate="true"] > span[aria-hidden="true"]');
     for (var si = 0; si < spans.length; si++) zbStripElapsed(spans[si]);
+  }
+  // --- \u6807\u9898\u6587\u4EF6\u5F15\u7528 (title file citations) ----------------------------------
+  // ZCode auto-generates a session title from the first user message and keeps
+  // the message's mention markdown verbatim ("[\u7A7F\u6234\u5F15\u5BFC\u8868\u5355.lua](./script/\u2026)").
+  // The message bubble re-parses that markdown into icon+label chips
+  // (packages/ui mentions/mentionMarkdown.ts \u2192 ConversationUserInputContent),
+  // but the sidebar title (TaskTitleOverflowText) is a plain-text component \u2014
+  // so the raw markdown leaks. This engine projects the bubble's grammar onto
+  // each [data-task-title-copy] span at the DOM level:
+  //   \xB7 the title's text node is NOT re-parented (React's reconciler keeps a
+  //     direct-child reference and would throw removeChild on a moved node);
+  //     it is blanked to '' and remembered \u2014 React's next title update writes
+  //     nodeValue, our characterData observer re-blanks + re-renders;
+  //   \xB7 a sibling .zb-tc-view layer renders the parsed parts (file/dir chips
+  //     reuse the same material-icons assets the bubble uses);
+  //   \xB7 the marquee's aria-hidden duplicate copy is processed the same way,
+  //     and the original span's scrollWidth still measures the chip layer, so
+  //     ZCode's own overflow/marquee logic stays intact.
+  function zbTcUnescape(s) {
+    return String(s == null ? '' : s).replace(/\\\\(.)/g, '$1');
+  }
+  function zbTcLeaf(path) {
+    var p = String(path == null ? '' : path).replace(/\\\\/g, '/').replace(/\\/+$/, '');
+    var seg = p.split('/');
+    for (var i = seg.length - 1; i >= 0; i--) if (seg[i]) return seg[i];
+    return String(path == null ? '' : path);
+  }
+  // A destination is a local file reference unless it carries a scheme. Anchors
+  // (#section) are not files; Windows drive letters look like schemes (C:) but
+  // are local; file:// URLs stay local.
+  function zbTcLocal(dest) {
+    if (!dest) return false;
+    if (dest.charAt(0) === '#') return false;
+    if (/^[a-zA-Z]:[\\\\/]/.test(dest)) return true;
+    if (dest.indexOf('file://') === 0) return true;
+    return !/^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(dest);
+  }
+  function zbTcIconName(path) {
+    var leaf = zbTcLeaf(path).toLowerCase();
+    if (!leaf) return 'document';
+    var dot = leaf.lastIndexOf('.');
+    var stem = dot === -1 ? leaf : leaf.slice(0, dot);
+    var cands = [leaf, stem];
+    var seg = stem;
+    while (seg.indexOf('.') !== -1) {
+      seg = seg.slice(0, seg.lastIndexOf('.'));
+      if (seg) cands.push(seg);
+    }
+    for (var i = 0; i < cands.length; i++) {
+      var hit = TC_NAME_ICONS[cands[i]];
+      if (hit) return hit;
+    }
+    if (dot === -1) return 'document';
+    var ext = leaf.slice(dot + 1);
+    return TC_EXT_ICONS[ext] || ext || 'document';
+  }
+  function zbTcSkillLabel(label) {
+    var t = String(label || '').trim();
+    if (!t || (t.indexOf(' ') !== -1 && t.indexOf('-') === -1 && t.indexOf('_') === -1)) return label;
+    var words = t.split(/[-_]/);
+    var out = [];
+    for (var i = 0; i < words.length; i++) {
+      if (!words[i]) continue;
+      out.push(words[i].charAt(0).toUpperCase() + words[i].slice(1).toLowerCase());
+    }
+    return out.length ? out.join(' ') : label;
+  }
+  // Inline tokens are the same fallback the bubble uses for plain "$skill",
+  // "/command", "@subagent" and "#sess_\u2026" text outside markdown links.
+  function zbTcInline(parts, seg) {
+    if (!seg) return;
+    TC_INLINE.lastIndex = 0;
+    var cursor = 0;
+    var m;
+    while ((m = TC_INLINE.exec(seg))) {
+      var token = m[2] || '';
+      var start = m.index + (m[1] || '').length;
+      if (!token) continue;
+      if (start > cursor) parts.push({ t: 'text', v: seg.slice(cursor, start) });
+      var ch = token.charAt(0);
+      if (ch === '$') parts.push({ t: 'skill', label: zbTcSkillLabel(token.slice(1)) });
+      else if (ch === '/') parts.push({ t: 'command', label: token.slice(1), cmd: token.slice(1) });
+      else if (ch === '@') parts.push({ t: 'subagent', label: token.slice(1) });
+      else if (ch === '#') parts.push({ t: 'session', label: token.slice(1) });
+      else parts.push({ t: 'text', v: token });
+      cursor = start + token.length;
+    }
+    if (cursor < seg.length) parts.push({ t: 'text', v: seg.slice(cursor) });
+  }
+  // The bubble's grammar (mentionMarkdown.ts parseMentionMarkdown), minus the
+  // transport-only schemes: any markdown link becomes a colored chip; file
+  // chips need a local destination, web links keep their label as plain text.
+  function zbTcParts(text) {
+    var parts = [];
+    var cursor = 0;
+    TC_LINK.lastIndex = 0;
+    var m;
+    while ((m = TC_LINK.exec(text))) {
+      var full = m[0] || '';
+      if (m.index > cursor) zbTcInline(parts, text.slice(cursor, m.index));
+      var label = zbTcUnescape(m[1]);
+      var dest = m[2] != null ? m[2] : (m[3] != null ? m[3] : '');
+      var cleanLabel = label.replace(/^@/, '');
+      if (/^#(?:sess|session)_[a-zA-Z0-9._-]+$/.test(dest)) {
+        parts.push({ t: 'session', label: label.replace(/^#/, '') });
+      } else if (dest.indexOf('zcode-element://') === 0) {
+        parts.push({ t: 'element', label: cleanLabel, dest: dest });
+      } else if (dest.indexOf('plugin://') === 0) {
+        parts.push({ t: 'plugin', label: cleanLabel, dest: dest });
+      } else if (label.charAt(0) === '$') {
+        parts.push({ t: 'skill', label: zbTcSkillLabel(label.slice(1)) });
+      } else if (/[\\\\/]$/.test(dest)) {
+        parts.push({ t: 'dir', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: dest });
+      } else if (zbTcLocal(dest)) {
+        var href = dest.replace(/\\\\([\\\\()[\\]<>])/g, '$1');
+        parts.push({ t: 'file', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: href });
+      } else {
+        // Web link inside a title: show its label, never the markdown, and
+        // never a misleading file icon.
+        parts.push({ t: 'text', v: label });
+      }
+      cursor = m.index + full.length;
+    }
+    if (cursor < text.length) zbTcInline(parts, text.slice(cursor));
+    if (!parts.length) parts.push({ t: 'text', v: text });
+    return parts;
+  }
+  function zbTcHasPart(parts) {
+    for (var i = 0; i < parts.length; i++) if (parts[i].t !== 'text') return true;
+    return false;
+  }
+  // --- goal sessions (\u6807\u9898 goal \u6807\u8BB0) ---------------------------------------
+  // A session started with /goal gets a generated title that no longer carries
+  // the command ("/goal \u6D4B\u8BD5" \u2192 "\u6D4B\u8BD5"), so the sidebar row no longer shows
+  // that it is a goal session. The serve's /api/goal-sessions maps session
+  // ids \u2192 goal status/title; rows in that map get the same goal chip the
+  // verbatim "/goal \u2026" titles already render.
+  function zbTcGoalRowId(span) {
+    var row = span && span.closest ? span.closest('[data-testid^="task-item-"]') : null;
+    if (!row) return '';
+    var tid = row.getAttribute('data-testid') || '';
+    return tid.indexOf('task-item-') === 0 ? tid.slice('task-item-'.length) : '';
+  }
+  function zbTcGoalOf(span) {
+    var S = window.__zcodeBeautify;
+    if (!S || !S.goals) return null;
+    var id = zbTcGoalRowId(span);
+    return (id && S.goals[id]) || null;
+  }
+  // Only the LEADING command counts as the marker: a title that merely
+  // mentions "/goal" later still gets the hook-in front chip.
+  function zbTcHasGoalCommand(parts) {
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.t === 'text') {
+        if (String(p.v || '').trim() === '') continue;
+        return false;
+      }
+      return p.t === 'command' && String(p.cmd || '').toLowerCase() === 'goal';
+    }
+    return false;
+  }
+  function zbTcGoalRefresh(force) {
+    var S = window.__zcodeBeautify;
+    if (!S || !GOAL_API || Number(S.tcOn) !== 1) return;
+    if (S.tcGoalBusy) return;
+    var now = Date.now();
+    if (!force && S.tcGoalAt && now - S.tcGoalAt < 8000) return;
+    S.tcGoalAt = now;
+    S.tcGoalBusy = true;
+    try {
+      fetch(GOAL_API, { cache: 'no-store' })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) {
+          S.tcGoalBusy = false;
+          if (!j || j.ok !== true || !j.sessions) return;
+          var next = j.sessions;
+          var changed = JSON.stringify(next) !== JSON.stringify(S.goals || {});
+          S.goals = next;
+          if (changed) zbTcSweep(document);
+        })
+        .catch(function() { S.tcGoalBusy = false; });
+    } catch (e) { S.tcGoalBusy = false; }
+  }
+  // A freshly created row's goal target lands in ZCode's db a beat after the
+  // session row itself; retry once shortly after so the marker is not stuck
+  // until the next poll.
+  function zbTcGoalWatch(span) {
+    var S = window.__zcodeBeautify;
+    if (!S || !GOAL_API || Number(S.tcOn) !== 1) return;
+    var id = zbTcGoalRowId(span);
+    if (!id) return;
+    zbTcGoalRefresh(false);
+    if (S.goals && S.goals[id]) return;
+    if (!S.tcGoalRetry) S.tcGoalRetry = {};
+    if (S.tcGoalRetry[id]) return;
+    S.tcGoalRetry[id] = 1;
+    setTimeout(function() {
+      delete S.tcGoalRetry[id];
+      zbTcGoalRefresh(true);
+    }, 2000);
+  }
+  function zbTcGoalStart() {
+    var S = window.__zcodeBeautify;
+    if (!GOAL_API || S.tcGoalTimer) return;
+    S.tcGoalTimer = setInterval(function() { zbTcGoalRefresh(true); }, 15000);
+  }
+  function zbTcGoalStop() {
+    var S = window.__zcodeBeautify;
+    if (S.tcGoalTimer) { clearInterval(S.tcGoalTimer); S.tcGoalTimer = null; }
+  }
+  function zbTcFileIcon(name) {
+    var img = document.createElement('img');
+    img.alt = '';
+    img.setAttribute('aria-hidden', 'true');
+    img.width = 16;
+    img.height = 16;
+    img.src = './material-icons/' + (name || 'document') + '.svg';
+    img.addEventListener('error', function() {
+      var cur = img.getAttribute('src') || '';
+      if (cur.indexOf('document.svg') === -1) img.setAttribute('src', './material-icons/document.svg');
+      else img.style.display = 'none';
+    });
+    return img;
+  }
+  function zbTcRender(view, parts) {
+    view.textContent = '';
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p.t === 'text') { view.appendChild(document.createTextNode(p.v)); continue; }
+      var chip = document.createElement('span');
+      chip.className = 'zb-tc';
+      chip.setAttribute('data-k', p.t);
+      if (p.goalStatus || p.goalTitle) {
+        // Injected goal marker: hover reveals the goal state the generated
+        // title dropped (status + summary).
+        chip.title = 'goal' + (p.goalStatus ? ' \xB7 ' + p.goalStatus : '') + (p.goalTitle ? ' \xB7 ' + p.goalTitle : '');
+      } else if (p.dest) chip.title = p.dest;
+      if (p.t === 'file') chip.appendChild(zbTcFileIcon(zbTcIconName(p.dest || p.label)));
+      else if (p.t === 'dir') chip.appendChild(zbTcFileIcon('folder'));
+      else if (p.t === 'command') chip.insertAdjacentHTML('beforeend', p.cmd === 'goal' || p.cmd === 'target' ? TC_SVG.goal : TC_SVG.command);
+      else if (TC_SVG[p.t]) chip.insertAdjacentHTML('beforeend', TC_SVG[p.t]);
+      var lab = document.createElement('span');
+      lab.className = 'zb-tc-t';
+      lab.textContent = p.label || '';
+      chip.appendChild(lab);
+      view.appendChild(chip);
+    }
+  }
+  function zbTcDirectTexts(span) {
+    var out = [];
+    for (var n = span.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) out.push(n);
+    return out;
+  }
+  function zbTcKids(span) {
+    var src = null, view = null;
+    for (var n = span.firstElementChild; n; n = n.nextElementSibling) {
+      if (n.className === TC_SRC_CLS) src = n;
+      else if (n.className === TC_VIEW_CLS) view = n;
+    }
+    return { src: src, view: view };
+  }
+  // Read the current title WITHOUT blanking: a node we already blanked keeps
+  // its remembered value; a node React just rewrote reports its new text.
+  function zbTcRead(span, st) {
+    var nodes = zbTcDirectTexts(span);
+    var raw = '';
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var rec = null;
+      if (st) {
+        for (var j = 0; j < st.nodes.length; j++) {
+          if (st.nodes[j].n === n) { rec = st.nodes[j]; break; }
+        }
+      }
+      raw += rec && n.nodeValue === '' ? rec.v : (n.nodeValue || '');
+    }
+    return raw;
+  }
+  // Adopt the title text node(s), remember their values, and blank them so
+  // the chip layer is the only visible title. React keeps writing nodeValue
+  // into these same nodes; the observer below picks that up.
+  function zbTcCapture(span, st) {
+    var nodes = zbTcDirectTexts(span);
+    var next = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var rec = null;
+      for (var j = 0; j < st.nodes.length; j++) {
+        if (st.nodes[j].n === n) { rec = st.nodes[j]; break; }
+      }
+      if (!rec) {
+        if (!n.nodeValue) continue; // empty node: nothing to remember
+        rec = { n: n, v: n.nodeValue };
+      } else if (n.nodeValue !== '' && n.nodeValue !== rec.v) {
+        rec.v = n.nodeValue; // React wrote a fresh title
+      }
+      next.push(rec);
+      if (n.nodeValue !== '') n.nodeValue = '';
+    }
+    st.nodes = next;
+    var raw = '';
+    for (var k = 0; k < next.length; k++) raw += next[k].v;
+    span.__zbTcText = raw;
+    return raw;
+  }
+  function zbTcRestore(span) {
+    var kids = zbTcKids(span);
+    var st = span.__zbTc || null;
+    if (st) {
+      for (var i = 0; i < st.nodes.length; i++) {
+        var rec = st.nodes[i];
+        if (rec.n.parentNode !== span) continue;
+        // A title update may have landed between React's write and our
+        // blanking: a non-empty nodeValue is React's newest text \u2014 keep it,
+        // only fall back to the remembered value for OUR blank''.
+        var cur = rec.n.nodeValue;
+        var val = cur ? cur : rec.v;
+        if (cur !== val) rec.n.nodeValue = val;
+      }
+    } else if (kids.view || kids.src) {
+      // A previous generation left wrappers but no state: put SOMETHING back
+      // rather than leaving a blank title.
+      var saved = span.__zbTcText || (kids.view ? (kids.view.textContent || '') : '');
+      if (saved && !zbTcRead(span, null)) span.textContent = saved;
+    }
+    if (kids.src) kids.src.remove();
+    if (kids.view) kids.view.remove();
+    try { delete span.__zbTc; } catch (e) { span.__zbTc = null; }
+    span.removeAttribute('data-zb-tc');
+  }
+  function zbTcProcess(span) {
+    if (!span || !span.isConnected) return;
+    // Goal map may be stale (new /goal session, or a session that started
+    // using the goal command mid-life): refresh in the background \u2014 throttled
+    // \u2014 and let the changed-map sweep re-render.
+    zbTcGoalWatch(span);
+    var st = span.__zbTc || null;
+    var kids = zbTcKids(span);
+    var raw = zbTcRead(span, st);
+    var parts = zbTcParts(raw);
+    var goal = Number(window.__zcodeBeautify.tcOn) === 1 ? zbTcGoalOf(span) : null;
+    var needGoal = !!goal && !zbTcHasGoalCommand(parts);
+    if (!zbTcHasPart(parts) && !needGoal) {
+      if (st) zbTcRestore(span);
+      else if (kids.src || kids.view) zbTcRestore(span);
+      return;
+    }
+    if (!st) st = span.__zbTc = { nodes: [], raw: '', rendered: '', view: null };
+    raw = zbTcCapture(span, st);
+    parts = zbTcParts(raw);
+    needGoal = !!goal && !zbTcHasGoalCommand(parts);
+    if (needGoal) {
+      parts.unshift({
+        t: 'command',
+        label: 'goal',
+        cmd: 'goal',
+        goalStatus: goal.status || '',
+        goalTitle: goal.title || '',
+      });
+      // The marker is synthesized, so no source whitespace separates it from
+      // the (blanked) title text \u2014 add one (collapses with existing spaces).
+      parts.splice(1, 0, { t: 'text', v: ' ' });
+    }
+    var view = kids.view;
+    if (!view) {
+      view = document.createElement('span');
+      view.className = TC_VIEW_CLS;
+      span.appendChild(view);
+    }
+    st.view = view;
+    // The render key includes the engine version + goal marker: a map refresh
+    // OR a newer engine generation can change the output even when the title
+    // text is byte-identical (live hit: TC_VER bump alone left stale renders).
+    var key = TC_VER + '\\u0000' + raw + '\\u0000' + (needGoal ? 'g:' + (goal.status || '') + ':' + (goal.title || '') : '');
+    if (st.rendered !== key) {
+      zbTcRender(view, parts);
+      st.raw = raw;
+      st.rendered = key;
+    }
+    if (span.getAttribute('data-zb-tc') !== '1') span.setAttribute('data-zb-tc', '1');
+  }
+  function zbTcOwner(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (!el || !el.closest) return null;
+    if (el.closest('.zb-tc-view')) return null; // our own render churn
+    var sp = el.closest(TC_SEL);
+    return sp && sp.nodeType === 1 ? sp : null;
+  }
+  function zbTcQueue(sp) {
+    if (!sp || !sp.isConnected) return;
+    for (var i = 0; i < tcQueue.length; i++) if (tcQueue[i] === sp) return;
+    tcQueue.push(sp);
+    if (tcRaf) return;
+    tcRaf = true;
+    var run = function() {
+      tcRaf = false;
+      var list = tcQueue;
+      tcQueue = [];
+      for (var j = 0; j < list.length; j++) {
+        try { zbTcProcess(list[j]); } catch (e) {}
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 16);
+  }
+  function zbTcMutations(muts) {
+    for (var i = 0; i < muts.length; i++) {
+      var mu = muts[i];
+      if (mu.type === 'characterData') {
+        var sp = zbTcOwner(mu.target);
+        if (sp) zbTcQueue(sp);
+        continue;
+      }
+      var target = mu.target;
+      if (target && target.nodeType === 1) {
+        if (target.matches && target.matches(TC_SEL)) { zbTcQueue(target); continue; }
+        if (target.closest && target.closest('.zb-tc-view')) continue;
+      }
+      for (var j = 0; j < mu.addedNodes.length; j++) {
+        var el = mu.addedNodes[j];
+        if (!el || el.nodeType !== 1) continue;
+        if (el.matches && el.matches(TC_SEL)) { zbTcQueue(el); continue; }
+        // Titles only render inside the sidebar. Skipping chat-area subtrees
+        // here matters: streaming re-renders add many elements per frame and a
+        // querySelectorAll on each would scan the whole message body.
+        if (!el.closest || !el.closest('aside')) continue;
+        if (el.querySelectorAll) {
+          var inner = el.querySelectorAll(TC_SEL);
+          for (var k = 0; k < inner.length; k++) zbTcQueue(inner[k]);
+        }
+      }
+    }
+  }
+  function zbTcSweep(root) {
+    if (!root || !root.querySelectorAll) return;
+    var spans = root.querySelectorAll(TC_SEL);
+    for (var i = 0; i < spans.length; i++) zbTcProcess(spans[i]);
+  }
+  function zbTcApply(on) {
+    var S = window.__zcodeBeautify;
+    if (!on) {
+      zbTcGoalStop();
+      if (S.tcObs) {
+        try { S.tcObs.disconnect(); } catch (e) {}
+        S.tcObs = null;
+      }
+      var live = document.querySelectorAll(TC_SEL);
+      for (var i = 0; i < live.length; i++) {
+        try { zbTcRestore(live[i]); } catch (e2) {}
+      }
+      return;
+    }
+    // Generation handoff (same model as listObs): an observer bound by an
+    // older eval keeps firing that generation's closure after a serve
+    // restart, so the newest engine must own it.
+    if (!S.tcObs || S.tcObsStamp !== TC_VER) {
+      if (S.tcObs) {
+        try { S.tcObs.disconnect(); } catch (e3) {}
+      }
+      var obs = new MutationObserver(zbTcMutations);
+      obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      S.tcObs = obs;
+      S.tcObsStamp = TC_VER;
+    }
+    // Goal map: initial load now, then a slow poll for sessions that start
+    // using /goal after their row was already rendered.
+    zbTcGoalStart();
+    zbTcGoalRefresh(false);
+    zbTcSweep(document);
   }
   function perfSched() {
     if (window.__zcodeBeautify.perfTimer) return;
@@ -9769,7 +10795,7 @@ function buildBootstrapScript(payload) {
   }
 })();`;
 }
-function buildResetScript(marker = "zcode-beautify") {
+function buildResetScript(marker = "zcode-beautify", opts = {}) {
   return `(function(){
   document.getElementById(${JSON.stringify(marker)} + '-style')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-fade-style')?.remove();
@@ -9789,6 +10815,25 @@ function buildResetScript(marker = "zcode-beautify") {
   });
   document.getElementById(${JSON.stringify(marker)} + '-frost')?.remove();
   document.getElementById(${JSON.stringify(marker)} + '-zonemask')?.remove();
+  // \u6807\u9898\u6587\u4EF6\u5F15\u7528 teardown: the sidebar title's text node was blanked in place
+  // and a chip layer rendered beside it \u2014 restore the raw text and drop the
+  // layer, or removing only the CSS would leave empty-looking titles.
+  document.querySelectorAll('[data-zb-tc]').forEach(function(n){
+    var st = n.__zbTc;
+    if (st && st.nodes) {
+      st.nodes.forEach(function(rec){
+        if (rec.n.parentNode !== n) return;
+        var cur = rec.n.nodeValue;
+        var val = cur ? cur : rec.v; // keep a newer React write; restore our blank'
+        if (cur !== val) rec.n.nodeValue = val;
+      });
+    } else if (n.__zbTcText && !n.textContent) {
+      n.textContent = n.__zbTcText;
+    }
+    n.querySelectorAll(':scope > .zb-tc-view,:scope > .zb-tc-src').forEach(function(c){ c.remove(); });
+    n.removeAttribute('data-zb-tc');
+    try { delete n.__zbTc; } catch (e) {}
+  });
   // The bootstrap persists the CSS/wallpaper for the panel's offline self-heal;
   // a reset that left them would let the look walk right back after restart.
   try { localStorage.removeItem(${JSON.stringify(marker)} + ':css'); } catch (e) {}
@@ -9818,8 +10863,25 @@ function buildResetScript(marker = "zcode-beautify") {
       try { window.__zcodeBeautify.listObs.disconnect(); } catch (e) {}
       window.__zcodeBeautify.listObs = null;
     }
+    if (window.__zcodeBeautify.tcObs) {
+      try { window.__zcodeBeautify.tcObs.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.tcObs = null;
+    }
+    if (window.__zcodeBeautify.tcGoalTimer) {
+      clearInterval(window.__zcodeBeautify.tcGoalTimer);
+      window.__zcodeBeautify.tcGoalTimer = null;
+    }
+    window.__zcodeBeautify.tcObsStamp = null;
   }
-})();`;
+${opts.disable ? `  // \u505C\u7528\uFF08\u4E0E\u300C\u8FD8\u539F\u5916\u89C2\u300D\u4E0D\u540C\uFF09\uFF1A\u7559\u4E0B\u6301\u4E45\u7981\u7528\u6807\u8BB0\uFF0C\u65E7\u4EE3
+  // addScriptToEvaluateOnNewDocument \u5728\u4E0B\u6B21 reload \u65F6\u81EA\u68C0\u9000\u51FA\uFF1B\u540C\u65F6\u628A\u9762\u677F
+  // \u672C\u4F53\u3001\u6D6E\u5C42\u548C\u5B83\u81EA\u5DF1\u7684\u5B9A\u65F6\u5668\u4E00\u5E76\u6536\u6389\u3002\u65B0 serve \u542F\u52A8\u6CE8\u5165\u524D\u4F1A\u6E05\u6389\u6807\u8BB0\u3002
+  try { localStorage.setItem(${JSON.stringify(marker + ":disabled")}, '1'); } catch (e) {}
+  document.querySelectorAll('[id^="' + ${JSON.stringify(marker)} + '-"]').forEach(function(n){ n.remove(); });
+  document.querySelectorAll('body > .zb-we-pop, body > .zb-dd-pop').forEach(function(n){ n.remove(); });
+  try { (window.__zbTimers || []).forEach(function(t){ clearInterval(t); }); window.__zbTimers = []; } catch (e) {}
+  if (window.__zcodeBeautify) window.__zcodeBeautify.disabled = true;
+` : ""}})();`;
 }
 var CdpError, CdpConnection, LIST_PAGING_VER;
 var init_cdp = __esm({
@@ -9897,6 +10959,35 @@ var init_cdp = __esm({
       }
     };
     LIST_PAGING_VER = 7;
+  }
+});
+
+// dist/core/bubbleLook.js
+function normalizeBubbleLook(raw) {
+  const num = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
+  const preset = BUBBLE_PRESETS.includes(raw?.preset) ? raw.preset : "default";
+  return {
+    preset,
+    tint: num(raw?.tint, 0, 100, DEFAULT_BUBBLE_LOOK.tint),
+    radius: num(raw?.radius, 4, 24, DEFAULT_BUBBLE_LOOK.radius),
+    width: num(raw?.width, 40, 90, DEFAULT_BUBBLE_LOOK.width),
+    align: raw?.align === "left" ? "left" : "right",
+    customCss: sanitizeCustomBubbleCss(raw?.customCss)
+  };
+}
+var DEFAULT_BUBBLE_LOOK, BUBBLE_PRESETS;
+var init_bubbleLook = __esm({
+  "dist/core/bubbleLook.js"() {
+    "use strict";
+    init_bubbleRecipes();
+    DEFAULT_BUBBLE_LOOK = {
+      preset: "default",
+      tint: 28,
+      radius: 12,
+      width: 70,
+      align: "right"
+    };
+    BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
   }
 });
 
@@ -15787,7 +16878,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs12 = __require("fs");
+    var fs14 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -15902,14 +16993,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports.write = function(path14, frames, spec, encoder) {
+    exports.write = function(path15, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path14.match(/\.[a-zA-Z]+$/);
+      const matches = path15.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path14}' has an unexpected suffix`);
+        throw new Error(`GIF '${path15}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path14, gif2.buffer).then(() => {
+        return _writeBinary(path15, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -15981,9 +17072,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path14) {
+    function _readBinary(path15) {
       return new Promise((resolve, reject) => {
-        fs12.readFile(path14, (err, buffer) => {
+        fs14.readFile(path15, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -15991,9 +17082,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path14, buffer) {
+    function _writeBinary(path15, buffer) {
       return new Promise((resolve, reject) => {
-        fs12.writeFile(path14, buffer, (err) => {
+        fs14.writeFile(path15, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -18004,9 +19095,9 @@ var require_decoder = __commonJS({
         return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
       }
       constructor.prototype = {
-        load: function load(path14) {
+        load: function load(path15) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path14, true);
+          xhr.open("GET", path15, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -28909,8 +30000,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue2 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -29218,11 +30309,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath2 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -33035,8 +34126,8 @@ var init_parseUtil2 = __esm({
     init_errors2();
     init_en2();
     makeIssue3 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -33344,11 +34435,11 @@ var init_types3 = __esm({
     init_parseUtil2();
     init_util2();
     ParseInputLazyPath3 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -37946,8 +39037,8 @@ var init_parseUtil3 = __esm({
     init_errors3();
     init_en3();
     makeIssue4 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -38255,11 +39346,11 @@ var init_types4 = __esm({
     init_parseUtil3();
     init_util3();
     ParseInputLazyPath4 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -42100,8 +43191,8 @@ var init_parseUtil4 = __esm({
     init_errors4();
     init_en4();
     makeIssue5 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -42409,11 +43500,11 @@ var init_types5 = __esm({
     init_parseUtil4();
     init_util4();
     ParseInputLazyPath5 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -46488,13 +47579,13 @@ var require_await_to_js_umd = __commonJS({
 });
 
 // node_modules/@jimp/file-ops/dist/esm/index.js
-import { promises as fs2 } from "fs";
+import { promises as fs4 } from "fs";
 import { existsSync } from "fs";
 var readFile, writeFile;
 var init_esm13 = __esm({
   "node_modules/@jimp/file-ops/dist/esm/index.js"() {
-    readFile = fs2.readFile;
-    writeFile = fs2.writeFile;
+    readFile = fs4.readFile;
+    writeFile = fs4.writeFile;
   }
 });
 
@@ -46536,11 +47627,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path14) {
-      path14 = String(path14);
-      let last = path14.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path15) {
+      path15 = String(path15);
+      let last = path15.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path14.length;
+      let hasPath = last.length < path15.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -53070,7 +54161,7 @@ __export(file_type_exports, {
 });
 import { ReadableStream as WebReadableStream } from "node:stream/web";
 import { pipeline, PassThrough, Readable } from "node:stream";
-import fs3 from "node:fs/promises";
+import fs5 from "node:fs/promises";
 import { constants as fileSystemConstants } from "node:fs";
 function isTokenizerStreamBoundsError(error62) {
   if (!(error62 instanceof RangeError) || error62.message !== "offset is out of bounds" || typeof error62.stack !== "string") {
@@ -53078,8 +54169,8 @@ function isTokenizerStreamBoundsError(error62) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error62.stack);
 }
-async function fileTypeFromFile(path14, options) {
-  return new FileTypeParser2(options).fromFile(path14, options);
+async function fileTypeFromFile(path15, options) {
+  return new FileTypeParser2(options).fromFile(path15, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -53110,9 +54201,9 @@ var init_file_type = __esm({
           }
         }
       }
-      async fromFile(path14) {
+      async fromFile(path15) {
         this.options.signal?.throwIfAborted();
-        const fileHandle = await fs3.open(path14, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+        const fileHandle = await fs5.open(path15, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
         const fileStat = await fileHandle.stat();
         if (!fileStat.isFile()) {
           await fileHandle.close();
@@ -53121,7 +54212,7 @@ var init_file_type = __esm({
         const tokenizer = new FileTokenizer(fileHandle, {
           ...this.getTokenizerOptions(),
           fileInfo: {
-            path: path14,
+            path: path15,
             size: fileStat.size
           }
         });
@@ -53456,9 +54547,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path14, options) {
-      const mimeType = import_lite.default.getType(path14);
-      await writeFile(path14, await this.getBuffer(mimeType, options));
+    async write(path15, options) {
+      const mimeType = import_lite.default.getType(path15);
+      await writeFile(path15, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -54107,8 +55198,8 @@ var init_parseUtil5 = __esm({
     init_errors5();
     init_en5();
     makeIssue6 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -54416,11 +55507,11 @@ var init_types6 = __esm({
     init_parseUtil5();
     init_util6();
     ParseInputLazyPath6 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -58865,8 +59956,8 @@ var init_parseUtil6 = __esm({
     init_errors6();
     init_en6();
     makeIssue7 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -59174,11 +60265,11 @@ var init_types7 = __esm({
     init_parseUtil6();
     init_util7();
     ParseInputLazyPath7 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -63032,8 +64123,8 @@ var init_parseUtil7 = __esm({
     init_errors7();
     init_en7();
     makeIssue8 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -63341,11 +64432,11 @@ var init_types8 = __esm({
     init_parseUtil7();
     init_util8();
     ParseInputLazyPath8 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -67326,8 +68417,8 @@ var init_parseUtil8 = __esm({
     init_errors8();
     init_en8();
     makeIssue9 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -67635,11 +68726,11 @@ var init_types9 = __esm({
     init_parseUtil8();
     init_util9();
     ParseInputLazyPath9 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -71488,8 +72579,8 @@ var init_parseUtil9 = __esm({
     init_errors9();
     init_en9();
     makeIssue10 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -71797,11 +72888,11 @@ var init_types10 = __esm({
     init_parseUtil9();
     init_util10();
     ParseInputLazyPath10 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -75687,8 +76778,8 @@ var init_parseUtil10 = __esm({
     init_errors10();
     init_en10();
     makeIssue11 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -75996,11 +77087,11 @@ var init_types11 = __esm({
     init_parseUtil10();
     init_util11();
     ParseInputLazyPath11 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -79838,8 +80929,8 @@ var init_parseUtil11 = __esm({
     init_errors11();
     init_en11();
     makeIssue12 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -80147,11 +81238,11 @@ var init_types12 = __esm({
     init_parseUtil11();
     init_util12();
     ParseInputLazyPath12 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -84224,8 +85315,8 @@ var init_parseUtil12 = __esm({
     init_errors12();
     init_en12();
     makeIssue13 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -84533,11 +85624,11 @@ var init_types13 = __esm({
     init_parseUtil12();
     init_util13();
     ParseInputLazyPath13 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -88394,8 +89485,8 @@ var init_parseUtil13 = __esm({
     init_errors13();
     init_en13();
     makeIssue14 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -88703,11 +89794,11 @@ var init_types14 = __esm({
     init_parseUtil13();
     init_util14();
     ParseInputLazyPath14 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -92721,8 +93812,8 @@ var init_parseUtil14 = __esm({
     init_errors14();
     init_en14();
     makeIssue15 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -93030,11 +94121,11 @@ var init_types16 = __esm({
     init_parseUtil14();
     init_util15();
     ParseInputLazyPath15 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -96998,8 +98089,8 @@ var init_parseUtil15 = __esm({
     init_errors15();
     init_en15();
     makeIssue16 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -97307,11 +98398,11 @@ var init_types17 = __esm({
     init_parseUtil15();
     init_util16();
     ParseInputLazyPath16 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -104048,8 +105139,8 @@ var init_parseUtil16 = __esm({
     init_errors16();
     init_en16();
     makeIssue17 = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path15, errorMaps, issueData } = params;
+      const fullPath = [...path15, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -104357,11 +105448,11 @@ var init_types18 = __esm({
     init_parseUtil16();
     init_util17();
     ParseInputLazyPath17 = class {
-      constructor(parent, value, path14, key) {
+      constructor(parent, value, path15, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path15;
         this._key = key;
       }
       get path() {
@@ -119680,138 +120771,32 @@ var init_tokens = __esm({
   }
 });
 
-// dist/version.js
-var VERSION;
-var init_version = __esm({
-  "dist/version.js"() {
-    "use strict";
-    VERSION = "6.3.5";
-  }
-});
-
-// dist/core/launch.js
-import { execFile, spawn } from "node:child_process";
-import { promisify } from "node:util";
-import fs4 from "node:fs";
-import path2 from "node:path";
-function dataDir() {
-  const t2 = target();
-  for (const name of t2.dataDirEnvVars) {
-    const v = process.env[name];
-    if (v && v.trim())
-      return v.trim();
-  }
-  return t2.defaultDataDir();
-}
-function configFile() {
-  return path2.join(dataDir(), "config.json");
-}
-function loadConfig() {
-  try {
-    return JSON.parse(fs4.readFileSync(configFile(), "utf8"));
-  } catch (err) {
-    if (err.code !== "ENOENT") {
-      try {
-        fs4.copyFileSync(configFile(), configFile() + `.corrupt-${Date.now().toString(36)}`);
-      } catch {
-      }
-    }
-    return {};
-  }
-}
-function withConfigLock(fn) {
-  const lock = configFile() + ".lock";
-  fs4.mkdirSync(dataDir(), { recursive: true });
-  const deadline = Date.now() + 1500;
-  let fd = null;
-  for (; ; ) {
-    try {
-      fd = fs4.openSync(lock, "wx");
-      break;
-    } catch {
-      try {
-        const age = Date.now() - fs4.statSync(lock).mtimeMs;
-        if (age > 5e3) {
-          fs4.rmSync(lock, { force: true });
-          continue;
-        }
-      } catch {
-      }
-      if (Date.now() > deadline)
-        return fn();
-      const waitMs = Date.now();
-      while (Date.now() - waitMs < 20) {
-      }
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      fs4.closeSync(fd);
-    } catch {
-    }
-    try {
-      fs4.rmSync(lock, { force: true });
-    } catch {
-    }
-  }
-}
-function saveConfig(config2) {
-  fs4.mkdirSync(dataDir(), { recursive: true });
-  withConfigLock(() => {
-    const file2 = configFile();
-    const tmp = file2 + ".tmp";
-    fs4.writeFileSync(tmp, JSON.stringify(config2, null, 2));
-    fs4.renameSync(tmp, file2);
-  });
-}
-function experimentalEnabled(cfg = loadConfig()) {
-  return cfg.experimental?.enabled === true;
-}
-function ensureExperimentalGate() {
-  const cfg = loadConfig();
-  if (cfg.experimental)
-    return cfg;
-  const used = PRIOR_USE_KEYS.some((k) => cfg[k] !== void 0);
-  if (!used)
-    return cfg;
-  const migrated = {
-    ...cfg,
-    experimental: { enabled: true, migrated: true, consentVersion: VERSION }
-  };
-  try {
-    saveConfig(migrated);
-  } catch {
-    return cfg;
-  }
-  return migrated;
-}
-var PRIOR_USE_KEYS, execFileAsync;
-var init_launch = __esm({
-  "dist/core/launch.js"() {
-    "use strict";
-    init_cdp();
-    init_target();
-    init_version();
-    PRIOR_USE_KEYS = [
-      "wallpaperPath",
-      "sceneHash",
-      "sceneVideoUrl",
-      "rotation",
-      "themeColor",
-      "chatLook",
-      "bubbleLook",
-      "taskSpinnerLook",
-      "dayNight"
-    ];
-    execFileAsync = promisify(execFile);
-  }
-});
-
 // dist/core/inject.js
-import fs5 from "node:fs";
-import path3 from "node:path";
+var inject_exports = {};
+__export(inject_exports, {
+  DEFAULT_BUBBLE_LOOK: () => DEFAULT_BUBBLE_LOOK,
+  DEFAULT_CHAT_LOAD_LOOK: () => DEFAULT_CHAT_LOAD_LOOK,
+  DEFAULT_CONFIG: () => DEFAULT_CONFIG,
+  DEFAULT_FAB_LOOK: () => DEFAULT_FAB_LOOK,
+  DEFAULT_TASK_SPINNER_LOOK: () => DEFAULT_TASK_SPINNER_LOOK,
+  SPINNER_FILE_MAX_BYTES: () => SPINNER_FILE_MAX_BYTES,
+  SPINNER_REF_MAX_CHARS: () => SPINNER_REF_MAX_CHARS,
+  STOCK_CHAT_WIDTH: () => STOCK_CHAT_WIDTH,
+  applyToZCode: () => applyToZCode,
+  buildInjectScript: () => buildInjectScript,
+  buildPayload: () => buildPayload,
+  loadWallpaper: () => loadWallpaper,
+  normalizeBubbleLook: () => normalizeBubbleLook,
+  normalizeChatLoadLook: () => normalizeChatLoadLook,
+  normalizeChatLook: () => normalizeChatLook,
+  normalizeFabLook: () => normalizeFabLook,
+  normalizeListPaging: () => normalizeListPaging,
+  normalizeTaskSpinnerLook: () => normalizeTaskSpinnerLook,
+  resetZCode: () => resetZCode,
+  resolveSpinnerImageRef: () => resolveSpinnerImageRef
+});
+import fs6 from "node:fs";
+import path4 from "node:path";
 function normalizeListPaging(raw) {
   const num = (v, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(1, Math.min(LIST_PAGING_MAX, Math.round(v))) : dflt;
   const initial = typeof raw?.initial === "number" && Number.isFinite(raw.initial) && raw.initial >= 1 ? Math.min(LIST_PAGING_MAX, Math.round(raw.initial)) : 0;
@@ -119836,6 +120821,7 @@ function normalizeChatLook(raw) {
   const hover = raw?.sessionHover;
   const hoverSide = raw?.sessionHoverSide;
   const hoverMax = raw?.sessionHoverMax;
+  const titleCites = raw?.titleCites;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -119850,7 +120836,10 @@ function normalizeChatLook(raw) {
     // absent = 1: existing configs predate the side toggle and expect rows on
     sessionHoverSide: hoverSide === 0 || hoverSide === false ? 0 : 1,
     sessionHoverMax: typeof hoverMax === "number" && Number.isFinite(hoverMax) && hoverMax >= 1 ? Math.min(60, Math.round(hoverMax)) : 10,
-    composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade) ? pct(raw.composerFade) : 50
+    composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade) ? pct(raw.composerFade) : 50,
+    // absent = 1: the raw-markdown title is the bug this option fixes, so
+    // existing configs (which predate the key) upgrade straight into chips.
+    titleCites: titleCites === 0 || titleCites === false ? 0 : 1
   };
 }
 function normalizeTaskSpinnerLook(raw) {
@@ -119894,29 +120883,29 @@ function resolveSpinnerImageRef(ref, apiPort, mediaToken) {
     return ref;
   let abs;
   try {
-    abs = path3.resolve(ref);
+    abs = path4.resolve(ref);
   } catch {
     return "";
   }
   let stat;
   try {
-    stat = fs5.statSync(abs);
+    stat = fs6.statSync(abs);
   } catch {
     return "";
   }
   if (!stat.isFile())
     return "";
-  const ext = path3.extname(abs).toLowerCase();
+  const ext = path4.extname(abs).toLowerCase();
   if (!SPINNER_MIME[ext])
     return "";
-  const dir = path3.resolve(dataDir()).toLowerCase();
-  const spinnerDir = path3.join(dir, "spinner").toLowerCase();
-  if (abs.toLowerCase().startsWith(spinnerDir + path3.sep)) {
-    const url2 = `http://127.0.0.1:${apiPort}/media/spinner/${encodeURIComponent(path3.basename(abs))}`;
+  const dir = path4.resolve(dataDir()).toLowerCase();
+  const spinnerDir = path4.join(dir, "spinner").toLowerCase();
+  if (abs.toLowerCase().startsWith(spinnerDir + path4.sep)) {
+    const url2 = `http://127.0.0.1:${apiPort}/media/spinner/${encodeURIComponent(path4.basename(abs))}`;
     return mediaToken ? `${url2}?t=${mediaToken}` : url2;
   }
-  if (abs.toLowerCase().startsWith(dir + path3.sep)) {
-    const url2 = `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path3.basename(abs))}`;
+  if (abs.toLowerCase().startsWith(dir + path4.sep)) {
+    const url2 = `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path4.basename(abs))}`;
     return mediaToken ? `${url2}?t=${mediaToken}` : url2;
   }
   if (stat.size > SPINNER_FILE_MAX_BYTES) {
@@ -119924,22 +120913,10 @@ function resolveSpinnerImageRef(ref, apiPort, mediaToken) {
     return "";
   }
   try {
-    return `data:${SPINNER_MIME[ext]};base64,${fs5.readFileSync(abs).toString("base64")}`;
+    return `data:${SPINNER_MIME[ext]};base64,${fs6.readFileSync(abs).toString("base64")}`;
   } catch {
     return "";
   }
-}
-function normalizeBubbleLook(raw) {
-  const num = (v, min, max, dflt) => typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
-  const preset = BUBBLE_PRESETS.includes(raw?.preset) ? raw.preset : "default";
-  return {
-    preset,
-    tint: num(raw?.tint, 0, 100, DEFAULT_BUBBLE_LOOK.tint),
-    radius: num(raw?.radius, 4, 24, DEFAULT_BUBBLE_LOOK.radius),
-    width: num(raw?.width, 40, 90, DEFAULT_BUBBLE_LOOK.width),
-    align: raw?.align === "left" ? "left" : "right",
-    customCss: sanitizeCustomBubbleCss(raw?.customCss)
-  };
 }
 function activePlanTransition(rotation) {
   const plans = rotation?.plans;
@@ -120035,10 +121012,10 @@ ${rootSelector} { background: transparent !important; }
   }
   let wallpaperDataUri;
   if (!config2.sceneVideoUrl && config2.wallpaperVisible) {
-    const p2 = path3.resolve(config2.wallpaperPath ?? "").toLowerCase();
-    const dir = path3.resolve(dataDir()).toLowerCase();
-    if (p2.startsWith(dir + path3.sep) && /\.(jpe?g|png|webp|bmp)$/i.test(p2)) {
-      wallpaperDataUri = tok(`http://127.0.0.1:${config2.apiPort ?? target().apiPort}/media/lib/${encodeURIComponent(path3.basename(config2.wallpaperPath))}`);
+    const p2 = path4.resolve(config2.wallpaperPath ?? "").toLowerCase();
+    const dir = path4.resolve(dataDir()).toLowerCase();
+    if (p2.startsWith(dir + path4.sep) && /\.(jpe?g|png|webp|bmp)$/i.test(p2)) {
+      wallpaperDataUri = tok(`http://127.0.0.1:${config2.apiPort ?? target().apiPort}/media/lib/${encodeURIComponent(path4.basename(config2.wallpaperPath))}`);
     } else {
       wallpaperDataUri = assets?.dataUri;
     }
@@ -120061,6 +121038,7 @@ ${rootSelector} { background: transparent !important; }
     if (!chatLoadLook.image)
       chatLoadLook.mode = "default";
   }
+  const chatLook = chatUi ? normalizeChatLook(config2.chatLook) : normalizeChatLook(void 0);
   return {
     css: parts.join("\n"),
     wallpaperDataUri,
@@ -120074,7 +121052,7 @@ ${rootSelector} { background: transparent !important; }
     // Chat extras (bubbles, column width, spinner icons) are bound to ZCode's
     // DOM. On other clients they are forced back to stock so a stored config
     // copied from ZCode can never inject rules for elements that do not exist.
-    chatLook: chatUi ? normalizeChatLook(config2.chatLook) : normalizeChatLook(void 0),
+    chatLook,
     bubbleLook: chatUi ? normalizeBubbleLook(config2.bubbleLook) : normalizeBubbleLook(void 0),
     componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(void 0),
@@ -120087,8 +121065,44 @@ ${rootSelector} { background: transparent !important; }
     startupProbe: app.startupProbe,
     // 会话概览悬停卡: only ZCode rows carry session ids, and only when the
     // toggle is on does the bootstrap need the (token-bearing) endpoint.
-    previewApi: chatUi && normalizeChatLook(config2.chatLook).sessionHover === 1 ? tok(`http://127.0.0.1:${config2.apiPort ?? target().apiPort}/api/session-preview`) : ""
+    previewApi: chatUi && chatLook.sessionHover === 1 ? tok(`http://127.0.0.1:${config2.apiPort ?? target().apiPort}/api/session-preview`) : "",
+    // 标题 goal 标记 rides the same title engine as 标题文件引用: goal sessions
+    // lose the /goal command in their generated titles, so the map lets the
+    // renderer put the goal chip back in front of them.
+    goalApi: chatUi && chatLook.titleCites === 1 ? tok(`http://127.0.0.1:${config2.apiPort ?? target().apiPort}/api/goal-sessions`) : ""
   };
+}
+function buildInjectScript(input2) {
+  let css = `
+html, body { background: transparent !important; }
+#zcode-beautify-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: -2147483646;
+  pointer-events: none;
+  filter: blur(${input2.blur}px);
+  transform: scale(${input2.blur > 0 ? 1.04 : 1});
+}
+#zcode-beautify-wallpaper > video,
+#zcode-beautify-wallpaper {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}`;
+  if (input2.dim > 0) {
+    css += `
+#zcode-beautify-wallpaper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / ${input2.dim / 100});
+}`;
+  }
+  if (input2.mediaType === "video") {
+    return buildBootstrapScript({ css, videoSrc: input2.path, fit: input2.fit ?? "cover", transition: "fade" });
+  }
+  const src = /^(data:|https?:|file:)/i.test(input2.path) ? input2.path : `file:///${input2.path.replace(/\\/g, "/").replace(/^\/+/, "")}`;
+  return buildBootstrapScript({ css, wallpaperDataUri: src, fit: input2.fit ?? "cover", transition: "fade" });
 }
 async function applyToZCode(config2, payload) {
   const targets = pickRendererTargets(await listTargets(config2.port));
@@ -120108,13 +121122,15 @@ async function applyToZCode(config2, payload) {
   }
   return count;
 }
-async function resetZCode(port) {
+async function resetZCode(port, opts = {}) {
   const targets = pickRendererTargets(await listTargets(port));
   let count = 0;
   for (const target2 of targets) {
     try {
       const conn = await CdpConnection.connect(target2.webSocketDebuggerUrl);
-      await conn.send("Runtime.evaluate", { expression: buildResetScript() });
+      await conn.send("Runtime.evaluate", {
+        expression: buildResetScript("zcode-beautify", { disable: opts.disable === true })
+      });
       conn.close();
       count++;
     } catch (err) {
@@ -120123,26 +121139,21 @@ async function resetZCode(port) {
   }
   return count;
 }
-var LIST_PAGING_MAX, CHAT_WIDTH_INSET_DEFAULT, DEFAULT_BUBBLE_LOOK, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, DEFAULT_CHAT_LOAD_LOOK, DEFAULT_FAB_LOOK, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, BUBBLE_PRESETS, DEFAULT_CONFIG;
+var LIST_PAGING_MAX, STOCK_CHAT_WIDTH, CHAT_WIDTH_INSET_DEFAULT, DEFAULT_TASK_SPINNER_LOOK, SPINNER_REF_MAX_CHARS, DEFAULT_CHAT_LOAD_LOOK, DEFAULT_FAB_LOOK, SPINNER_FILE_MAX_BYTES, SPINNER_MIME, DEFAULT_CONFIG;
 var init_inject = __esm({
   "dist/core/inject.js"() {
     "use strict";
     init_cdp();
-    init_bubbleRecipes();
+    init_bubbleLook();
     init_componentLook();
     init_monet();
     init_tokens();
     init_target();
     init_launch();
+    init_bubbleLook();
     LIST_PAGING_MAX = 100;
+    STOCK_CHAT_WIDTH = { capRem: 72, insetRem: 24 };
     CHAT_WIDTH_INSET_DEFAULT = 12;
-    DEFAULT_BUBBLE_LOOK = {
-      preset: "default",
-      tint: 28,
-      radius: 12,
-      width: 70,
-      align: "right"
-    };
     DEFAULT_TASK_SPINNER_LOOK = {
       mode: "default",
       image: "",
@@ -120172,7 +121183,6 @@ var init_inject = __esm({
       ".svg": "image/svg+xml",
       ".avif": "image/avif"
     };
-    BUBBLE_PRESETS = ["default", "accent", "glass", "outline", "flat", "custom"];
     DEFAULT_CONFIG = {
       port: 9222,
       experimental: { enabled: false },
@@ -120186,101 +121196,131 @@ var init_inject = __esm({
   }
 });
 
-// dist/core/wallpaperType.js
-import fs6 from "node:fs";
-import path4 from "node:path";
-function detectWallpaperType(input2) {
-  const ext = path4.extname(input2).toLowerCase();
-  if (IMAGE_EXTENSIONS.has(ext))
-    return "image";
-  if (VIDEO_EXTENSIONS.has(ext))
-    return "video";
-  if (ext === ".pkg")
-    return "scene";
-  let stat;
-  try {
-    stat = fs6.statSync(input2);
-  } catch {
-    return "unknown";
-  }
-  if (!stat.isDirectory())
-    return "unknown";
-  return detectDirectoryType(input2);
-}
-function detectDirectoryType(dir) {
-  const project = readProjectJson(path4.join(dir, "project.json"));
-  const declared = typeof project?.type === "string" ? project.type.toLowerCase() : "";
-  if (declared === "scene" || declared === "video" || declared === "web") {
-    return declared;
-  }
-  const entryExt = path4.extname(typeof project?.file === "string" ? project.file : "").toLowerCase();
-  if (SCENE_ENTRY_EXTENSIONS.has(entryExt))
-    return "scene";
-  if (VIDEO_EXTENSIONS.has(entryExt))
-    return "video";
-  if (entryExt === ".html" || entryExt === ".htm")
-    return "web";
-  return detectFromDirectoryContents(dir);
-}
-function readProjectJson(file2) {
-  try {
-    return JSON.parse(fs6.readFileSync(file2, "utf8"));
-  } catch {
-    return void 0;
-  }
-}
-function detectFromDirectoryContents(dir) {
-  let entries;
-  try {
-    entries = fs6.readdirSync(dir);
-  } catch {
-    return "unknown";
-  }
-  let nested = [];
-  if (entries.some((e2) => e2.toLowerCase() === "files")) {
+// dist/core/experimental.js
+var experimental_exports = {};
+__export(experimental_exports, {
+  cleanupLaunchEntries: () => cleanupLaunchEntries,
+  disableExperimental: () => disableExperimental,
+  enableExperimental: () => enableExperimental,
+  markExperimentalDisabled: () => markExperimentalDisabled,
+  spawnServeDetached: () => spawnServeDetached
+});
+import { spawn as spawn2 } from "node:child_process";
+import { existsSync as existsSync2, readFileSync } from "node:fs";
+import path5 from "node:path";
+function spawnServeDetached(apiPort, cliJs) {
+  fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r2) => {
+    if (!r2.ok)
+      throw new Error("unhealthy");
+    return r2.json();
+  }).then((body) => {
+    const h = body;
+    if (h?.service !== "zcode-beautify" || (h.target ?? "zcode") !== target().id) {
+      throw new Error("foreign service");
+    }
+  }).catch(() => {
     try {
-      nested = fs6.readdirSync(path4.join(dir, "files")).map((e2) => path4.join("files", e2));
+      const childEnv = { ...process.env };
+      spawn2(process.execPath, [cliJs, "serve", "--detach", "--api-port", String(apiPort)], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        env: childEnv
+      }).unref();
     } catch {
     }
-  }
-  for (const name of [...entries, ...nested]) {
-    const lower = name.toLowerCase();
-    const ext = path4.extname(lower);
-    if (lower === "scene.pkg" || lower === "scene.json")
-      return "scene";
-    if (ext === ".html" || ext === ".htm")
-      return "web";
-    if (VIDEO_EXTENSIONS.has(ext))
-      return "video";
-  }
-  return "unknown";
+  });
 }
-var IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, SCENE_ENTRY_EXTENSIONS;
-var init_wallpaperType = __esm({
-  "dist/core/wallpaperType.js"() {
+async function enableExperimental() {
+  const cfg = ensureExperimentalGate();
+  cfg.experimental = {
+    enabled: true,
+    consentedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    consentVersion: VERSION
+  };
+  saveConfig(cfg);
+  const port = cfg.port ?? target().cdpPort;
+  const apiPort = cfg.apiPort ?? target().apiPort;
+  const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
+  const launchers = await repairLaunchers2({ port });
+  return { enabled: true, port, apiPort, launchers };
+}
+async function teardownLive() {
+  const cfg = loadConfig();
+  const port = cfg.port ?? target().cdpPort;
+  try {
+    const tokenFile = path5.join(dataDir(), "serve.token");
+    if (existsSync2(tokenFile)) {
+      const token = readFileSync(tokenFile, "utf8").trim();
+      const apiPort = cfg.apiPort ?? target().apiPort;
+      const res = await fetch(`http://127.0.0.1:${apiPort}/api/experimental/disable`, {
+        method: "POST",
+        headers: { "X-Beautify-Token": token },
+        signal: AbortSignal.timeout(6e3)
+      });
+      if (res.ok)
+        return { via: "service", windows: 0 };
+    }
+  } catch {
+  }
+  try {
+    const { resetZCode: resetZCode2 } = await Promise.resolve().then(() => (init_inject(), inject_exports));
+    for (const candidate of [port, ...fallbackCdpPorts()]) {
+      try {
+        const windows = await resetZCode2(candidate, { disable: true });
+        if (windows > 0)
+          return { via: "cdp", windows };
+      } catch {
+      }
+    }
+    return { via: "none", windows: 0 };
+  } catch {
+    return { via: "none", windows: 0 };
+  }
+}
+function markExperimentalDisabled() {
+  const cfg = loadConfig();
+  const port = cfg.port ?? target().cdpPort;
+  const apiPort = cfg.apiPort ?? target().apiPort;
+  cfg.experimental = { enabled: false };
+  saveConfig(cfg);
+  return { port, apiPort };
+}
+async function cleanupLaunchEntries(port) {
+  const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
+  return repairLaunchers2({ port, action: "remove" });
+}
+async function disableExperimental(opts = {}) {
+  const gate = markExperimentalDisabled();
+  const teardown = await teardownLive();
+  const launchers = opts.cleanLaunchers ?? true ? await cleanupLaunchEntries(gate.port) : void 0;
+  return { enabled: false, ...gate, launchers, teardown };
+}
+var init_experimental = __esm({
+  "dist/core/experimental.js"() {
     "use strict";
-    IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp"]);
-    VIDEO_EXTENSIONS = /* @__PURE__ */ new Set([".mp4", ".webm"]);
-    SCENE_ENTRY_EXTENSIONS = /* @__PURE__ */ new Set([".pkg", ".json"]);
+    init_launch();
+    init_target();
+    init_version();
   }
 });
 
 // dist/core/exec.js
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify2 } from "node:util";
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
 var execRaw, execFileP;
 var init_exec = __esm({
   "dist/core/exec.js"() {
     "use strict";
-    execRaw = promisify2(execFile2);
+    execRaw = promisify3(execFile3);
     execFileP = ((cmd, args, opts = {}) => execRaw(cmd, args, { windowsHide: true, ...opts }));
   }
 });
 
 // dist/core/dependencyCheck.js
-import fs7 from "node:fs";
+import fs9 from "node:fs";
 import { execFileSync as execFileSync2 } from "node:child_process";
-import path5 from "node:path";
+import path8 from "node:path";
 async function checkWallpaperEngine() {
   if (process.platform !== "win32") {
     return { ok: false, detail: "Wallpaper Engine is Windows-only" };
@@ -120292,7 +121332,7 @@ async function checkWallpaperEngine() {
   if (registry2)
     return { ok: true, path: registry2, detail: "detected via HKLM\\SOFTWARE\\Wallpaper Engine" };
   for (const candidate of steamLibraryCandidates()) {
-    const exe = path5.join(candidate, WE_EXE_RELATIVE);
+    const exe = path8.join(candidate, WE_EXE_RELATIVE);
     if (isFile(exe))
       return { ok: true, path: exe, detail: `detected via Steam library ${candidate}` };
   }
@@ -120322,6 +121362,33 @@ async function checkFfmpeg() {
   }
   return { ok: false, detail: "ffmpeg not found on PATH" + (override ? ` (env override ${override} not usable)` : "") };
 }
+function getInstallGuide(missing) {
+  const sections = [];
+  if (missing.includes("we")) {
+    sections.push([
+      "## Wallpaper Engine \u672A\u68C0\u6D4B\u5230",
+      "",
+      "1. \u901A\u8FC7 Steam \u5B89\u88C5 Wallpaper Engine\uFF08\u5546\u5E97\u9875\uFF1Ahttps://store.steampowered.com/app/431960\uFF09\u3002",
+      "2. \u542F\u52A8\u4E00\u6B21 Wallpaper Engine\uFF0C\u5E76\u81F3\u5C11\u8BA2\u9605\u4E00\u4E2A\u300C\u573A\u666F\uFF08Scene\uFF09\u300D\u7C7B\u578B\u58C1\u7EB8\u3002",
+      "3. \u5982\u679C\u5B89\u88C5\u5728\u975E\u9ED8\u8BA4 Steam \u5E93\uFF0C\u65E0\u9700\u989D\u5916\u914D\u7F6E\u2014\u2014\u63D2\u4EF6\u4F1A\u81EA\u52A8\u626B\u63CF\u6240\u6709 Steam \u5E93\u3002",
+      "4. \u5B89\u88C5\u5B8C\u6210\u540E\u70B9\u51FB\u300C\u5DF2\u5B89\u88C5\uFF0C\u91CD\u8BD5\u300D\u3002"
+    ].join("\n"));
+  }
+  if (missing.includes("ffmpeg")) {
+    sections.push([
+      "## ffmpeg \u672A\u68C0\u6D4B\u5230\uFF08\u9700\u8981 5.0 \u6216\u66F4\u9AD8\u7248\u672C\uFF09",
+      "",
+      "\u4EFB\u9009\u4E00\u79CD\u65B9\u5F0F\u5B89\u88C5\uFF1A",
+      "",
+      "- winget\uFF1A`winget install Gyan.FFmpeg`\uFF08\u63A8\u8350\uFF0C\u81EA\u52A8\u52A0\u5165 PATH\uFF09",
+      "- \u624B\u52A8\uFF1A\u4ECE https://www.gyan.dev/ffmpeg/builds/ \u4E0B\u8F7D essentials \u7248\uFF0C",
+      "  \u89E3\u538B\u540E\u628A bin \u76EE\u5F55\u52A0\u5165 PATH\uFF0C\u6216\u8BBE\u7F6E\u73AF\u5883\u53D8\u91CF ZCODE_BEAUTIFY_FFMPEG \u6307\u5411 ffmpeg.exe\u3002",
+      "",
+      "\u5B89\u88C5\u5B8C\u6210\u540E\u91CD\u542F\u7EC8\u7AEF\uFF08\u8BA9 PATH \u751F\u6548\uFF09\uFF0C\u518D\u70B9\u51FB\u300C\u5DF2\u5B89\u88C5\uFF0C\u91CD\u8BD5\u300D\u3002"
+    ].join("\n"));
+  }
+  return sections.join("\n\n");
+}
 async function findRunningWallpaperProcess() {
   try {
     const { stdout } = await exec("powershell", [
@@ -120342,7 +121409,7 @@ async function findWallpaperInRegistry() {
       const match = /\sInstallPath\s+REG_SZ\s+(.+)/.exec(stdout);
       const dir = match?.[1]?.trim();
       if (dir) {
-        const exe = path5.join(dir, "wallpaper64.exe");
+        const exe = path8.join(dir, "wallpaper64.exe");
         if (isFile(exe))
           return exe;
       }
@@ -120374,16 +121441,16 @@ function steamLibraryCandidates() {
     registrySteamPath(),
     "C:\\Program Files (x86)\\Steam",
     "C:\\Program Files\\Steam",
-    ...driveRoots().flatMap((d) => [path5.join(d, "Steam"), path5.join(d, "SteamLibrary")])
+    ...driveRoots().flatMap((d) => [path8.join(d, "Steam"), path8.join(d, "SteamLibrary")])
   ].filter((p2) => Boolean(p2));
   for (const root of vdfRoots) {
-    const vdf = path5.join(root, "steamapps", "libraryfolders.vdf");
+    const vdf = path8.join(root, "steamapps", "libraryfolders.vdf");
     for (const lib of parseVdfPaths(readFileSafe(vdf)))
       candidates.add(lib);
   }
   for (const drive of driveRoots()) {
     for (const name of ["SteamLibrary", "Steam", "Games\\Steam", "Program Files (x86)\\Steam"]) {
-      candidates.add(path5.join(drive, name));
+      candidates.add(path8.join(drive, name));
     }
   }
   return [...candidates];
@@ -120402,7 +121469,7 @@ function driveRoots() {
   for (let i2 = 67; i2 <= 90; i2++) {
     const drive = `${String.fromCharCode(i2)}:\\`;
     try {
-      fs7.accessSync(drive);
+      fs9.accessSync(drive);
       roots.push(drive);
     } catch {
     }
@@ -120435,14 +121502,14 @@ async function ffmpegVersion(exe) {
 }
 function isFile(p2) {
   try {
-    return fs7.statSync(p2).isFile();
+    return fs9.statSync(p2).isFile();
   } catch {
     return false;
   }
 }
 function readFileSafe(p2) {
   try {
-    return fs7.readFileSync(p2, "utf8");
+    return fs9.readFileSync(p2, "utf8");
   } catch {
     return "";
   }
@@ -120453,14 +121520,14 @@ var init_dependencyCheck = __esm({
     "use strict";
     init_exec();
     exec = execFileP;
-    WE_EXE_RELATIVE = path5.join("steamapps", "common", "wallpaper_engine", "wallpaper64.exe");
+    WE_EXE_RELATIVE = path8.join("steamapps", "common", "wallpaper_engine", "wallpaper64.exe");
     MIN_FFMPEG_MAJOR = 5;
     registrySteamPathProbed = false;
   }
 });
 
 // dist/core/weLauncher.js
-import { spawn as spawn2 } from "node:child_process";
+import { spawn as spawn3 } from "node:child_process";
 async function windowIsBlack(title) {
   const script = `
 Add-Type -AssemblyName System.Drawing
@@ -120504,7 +121571,7 @@ async function openSceneWindow(pkgPath, opts, wallpaperExePath) {
   const exe = wallpaperExePath ?? (await checkWallpaperEngine()).path;
   if (!exe)
     throw new SceneWindowError("Wallpaper Engine not found \u2014 cannot open scene window");
-  const proc = spawn2(exe, [
+  const proc = spawn3(exe, [
     "-control",
     "openWallpaper",
     "-file",
@@ -120657,9 +121724,9 @@ function Measure-Client([IntPtr]$h) {
 
 // dist/core/recorder.js
 import { mkdirSync, rmSync } from "node:fs";
-import path6 from "node:path";
+import path9 from "node:path";
 async function recordWindowBackground(handle, out, opts, ffmpeg) {
-  const seqDir = path6.join(path6.dirname(path6.resolve(out)), `seq-${process.pid}-${Date.now().toString(36)}`);
+  const seqDir = path9.join(path9.dirname(path9.resolve(out)), `seq-${process.pid}-${Date.now().toString(36)}`);
   mkdirSync(seqDir, { recursive: true });
   const frameMs = Math.max(20, Math.round(1e3 / opts.fps));
   const script = `
@@ -120720,7 +121787,7 @@ Write-Output $n`;
       "-framerate",
       String(opts.fps),
       "-i",
-      path6.join(seqDir, "f_%06d.png"),
+      path9.join(seqDir, "f_%06d.png"),
       "-vf",
       `scale=${outW}:${outH}`,
       "-c:v",
@@ -120742,7 +121809,7 @@ async function recordSceneWindow(handle, out, opts, ffmpegPath) {
   const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
   if (!ffmpeg)
     throw new RecordError("ffmpeg not found \u2014 cannot record scene window");
-  mkdirSync(path6.dirname(path6.resolve(out)), { recursive: true });
+  mkdirSync(path9.dirname(path9.resolve(out)), { recursive: true });
   await recordWindowBackground(handle, out, {
     duration: opts.duration,
     fps: opts.fps,
@@ -120812,7 +121879,7 @@ var init_recorder = __esm({
 
 // dist/core/loopProcessor.js
 import { mkdirSync as mkdirSync2 } from "node:fs";
-import path7 from "node:path";
+import path10 from "node:path";
 async function makeSeamless(input2, output2, fadeSec, ffmpegPath, options = {}) {
   const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
   if (!ffmpeg)
@@ -120840,7 +121907,7 @@ async function makeSeamless(input2, output2, fadeSec, ffmpegPath, options = {}) 
     `[xfade][main]concat=n=2:v=1:a=0[joined]`,
     `[joined]${scale}format=yuv420p[out]`
   ].join(";");
-  mkdirSync2(path7.dirname(path7.resolve(output2)), { recursive: true });
+  mkdirSync2(path10.dirname(path10.resolve(output2)), { recursive: true });
   await exec4(ffmpeg, [
     "-y",
     "-hide_banner",
@@ -120897,17 +121964,17 @@ var init_loopProcessor = __esm({
 
 // dist/core/cacheManager.js
 import crypto from "node:crypto";
-import fs8 from "node:fs";
-import path8 from "node:path";
+import fs10 from "node:fs";
+import path11 from "node:path";
 function scenesCacheRoot() {
-  return path8.join(dataDir(), "scenes");
+  return path11.join(dataDir(), "scenes");
 }
 function getCachePath(hash2) {
-  return path8.join(scenesCacheRoot(), hash2, "loop.mp4");
+  return path11.join(scenesCacheRoot(), hash2, "loop.mp4");
 }
 function hasCache(hash2) {
   try {
-    return fs8.statSync(getCachePath(hash2)).isFile() && fs8.statSync(getCachePath(hash2)).size > 0;
+    return fs10.statSync(getCachePath(hash2)).isFile() && fs10.statSync(getCachePath(hash2)).size > 0;
   } catch {
     return false;
   }
@@ -120922,7 +121989,7 @@ function touchCache(hash2) {
   const file2 = getCachePath(hash2);
   const now = /* @__PURE__ */ new Date();
   try {
-    fs8.utimesSync(file2, now, now);
+    fs10.utimesSync(file2, now, now);
   } catch {
   }
 }
@@ -120930,12 +121997,12 @@ function enforceLimit(maxBytes) {
   const root = scenesCacheRoot();
   let entries;
   try {
-    entries = fs8.readdirSync(root, { withFileTypes: true });
+    entries = fs10.readdirSync(root, { withFileTypes: true });
   } catch {
     return 0;
   }
   const sized = entries.filter((e2) => e2.isDirectory()).map((e2) => {
-    const dir = path8.join(root, e2.name);
+    const dir = path11.join(root, e2.name);
     try {
       return { dir, size: dirSize(dir), lru: lastUseMs(dir) };
     } catch {
@@ -120950,7 +122017,7 @@ function enforceLimit(maxBytes) {
     if (total <= maxBytes)
       break;
     try {
-      fs8.rmSync(entry.dir, { recursive: true, force: true });
+      fs10.rmSync(entry.dir, { recursive: true, force: true });
     } catch {
       continue;
     }
@@ -120968,13 +122035,13 @@ function normalizeOpts(opts) {
 function fingerprint(p2) {
   let stat;
   try {
-    stat = fs8.statSync(p2);
+    stat = fs10.statSync(p2);
   } catch {
     return `missing:${p2}`;
   }
   if (stat.isFile()) {
     const buf = crypto.createHash("md5");
-    buf.update(fs8.readFileSync(p2));
+    buf.update(fs10.readFileSync(p2));
     return `file:${stat.size}:${buf.digest("hex")}`;
   }
   if (stat.isDirectory()) {
@@ -120982,25 +122049,25 @@ function fingerprint(p2) {
     const walk = (abs, rel) => {
       let items;
       try {
-        items = fs8.readdirSync(abs, { withFileTypes: true });
+        items = fs10.readdirSync(abs, { withFileTypes: true });
       } catch {
         return;
       }
       for (const item of items) {
-        const childAbs = path8.join(abs, item.name);
+        const childAbs = path11.join(abs, item.name);
         const childRel = rel ? `${rel}/${item.name}` : item.name;
         if (item.isDirectory()) {
           walk(childAbs, childRel);
         } else if (item.isFile()) {
           let size = 0;
           try {
-            size = fs8.statSync(childAbs).size;
+            size = fs10.statSync(childAbs).size;
           } catch {
           }
           if (size <= 16 * 1024 * 1024) {
             let content = "";
             try {
-              content = crypto.createHash("md5").update(fs8.readFileSync(childAbs)).digest("hex");
+              content = crypto.createHash("md5").update(fs10.readFileSync(childAbs)).digest("hex");
             } catch {
               content = "unreadable";
             }
@@ -121026,17 +122093,17 @@ function dirSize(dir) {
   function walkSize(dir2) {
     let items;
     try {
-      items = fs8.readdirSync(dir2, { withFileTypes: true });
+      items = fs10.readdirSync(dir2, { withFileTypes: true });
     } catch {
       return;
     }
     for (const item of items) {
-      const child = path8.join(dir2, item.name);
+      const child = path11.join(dir2, item.name);
       if (item.isDirectory())
         walkSize(child);
       else if (item.isFile()) {
         try {
-          total += fs8.statSync(child).size;
+          total += fs10.statSync(child).size;
         } catch {
         }
       }
@@ -121051,18 +122118,18 @@ function lastUseMs(dir) {
   };
   let items;
   try {
-    items = fs8.readdirSync(dir, { withFileTypes: true });
+    items = fs10.readdirSync(dir, { withFileTypes: true });
   } catch {
     return 0;
   }
   for (const item of items) {
     try {
-      const st = fs8.statSync(path8.join(dir, item.name));
+      const st = fs10.statSync(path11.join(dir, item.name));
       consider(st);
       if (item.isDirectory()) {
-        for (const inner of fs8.readdirSync(path8.join(dir, item.name), { withFileTypes: true })) {
+        for (const inner of fs10.readdirSync(path11.join(dir, item.name), { withFileTypes: true })) {
           try {
-            consider(fs8.statSync(path8.join(dir, item.name, inner.name)));
+            consider(fs10.statSync(path11.join(dir, item.name, inner.name)));
           } catch {
           }
         }
@@ -121089,27 +122156,27 @@ __export(scenePipeline_exports, {
   importScene: () => importScene,
   resolveSceneInput: () => resolveSceneInput
 });
-import fs9 from "node:fs";
-import path9 from "node:path";
+import fs11 from "node:fs";
+import path12 from "node:path";
 function findVideoInDir(dir) {
   for (const subdir of ["", "files"]) {
-    const base = path9.join(dir, subdir);
+    const base = path12.join(dir, subdir);
     let entries;
     try {
-      entries = fs9.readdirSync(base);
+      entries = fs11.readdirSync(base);
     } catch {
       continue;
     }
     const hit = entries.find((e2) => /\.(mp4|webm)$/i.test(e2));
     if (hit)
-      return path9.join(base, hit);
+      return path12.join(base, hit);
   }
   return void 0;
 }
 function resolveSceneInput(input2) {
   let stat;
   try {
-    stat = fs9.statSync(input2);
+    stat = fs11.statSync(input2);
   } catch {
     return input2;
   }
@@ -121117,11 +122184,11 @@ function resolveSceneInput(input2) {
     return input2;
   if (input2.toLowerCase().endsWith(".pkg"))
     return input2;
-  let dir = path9.dirname(path9.resolve(input2));
+  let dir = path12.dirname(path12.resolve(input2));
   for (let hop = 0; hop < 4; hop++) {
-    if (fs9.existsSync(path9.join(dir, "project.json")))
+    if (fs11.existsSync(path12.join(dir, "project.json")))
       return dir;
-    const parent = path9.dirname(dir);
+    const parent = path12.dirname(dir);
     if (parent === dir)
       break;
     dir = parent;
@@ -121133,7 +122200,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   onProgress("detect", pkgPath);
   let type = detectWallpaperType(pkgPath);
   try {
-    if (type === "video" && fs9.statSync(pkgPath).isDirectory()) {
+    if (type === "video" && fs11.statSync(pkgPath).isDirectory()) {
       const videoFile = findVideoInDir(pkgPath);
       if (!videoFile)
         throw new SceneImportError(`No .mp4/.webm inside video wallpaper directory: ${pkgPath}`);
@@ -121166,7 +122233,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     fadeSec: opts.fadeSec
   });
   const loopPath = getCachePath(hash2);
-  const posterPath = path9.join(path9.dirname(loopPath), "poster.jpg");
+  const posterPath = path12.join(path12.dirname(loopPath), "poster.jpg");
   if (hasCache(hash2)) {
     onProgress("cache-hit", hash2);
     touchCache(hash2);
@@ -121189,8 +122256,8 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
     onProgress("saving", hash2);
-    fs9.mkdirSync(path9.dirname(loopPath), { recursive: true });
-    fs9.renameSync(tmpLoop, loopPath);
+    fs11.mkdirSync(path12.dirname(loopPath), { recursive: true });
+    fs11.renameSync(tmpLoop, loopPath);
     const blackness = await analyzeBlackness(loopPath, ffmpegPath);
     enforceLimit(opts.maxCacheBytes);
     onProgress("done", loopPath);
@@ -121198,16 +122265,16 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   }
   let pkgFile = pkgPath;
   try {
-    if (fs9.statSync(pkgPath).isDirectory()) {
+    if (fs11.statSync(pkgPath).isDirectory()) {
       let declared;
       try {
-        declared = JSON.parse(fs9.readFileSync(path9.join(pkgPath, "project.json"), "utf8")).file;
+        declared = JSON.parse(fs11.readFileSync(path12.join(pkgPath, "project.json"), "utf8")).file;
       } catch {
       }
-      const name = declared && /\.pkg$/i.test(declared) && fs9.existsSync(path9.join(pkgPath, declared)) ? declared : fs9.readdirSync(pkgPath).find((e2) => /\.pkg$/i.test(e2));
+      const name = declared && /\.pkg$/i.test(declared) && fs11.existsSync(path12.join(pkgPath, declared)) ? declared : fs11.readdirSync(pkgPath).find((e2) => /\.pkg$/i.test(e2));
       if (!name)
         throw new SceneImportError(`No scene.pkg inside: ${pkgPath}`);
-      pkgFile = path9.join(pkgPath, name);
+      pkgFile = path12.join(pkgPath, name);
     }
   } catch (err) {
     if (err instanceof SceneImportError)
@@ -121224,8 +122291,8 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
         throw new SceneWindowBlackError("\u7A97\u53E3\u6E32\u67D3\u672A\u9644\u7740(\u9884\u68C0\u5E27\u5168\u9ED1)");
       }
       onProgress("recording", `${opts.duration}s @ ${opts.fps}fps`);
-      const rawPath2 = path9.join(path9.dirname(loopPath), `raw-${Date.now()}.mp4`);
-      fs9.mkdirSync(path9.dirname(rawPath2), { recursive: true });
+      const rawPath2 = path12.join(path12.dirname(loopPath), `raw-${Date.now()}.mp4`);
+      fs11.mkdirSync(path12.dirname(rawPath2), { recursive: true });
       await recordSceneWindow(handle, rawPath2, { duration: opts.duration, fps: opts.fps, outWidth: opts.width, outHeight: opts.height }, ffmpegPath);
       return { rawPath: rawPath2 };
     } finally {
@@ -121246,7 +122313,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     if (black) {
       onProgress(`black-retry-${pass + 1}`, "reopen window");
       try {
-        fs9.rmSync(rawPath, { force: true });
+        fs11.rmSync(rawPath, { force: true });
       } catch {
       }
       await new Promise((r2) => setTimeout(r2, 3e3));
@@ -121255,7 +122322,7 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
   if (black) {
     try {
       if (rawPath)
-        fs9.rmSync(rawPath, { force: true });
+        fs11.rmSync(rawPath, { force: true });
     } catch {
     }
     throw new SceneImportError("\u5F55\u5236\u753B\u9762\u5168\u9ED1(\u5DF2\u81EA\u52A8\u91CD\u5F00\u7A97\u53E3\u91CD\u8BD5)\u2014\u2014\u8BF7\u7A0D\u5019\u91CD\u8BD5\u6216\u91CD\u542F Wallpaper Engine");
@@ -121267,15 +122334,15 @@ async function importScene(pkgPath, onProgress = () => void 0, options = {}, ffm
     onProgress("poster");
     await extractPoster(tmpLoop, posterPath, ffmpegPath);
     onProgress("saving", hash2);
-    fs9.mkdirSync(path9.dirname(loopPath), { recursive: true });
-    fs9.renameSync(tmpLoop, loopPath);
-    fs9.rmSync(rawPath, { force: true });
+    fs11.mkdirSync(path12.dirname(loopPath), { recursive: true });
+    fs11.renameSync(tmpLoop, loopPath);
+    fs11.rmSync(rawPath, { force: true });
     enforceLimit(opts.maxCacheBytes);
     onProgress("done", loopPath);
     return { loopPath, posterPath, hash: hash2, blackness: { blackFraction: black ? 1 : 0, meanLuma: 0, durationSec: opts.duration }, fromCache: false };
   } finally {
     try {
-      fs9.rmSync(rawPath, { force: true });
+      fs11.rmSync(rawPath, { force: true });
     } catch {
     }
   }
@@ -121284,7 +122351,7 @@ async function extractPoster(loopFile, posterPath, ffmpegPath) {
   const ffmpeg = ffmpegPath ?? (await checkFfmpeg()).path;
   if (!ffmpeg)
     throw new SceneImportError("ffmpeg not found");
-  fs9.mkdirSync(path9.dirname(path9.resolve(posterPath)), { recursive: true });
+  fs11.mkdirSync(path12.dirname(path12.resolve(posterPath)), { recursive: true });
   await execFileP(ffmpeg, [
     "-y",
     "-loglevel",
@@ -121336,293 +122403,166 @@ var init_scenePipeline = __esm({
   }
 });
 
-// dist/core/launchers.js
-var launchers_exports = {};
-__export(launchers_exports, {
-  DEFAULT_REGISTRY_KEYS: () => DEFAULT_REGISTRY_KEYS,
-  psScript: () => psScript,
-  repairLaunchers: () => repairLaunchers
+// dist/core/session.js
+var session_exports = {};
+__export(session_exports, {
+  MissingDependencyError: () => MissingDependencyError,
+  applyColorsOnly: () => applyColorsOnly,
+  applySceneWallpaper: () => applySceneWallpaper,
+  applyWallpaper: () => applyWallpaper,
+  baseConfig: () => baseConfig,
+  buildPayloadFromConfig: () => buildPayloadFromConfig,
+  getInstallGuide: () => getInstallGuide,
+  reapplyStored: () => reapplyStored,
+  resetAppearance: () => resetAppearance
 });
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify3 } from "node:util";
-function psScript(port, dryRun, registryKeys = DEFAULT_REGISTRY_KEYS, shortcutMatch = "*ZCode.exe", exeName = "ZCode.exe", action = "add") {
-  return `
-$ErrorActionPreference = 'Continue'
-# Without this, Chinese Windows error strings come back as mojibake through
-# Node's UTF-8 stdout decoding.
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$port = ${port}
-$dryRun = $${dryRun ? "true" : "false"}
-$mode = '${action}'
-$flag = ' --remote-debugging-port=' + $port
-$exeMatch = '${shortcutMatch.replace(/'/g, "''")}'
-$exeName = '${exeName.replace(/'/g, "''")}'
-$results = New-Object System.Collections.ArrayList
-
-function Add-Result($kind, $p, $before, $after, $status, $reason) {
-  [void]$results.Add([pscustomobject]@{
-    kind = $kind; path = $p; before = $before; after = $after
-    status = $status; reason = $reason
-  })
+import fs12 from "node:fs";
+import path13 from "node:path";
+async function reapplyStored() {
+  const config2 = mergedConfig();
+  return applyToZCode(config2, await buildPayloadFromConfig(config2));
 }
-
-# Strip any --remote-debugging-port=<digits> (any port, not just $port) and
-# the whitespace before it, so "app.exe --remote-debugging-port=9222" becomes
-# "app.exe" and quoted command strings stay intact.
-function Remove-Flag([string]$s) {
-  return ($s -replace '\\s*--remote-debugging-port=\\d+', '').Trim()
+async function applyWallpaper(imagePath, opts) {
+  const abs = path13.resolve(imagePath);
+  if (!fs12.existsSync(abs))
+    throw new Error(`Image not found: ${abs}`);
+  const kind = detectWallpaperType(abs);
+  if (kind === "scene" || kind === "video") {
+    const result = await applySceneWallpaper(abs, opts);
+    return { windows: result.windows, config: result.config };
+  }
+  const stored = loadConfig();
+  const config2 = { ...baseConfig(opts, stored), mediaType: "image", sceneHash: void 0 };
+  fs12.mkdirSync(dataDir(), { recursive: true });
+  const dest = path13.join(dataDir(), "wallpaper" + path13.extname(abs).toLowerCase());
+  if (dest !== abs)
+    fs12.copyFileSync(abs, dest);
+  const assets = await loadWallpaper(dest);
+  const payload = buildPayload(config2, assets, serveMediaToken());
+  saveConfig({ ...config2, wallpaperPath: dest });
+  const windows = await applyToZCode(config2, payload);
+  return { windows, config: config2 };
 }
-
-# --- shortcuts -------------------------------------------------------------
-$dirs = @(
-  (Join-Path $env:USERPROFILE 'Desktop'),
-  $(if ($env:OneDrive) { Join-Path $env:OneDrive 'Desktop' }),
-  (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'),
-  # Pinned taskbar shortcuts are plain .lnk files; start-menu search and most
-  # third-party launchers (Flow Launcher, PowerToys Run, \u2026) index the Start Menu
-  # copy, but users who pin the app read this one.
-  (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar'),
-  (Join-Path $env:PUBLIC 'Desktop'),
-  (Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs')
-)
-
-$lnks = @()
-foreach ($d in $dirs) {
-  if ($d -and (Test-Path -LiteralPath $d)) {
-    $lnks += @(Get-ChildItem -LiteralPath $d -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)
-  }
-}
-
-$wsh = New-Object -ComObject WScript.Shell
-foreach ($item in $lnks) {
-  try { $sc = $wsh.CreateShortcut($item.FullName) } catch { continue }
-  $target = [string]$sc.TargetPath
-  if ($target -notlike $exeMatch) { continue }
-
-  $before = [string]$sc.Arguments
-  if ($mode -eq 'add') {
-    if ($before -match 'remote-debugging-port') {
-      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
-      continue
-    }
-    $after = ($before.Trim() + $flag).Trim()
-  } else {
-    if ($before -notmatch 'remote-debugging-port') {
-      Add-Result 'shortcut' $item.FullName $before $before 'already-ok' $null
-      continue
-    }
-    $after = Remove-Flag $before
-  }
-  if ($dryRun) {
-    Add-Result 'shortcut' $item.FullName $before $after 'updated' 'dry-run'
-    continue
-  }
+function serveMediaToken() {
   try {
-    $sc.Arguments = $after
-    $sc.Save()
-    Add-Result 'shortcut' $item.FullName $before $after 'updated' $null
+    return fs12.readFileSync(path13.join(dataDir(), "serve.token"), "utf8").trim();
   } catch {
-    Add-Result 'shortcut' $item.FullName $before $after 'failed' $_.Exception.Message
+    return "";
   }
 }
-
-# --- HKCU protocol / shell handlers ----------------------------------------
-$keys = @(${registryKeys.map((k) => `'${k.replace(/'/g, "''")}'`).join(",")})
-
-foreach ($k in $keys) {
-  if (-not (Test-Path -LiteralPath $k)) { continue }
-  try {
-    $key = Get-Item -LiteralPath $k
-    $before = [string]$key.GetValue('')
-    if ($before -notmatch [regex]::Escape($exeName)) { continue }
-    if ($mode -eq 'add') {
-      if ($before -match 'remote-debugging-port') {
-        Add-Result 'registry' $k $before $before 'already-ok' $null
-        continue
-      }
-      # Insert the flag directly after the executable token, keeping any
-      # placeholders ("%1") and quoting untouched.
-      $after = $before -replace '^(\\s*("[^"]+"|\\S+))', ('$1' + $flag)
-    } else {
-      if ($before -notmatch 'remote-debugging-port') {
-        Add-Result 'registry' $k $before $before 'already-ok' $null
-        continue
-      }
-      $after = Remove-Flag $before
-    }
-    if ($dryRun) {
-      Add-Result 'registry' $k $before $after 'updated' 'dry-run'
-      continue
-    }
-    try {
-      # Get-Item hands back a read-only handle, so the default value can only be
-      # changed through a .NET key opened with write access.
-      $sub = $k -replace '^HKCU:\\\\', ''
-      $writable = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($sub, $true)
-      if (-not $writable) { throw 'cannot open the key for writing' }
-      $writable.SetValue('', $after, [Microsoft.Win32.RegistryValueKind]::String)
-      $writable.Close()
-      Add-Result 'registry' $k $before $after 'updated' $null
-    } catch {
-      Add-Result 'registry' $k $before $after 'failed' $_.Exception.Message
-    }
-  } catch {
-    Add-Result 'registry' $k '' '' 'failed' $_.Exception.Message
-  }
+async function applyColorsOnly(opts) {
+  const stored = loadConfig();
+  const config2 = baseConfig(opts, stored);
+  saveConfig(config2);
+  return applyToZCode(config2, await buildPayloadFromConfig(config2));
 }
-
-@($results) | ConvertTo-Json -Depth 4 -Compress
-`;
-}
-async function repairLaunchers(opts) {
-  const dryRun = opts.dryRun ?? false;
-  const action = opts.action ?? "add";
-  if (process.platform !== "win32") {
-    return {
-      supported: false,
-      dryRun,
-      fixes: [],
-      error: "launcher repair is only implemented for Windows; on other platforms edit your app shortcut manually"
-    };
-  }
-  const app = target();
-  const keys = opts.registryKeys ?? app.launcher.registryKeys;
-  const encoded = Buffer.from(psScript(opts.port, dryRun, keys, app.launcher.shortcutMatch, app.exeName, action), "utf16le").toString("base64");
-  try {
-    const { stdout } = await execFileAsync2("powershell", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { maxBuffer: 8 * 1024 * 1024, timeout: 12e4, windowsHide: true });
-    const trimmed = stdout.trim();
-    if (!trimmed)
-      return { supported: true, dryRun, fixes: [] };
-    const raw = JSON.parse(trimmed);
-    const list = Array.isArray(raw) ? raw : [raw];
-    return {
-      supported: true,
-      dryRun,
-      fixes: list.map((r2) => ({
-        kind: r2.kind === "registry" ? "registry" : "shortcut",
-        path: r2.path,
-        before: r2.before,
-        after: r2.after,
-        status: r2.status === "updated" || r2.status === "already-ok" ? r2.status : "failed",
-        reason: r2.reason ?? void 0
-      }))
-    };
-  } catch (err) {
-    return { supported: true, dryRun, fixes: [], error: err.message };
-  }
-}
-var execFileAsync2, DEFAULT_REGISTRY_KEYS;
-var init_launchers = __esm({
-  "dist/core/launchers.js"() {
-    "use strict";
-    init_target();
-    execFileAsync2 = promisify3(execFile3);
-    DEFAULT_REGISTRY_KEYS = [
-      "HKCU:\\Software\\Classes\\zcode\\shell\\open\\command",
-      "HKCU:\\Software\\Classes\\Directory\\shell\\ZCode.OpenInZCode\\command",
-      "HKCU:\\Software\\Classes\\Drive\\shell\\ZCode.OpenInZCode\\command"
-    ];
-  }
-});
-
-// dist/core/experimental.js
-var experimental_exports = {};
-__export(experimental_exports, {
-  disableExperimental: () => disableExperimental,
-  enableExperimental: () => enableExperimental,
-  spawnServeDetached: () => spawnServeDetached
-});
-import { spawn as spawn3 } from "node:child_process";
-import { existsSync as existsSync2, readFileSync } from "node:fs";
-import path11 from "node:path";
-function spawnServeDetached(apiPort, cliJs) {
-  fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1500) }).then((r2) => {
-    if (!r2.ok)
-      throw new Error("unhealthy");
-    return r2.json();
-  }).then((body) => {
-    const h = body;
-    if (h?.service !== "zcode-beautify" || (h.target ?? "zcode") !== target().id) {
-      throw new Error("foreign service");
-    }
-  }).catch(() => {
-    try {
-      const childEnv = { ...process.env };
-      spawn3(process.execPath, [cliJs, "serve", "--detach", "--api-port", String(apiPort)], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-        env: childEnv
-      }).unref();
-    } catch {
-    }
-  });
-}
-async function enableExperimental() {
-  const cfg = ensureExperimentalGate();
-  cfg.experimental = {
-    enabled: true,
-    consentedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    consentVersion: VERSION
+function baseConfig(opts, stored) {
+  return {
+    ...DEFAULT_CONFIG,
+    ...stored,
+    port: opts.port ?? stored.port ?? target().cdpPort,
+    blur: opts.blur ?? stored.blur ?? DEFAULT_CONFIG.blur,
+    dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
+    sidebarDim: opts.sidebarDim ?? stored.sidebarDim ?? DEFAULT_CONFIG.sidebarDim,
+    monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
+    wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
+    fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
+    // Partial bubble patches merge over the stored look so callers (MCP
+    // apply_options / the bubble command) can change one aspect — radius only,
+    // preset only — without re-sending (and resetting) the rest.
+    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
+    // Chat look merges the same way (masks + column width), then normalizes.
+    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook),
+    // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
+    // inside buildPayload where the image reference is resolved too.
+    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook),
+    // 会话底部加载图标 merges the same way (mode/image/spin/size).
+    chatLoadLook: normalizeChatLoadLook(opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook),
+    // 会话列表分页 merges the same way (initial/step/collapse).
+    listPaging: normalizeListPaging(opts.listPaging ? { ...stored.listPaging, ...opts.listPaging } : stored.listPaging),
+    // 设置按钮 merges the same way (mode/image/size).
+    fabLook: normalizeFabLook(opts.fabLook ? { ...stored.fabLook, ...opts.fabLook } : stored.fabLook)
   };
-  saveConfig(cfg);
-  const port = cfg.port ?? target().cdpPort;
-  const apiPort = cfg.apiPort ?? target().apiPort;
-  const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
-  const launchers = await repairLaunchers2({ port });
-  return { enabled: true, port, apiPort, launchers };
 }
-async function teardownLive() {
-  const cfg = loadConfig();
-  const port = cfg.port ?? target().cdpPort;
+async function applySceneWallpaper(scenePath, opts = {}) {
+  const abs = path13.resolve(scenePath);
+  const { importScene: importScene2 } = await Promise.resolve().then(() => (init_scenePipeline(), scenePipeline_exports));
+  const scene = await importScene2(abs, opts.onProgress ?? (() => void 0));
+  const stored = loadConfig();
+  const config2 = baseConfig(opts, stored);
+  const apiPort = stored.apiPort ?? target().apiPort;
+  const sceneVideoUrl = `http://127.0.0.1:${apiPort}/media/scene/${scene.hash}.mp4`;
+  const served = await isServeAlive(apiPort);
+  const next = {
+    ...config2,
+    mediaType: "video",
+    sceneHash: scene.hash,
+    wallpaperPath: scene.loopPath,
+    apiPort,
+    ...served ? { sceneVideoUrl } : {}
+  };
+  saveConfig(next);
+  if (!served) {
+    console.warn("scene loop stored, but serve is not running \u2014 applying the poster frame as a static wallpaper.\nRun `zcode-beautify serve --detach` and `refresh_theme` to enable motion.");
+    const assets = await loadWallpaper(scene.posterPath);
+    const payload = buildPayload({ ...next, sceneVideoUrl: void 0 }, assets, serveMediaToken());
+    const windows2 = await applyToZCode({ ...next, sceneVideoUrl: void 0 }, payload);
+    return { windows: windows2, config: next, scene, served: false };
+  }
+  const windows = await applyToZCode(next, await buildPayloadFromConfig(next));
+  return { windows, config: next, scene, served: true };
+}
+async function isServeAlive(apiPort) {
   try {
-    const tokenFile = path11.join(dataDir(), "serve.token");
-    if (existsSync2(tokenFile)) {
-      const token = readFileSync(tokenFile, "utf8").trim();
-      const apiPort = cfg.apiPort ?? target().apiPort;
-      const res = await fetch(`http://127.0.0.1:${apiPort}/api/experimental/disable`, {
-        method: "POST",
-        headers: { "X-Beautify-Token": token },
-        signal: AbortSignal.timeout(6e3)
-      });
-      if (res.ok)
-        return { via: "service", windows: 0 };
+    const res = await fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1200) });
+    const body = await res.json();
+    return body?.service === "zcode-beautify" && (body.target ?? "zcode") === target().id;
+  } catch {
+    return false;
+  }
+}
+async function resetAppearance(port) {
+  const stored = loadConfig();
+  await resetZCode(port ?? stored.port ?? DEFAULT_CONFIG.port);
+  saveConfig({ ...stored, wallpaperPath: void 0, mediaType: void 0, sceneHash: void 0, sceneVideoUrl: void 0 });
+  return 0;
+}
+async function buildPayloadFromConfig(config2) {
+  let assets;
+  if (config2.mediaType === "video" && config2.wallpaperPath && fs12.existsSync(config2.wallpaperPath)) {
+    const posterPath = path13.join(path13.dirname(config2.wallpaperPath), "poster.jpg");
+    if (fs12.existsSync(posterPath)) {
+      assets = await loadWallpaper(posterPath);
     }
-  } catch {
+    const apiPort = config2.apiPort ?? target().apiPort;
+    if (!config2.sceneVideoUrl && config2.sceneHash) {
+      config2 = { ...config2, sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${config2.sceneHash}.mp4` };
+    }
+    return buildPayload(config2, assets, serveMediaToken());
   }
-  try {
-    const windows = await resetZCode(port);
-    return { via: "cdp", windows };
-  } catch {
-    return { via: "none", windows: 0 };
+  if (config2.wallpaperPath && fs12.existsSync(config2.wallpaperPath)) {
+    assets = await loadWallpaper(config2.wallpaperPath);
   }
+  return buildPayload(config2, assets, serveMediaToken());
 }
-async function disableExperimental(opts = {}) {
-  const cfg = loadConfig();
-  const port = cfg.port ?? target().cdpPort;
-  const teardown = await teardownLive();
-  cfg.experimental = { enabled: false };
-  saveConfig(cfg);
-  let launchers;
-  if (opts.cleanLaunchers ?? true) {
-    const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
-    launchers = await repairLaunchers2({ port, action: "remove" });
-  }
-  return { enabled: false, port, apiPort: cfg.apiPort ?? target().apiPort, launchers, teardown };
+function mergedConfig() {
+  return { ...DEFAULT_CONFIG, ...loadConfig(), port: loadConfig().port ?? target().cdpPort };
 }
-var init_experimental = __esm({
-  "dist/core/experimental.js"() {
+var init_session = __esm({
+  "dist/core/session.js"() {
     "use strict";
-    init_launch();
     init_inject();
+    init_launch();
     init_target();
-    init_version();
+    init_wallpaperType();
+    init_scenePipeline();
+    init_dependencyCheck();
   }
 });
 
 // dist/mcp/server.js
-import { existsSync as existsSync3, statSync } from "node:fs";
-import path13 from "node:path";
+import fs13, { existsSync as existsSync3, statSync } from "node:fs";
+import path14 from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -121998,8 +122938,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path14, errorMaps, issueData } = params;
-  const fullPath = [...path14, ...issueData.path || []];
+  const { data, path: path15, errorMaps, issueData } = params;
+  const fullPath = [...path15, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -122114,11 +123054,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path14, key) {
+  constructor(parent, value, path15, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path14;
+    this._path = path15;
     this._key = key;
   }
   get path() {
@@ -126072,10 +127012,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path14) {
-  if (!path14)
+function getElementAtPath(obj, path15) {
+  if (!path15)
     return obj;
-  return path14.reduce((acc, key) => acc?.[key], obj);
+  return path15.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -126415,11 +127355,11 @@ function explicitlyAborted(x2, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path14, issues) {
+function prefixIssues(path15, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path14);
+    iss.path.unshift(path15);
     return iss;
   });
 }
@@ -126869,16 +127809,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path14 = []) => {
+  const processError = (error63, path15 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path14, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else {
-        const fullpath = [...path14, ...issue2.path];
+        const fullpath = [...path15, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -126917,17 +127857,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path14 = []) => {
+  const processError = (error63, path15 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path14, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path14, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
       } else {
-        const fullpath = [...path14, ...issue2.path];
+        const fullpath = [...path15, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -126966,8 +127906,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path14 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path14) {
+  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path15) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -142482,11 +143422,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path14) {
-  if (path14.length === 0) {
+function getDotPath(path15) {
+  if (path15.length === 0) {
     return "object root";
   }
-  return path14.reduce((acc, seg, index) => {
+  return path15.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -144713,13 +145653,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path14 = ref.slice(1).split("/").filter(Boolean);
-  if (path14.length === 0) {
+  const path15 = ref.slice(1).split("/").filter(Boolean);
+  if (path15.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path14[0] === defsKey) {
-    const key = path14[1] === void 0 ? void 0 : decodeJSONPointerSegment(path14[1]);
+  if (path15[0] === defsKey) {
+    const key = path15[1] === void 0 ? void 0 : decodeJSONPointerSegment(path15[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -150902,158 +151842,126 @@ var StdioServerTransport = class {
   }
 };
 
-// dist/core/session.js
-init_inject();
-init_launch();
-init_target();
-init_wallpaperType();
-init_scenePipeline();
-init_dependencyCheck();
-import fs10 from "node:fs";
-import path10 from "node:path";
-async function reapplyStored() {
-  const config2 = mergedConfig();
-  return applyToZCode(config2, await buildPayloadFromConfig(config2));
-}
-async function applyWallpaper(imagePath, opts) {
-  const abs = path10.resolve(imagePath);
-  if (!fs10.existsSync(abs))
-    throw new Error(`Image not found: ${abs}`);
-  const kind = detectWallpaperType(abs);
-  if (kind === "scene" || kind === "video") {
-    const result = await applySceneWallpaper(abs, opts);
-    return { windows: result.windows, config: result.config };
-  }
-  const stored = loadConfig();
-  const config2 = { ...baseConfig(opts, stored), mediaType: "image", sceneHash: void 0 };
-  fs10.mkdirSync(dataDir(), { recursive: true });
-  const dest = path10.join(dataDir(), "wallpaper" + path10.extname(abs).toLowerCase());
-  if (dest !== abs)
-    fs10.copyFileSync(abs, dest);
-  const assets = await loadWallpaper(dest);
-  const payload = buildPayload(config2, assets, serveMediaToken());
-  saveConfig({ ...config2, wallpaperPath: dest });
-  const windows = await applyToZCode(config2, payload);
-  return { windows, config: config2 };
-}
-function serveMediaToken() {
-  try {
-    return fs10.readFileSync(path10.join(dataDir(), "serve.token"), "utf8").trim();
-  } catch {
-    return "";
-  }
-}
-async function applyColorsOnly(opts) {
-  const stored = loadConfig();
-  const config2 = baseConfig(opts, stored);
-  saveConfig(config2);
-  return applyToZCode(config2, await buildPayloadFromConfig(config2));
-}
-function baseConfig(opts, stored) {
-  return {
-    ...DEFAULT_CONFIG,
-    ...stored,
-    port: opts.port ?? stored.port ?? target().cdpPort,
-    blur: opts.blur ?? stored.blur ?? DEFAULT_CONFIG.blur,
-    dim: opts.dim ?? stored.dim ?? DEFAULT_CONFIG.dim,
-    sidebarDim: opts.sidebarDim ?? stored.sidebarDim ?? DEFAULT_CONFIG.sidebarDim,
-    monet: opts.monet ?? stored.monet ?? DEFAULT_CONFIG.monet,
-    wallpaperVisible: opts.wallpaperVisible ?? stored.wallpaperVisible ?? DEFAULT_CONFIG.wallpaperVisible,
-    fit: opts.fit ?? stored.fit ?? DEFAULT_CONFIG.fit,
-    // Partial bubble patches merge over the stored look so callers (MCP
-    // apply_options / the bubble command) can change one aspect — radius only,
-    // preset only — without re-sending (and resetting) the rest.
-    bubbleLook: opts.bubbleLook ? { ...stored.bubbleLook, ...opts.bubbleLook } : stored.bubbleLook,
-    // Chat look merges the same way (masks + column width), then normalizes.
-    chatLook: normalizeChatLook(opts.chatLook ? { ...stored.chatLook, ...opts.chatLook } : stored.chatLook),
-    // 运行中图标 merges the same way (mode/image/spin/size), then normalizes
-    // inside buildPayload where the image reference is resolved too.
-    taskSpinnerLook: normalizeTaskSpinnerLook(opts.taskSpinnerLook ? { ...stored.taskSpinnerLook, ...opts.taskSpinnerLook } : stored.taskSpinnerLook),
-    // 会话底部加载图标 merges the same way (mode/image/spin/size).
-    chatLoadLook: normalizeChatLoadLook(opts.chatLoadLook ? { ...stored.chatLoadLook, ...opts.chatLoadLook } : stored.chatLoadLook),
-    // 会话列表分页 merges the same way (initial/step/collapse).
-    listPaging: normalizeListPaging(opts.listPaging ? { ...stored.listPaging, ...opts.listPaging } : stored.listPaging),
-    // 设置按钮 merges the same way (mode/image/size).
-    fabLook: normalizeFabLook(opts.fabLook ? { ...stored.fabLook, ...opts.fabLook } : stored.fabLook)
-  };
-}
-async function applySceneWallpaper(scenePath, opts = {}) {
-  const abs = path10.resolve(scenePath);
-  const { importScene: importScene2 } = await Promise.resolve().then(() => (init_scenePipeline(), scenePipeline_exports));
-  const scene = await importScene2(abs, opts.onProgress ?? (() => void 0));
-  const stored = loadConfig();
-  const config2 = baseConfig(opts, stored);
-  const apiPort = stored.apiPort ?? target().apiPort;
-  const sceneVideoUrl = `http://127.0.0.1:${apiPort}/media/scene/${scene.hash}.mp4`;
-  const served = await isServeAlive(apiPort);
-  const next = {
-    ...config2,
-    mediaType: "video",
-    sceneHash: scene.hash,
-    wallpaperPath: scene.loopPath,
-    apiPort,
-    ...served ? { sceneVideoUrl } : {}
-  };
-  saveConfig(next);
-  if (!served) {
-    console.warn("scene loop stored, but serve is not running \u2014 applying the poster frame as a static wallpaper.\nRun `zcode-beautify serve --detach` and `refresh_theme` to enable motion.");
-    const assets = await loadWallpaper(scene.posterPath);
-    const payload = buildPayload({ ...next, sceneVideoUrl: void 0 }, assets, serveMediaToken());
-    const windows2 = await applyToZCode({ ...next, sceneVideoUrl: void 0 }, payload);
-    return { windows: windows2, config: next, scene, served: false };
-  }
-  const windows = await applyToZCode(next, await buildPayloadFromConfig(next));
-  return { windows, config: next, scene, served: true };
-}
-async function isServeAlive(apiPort) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${apiPort}/api/health`, { signal: AbortSignal.timeout(1200) });
-    const body = await res.json();
-    return body?.service === "zcode-beautify" && (body.target ?? "zcode") === target().id;
-  } catch {
-    return false;
-  }
-}
-async function resetAppearance(port) {
-  const stored = loadConfig();
-  await resetZCode(port ?? stored.port ?? DEFAULT_CONFIG.port);
-  saveConfig({ ...stored, wallpaperPath: void 0, mediaType: void 0, sceneHash: void 0, sceneVideoUrl: void 0 });
-  return 0;
-}
-async function buildPayloadFromConfig(config2) {
-  let assets;
-  if (config2.mediaType === "video" && config2.wallpaperPath && fs10.existsSync(config2.wallpaperPath)) {
-    const posterPath = path10.join(path10.dirname(config2.wallpaperPath), "poster.jpg");
-    if (fs10.existsSync(posterPath)) {
-      assets = await loadWallpaper(posterPath);
-    }
-    const apiPort = config2.apiPort ?? target().apiPort;
-    if (!config2.sceneVideoUrl && config2.sceneHash) {
-      config2 = { ...config2, sceneVideoUrl: `http://127.0.0.1:${apiPort}/media/scene/${config2.sceneHash}.mp4` };
-    }
-    return buildPayload(config2, assets, serveMediaToken());
-  }
-  if (config2.wallpaperPath && fs10.existsSync(config2.wallpaperPath)) {
-    assets = await loadWallpaper(config2.wallpaperPath);
-  }
-  return buildPayload(config2, assets, serveMediaToken());
-}
-function mergedConfig() {
-  return { ...DEFAULT_CONFIG, ...loadConfig(), port: loadConfig().port ?? target().cdpPort };
-}
-
 // dist/mcp/server.js
 init_wallpaperType();
 init_launch();
 init_target();
-init_inject();
 init_experimental();
+
+// dist/core/pluginGate.js
+init_target();
+import fs7 from "node:fs";
+import os2 from "node:os";
+import path6 from "node:path";
+var PLUGIN_NAMES = ["zcode-beautify", "zcode-beautify-workbuddy"];
+var HOST_CONFIG_ENV = {
+  zcode: "ZCODE_BEAUTIFY_HOST_CONFIG",
+  workbuddy: "WORKBUDDY_BEAUTIFY_HOST_CONFIG"
+};
+function readJson(file2) {
+  try {
+    return JSON.parse(fs7.readFileSync(file2, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function enabledPluginsMap(raw, targetId) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    return void 0;
+  const record2 = raw;
+  const plugins = record2.plugins && typeof record2.plugins === "object" && !Array.isArray(record2.plugins) ? record2.plugins : void 0;
+  const maps = targetId === "workbuddy" ? [record2.enabledPlugins, plugins?.enabledPlugins] : [plugins?.enabledPlugins, record2.enabledPlugins];
+  for (const map2 of maps) {
+    if (map2 && typeof map2 === "object" && !Array.isArray(map2)) {
+      return map2;
+    }
+  }
+  return void 0;
+}
+function matchingValues(map2) {
+  if (!map2)
+    return [];
+  const values = [];
+  for (const [id, value] of Object.entries(map2)) {
+    if (typeof value !== "boolean")
+      continue;
+    const name = id.split("@", 1)[0];
+    if (PLUGIN_NAMES.includes(name))
+      values.push(value);
+  }
+  return values;
+}
+function readScope(file2, scope, targetId) {
+  const values = matchingValues(enabledPluginsMap(readJson(file2), targetId));
+  return values.length ? { file: file2, scope, values } : void 0;
+}
+function userConfigPath(targetId, home, env) {
+  const override = env[HOST_CONFIG_ENV[targetId]]?.trim();
+  if (override)
+    return path6.resolve(override);
+  return targetId === "workbuddy" ? path6.join(home, ".workbuddy", "settings.json") : path6.join(home, ".zcode", "cli", "config.json");
+}
+function workspaceConfigPath(workingDirectory) {
+  let dir = path6.resolve(workingDirectory);
+  for (; ; ) {
+    const candidate = path6.join(dir, ".zcode", "config.json");
+    try {
+      if (fs7.statSync(candidate).isFile())
+        return candidate;
+    } catch {
+    }
+    const parent = path6.dirname(dir);
+    if (parent === dir)
+      return void 0;
+    dir = parent;
+  }
+}
+function samePath(a2, b) {
+  const na = path6.resolve(a2);
+  const nb = path6.resolve(b);
+  return process.platform === "win32" ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+function hostPluginState(options = {}) {
+  const targetId = options.targetId ?? target().id;
+  const home = options.home ?? os2.homedir();
+  const env = options.env ?? process.env;
+  const cwd = options.workingDirectory ?? process.cwd();
+  const userFile = userConfigPath(targetId, home, env);
+  const found = [];
+  const user = readScope(userFile, "user", targetId);
+  if (user)
+    found.push(user);
+  if (targetId === "zcode") {
+    const workspace = workspaceConfigPath(cwd);
+    if (workspace && !samePath(workspace, userFile)) {
+      const scope = readScope(workspace, "workspace", targetId);
+      if (scope)
+        found.push(scope);
+    }
+  }
+  if (!found.length)
+    return { known: false, enabled: true };
+  const userValues = found.filter((f2) => f2.scope === "user").flatMap((f2) => f2.values);
+  const workspaceValues = found.filter((f2) => f2.scope === "workspace").flatMap((f2) => f2.values);
+  const userEnabled = userValues.includes(true) ? true : userValues.includes(false) ? false : void 0;
+  const workspaceEnabled = workspaceValues.includes(true) ? true : workspaceValues.includes(false) ? false : void 0;
+  if (userEnabled === false) {
+    return { known: true, enabled: false, source: found.find((f2) => f2.scope === "user")?.file };
+  }
+  if (workspaceEnabled === false) {
+    return { known: true, enabled: false, source: found.find((f2) => f2.scope === "workspace")?.file };
+  }
+  if (userEnabled === true || workspaceEnabled === true) {
+    return { known: true, enabled: true, source: (found.find((f2) => f2.values.includes(true)) ?? found[0]).file };
+  }
+  return { known: false, enabled: true };
+}
 
 // dist/core/bubbleStudio.js
 init_launch();
-init_inject();
-import fs11 from "node:fs";
-import path12 from "node:path";
+init_bubbleLook();
+import fs8 from "node:fs";
+import path7 from "node:path";
 var BUBBLE_STUDIO_URI = "ui://zcode-beautify/bubble-studio.html";
 var BUBBLE_STUDIO_SURFACE = "bubble-studio";
 var BUILTIN_NAMES = {
@@ -151074,11 +151982,11 @@ function builtinBubbleRecipes() {
 }
 var MAX_SAVED_RECIPES = 50;
 function recipesFile() {
-  return path12.join(dataDir(), "bubble-recipes.json");
+  return path7.join(dataDir(), "bubble-recipes.json");
 }
 function readSaved() {
   try {
-    const parsed = JSON.parse(fs11.readFileSync(recipesFile(), "utf8"));
+    const parsed = JSON.parse(fs8.readFileSync(recipesFile(), "utf8"));
     if (!Array.isArray(parsed?.recipes))
       return [];
     return parsed.recipes.filter((r2) => r2 && typeof r2.id === "string" && typeof r2.name === "string");
@@ -151087,9 +151995,9 @@ function readSaved() {
   }
 }
 function writeSaved(recipes) {
-  fs11.mkdirSync(dataDir(), { recursive: true });
+  fs8.mkdirSync(dataDir(), { recursive: true });
   const file2 = { version: 1, recipes };
-  fs11.writeFileSync(recipesFile(), JSON.stringify(file2, null, 2));
+  fs8.writeFileSync(recipesFile(), JSON.stringify(file2, null, 2));
 }
 function lookEquals(a2, b) {
   return a2.preset === b.preset && a2.tint === b.tint && a2.radius === b.radius && a2.width === b.width && a2.align === b.align && (a2.customCss ?? "") === (b.customCss ?? "");
@@ -151556,22 +152464,63 @@ init_version();
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
 delete process.env.WORKBUDDY_BEAUTIFY_DATA_DIR;
 var absoluteExisting = (p2) => {
-  if (!path13.isAbsolute(p2))
+  if (!path14.isAbsolute(p2))
     throw new Error(`\u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84: ${p2}`);
   if (!existsSync3(p2))
     throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${p2}`);
   return p2;
 };
+var loadSession = () => Promise.resolve().then(() => (init_session(), session_exports));
 function cliJsPath() {
-  const serverFile = path13.resolve(process.argv[1] ?? "");
-  const cliJs = path13.join(path13.dirname(serverFile), "..", "cli.js");
-  return path13.basename(serverFile) === "server.js" && existsSync3(cliJs) ? cliJs : null;
+  const serverFile = path14.resolve(process.argv[1] ?? "");
+  const cliJs = path14.join(path14.dirname(serverFile), "..", "cli.js");
+  return path14.basename(serverFile) === "server.js" && existsSync3(cliJs) ? cliJs : null;
+}
+var LAUNCHER_CHECK_INTERVAL_MS = 10 * 6e4;
+function launcherCheckStamp() {
+  return path14.join(dataDir(), "launcher-check.stamp");
+}
+function claimLauncherCheck() {
+  const stamp = launcherCheckStamp();
+  try {
+    const st = statSync(stamp);
+    let fresh = Date.now() - st.mtimeMs < LAUNCHER_CHECK_INTERVAL_MS;
+    try {
+      const [stampVersion] = fs13.readFileSync(stamp, "utf8").trim().split(/\s+/);
+      if (stampVersion !== VERSION)
+        fresh = false;
+    } catch {
+      fresh = false;
+    }
+    if (fresh)
+      return false;
+  } catch {
+  }
+  try {
+    fs13.mkdirSync(dataDir(), { recursive: true });
+    fs13.rmSync(stamp, { force: true });
+    fs13.writeFileSync(stamp, `${VERSION} ${Date.now()}`, { flag: "wx" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function releaseLauncherCheck() {
+  try {
+    fs13.rmSync(launcherCheckStamp(), { force: true });
+  } catch {
+  }
 }
 function bootstrapServe() {
   try {
     const cliJs = cliJsPath();
     if (!cliJs)
       return;
+    const host = hostPluginState();
+    if (host.known && !host.enabled) {
+      console.error(`beautify: plugin disabled in ${target().appName}'s plugin manager \u2014 nothing started`);
+      return;
+    }
     const cfg = ensureExperimentalGate();
     if (!cfg.experimental?.enabled) {
       console.error("beautify: experimental CDP injection is disabled \u2014 nothing started (enable_experimental, or `cli.js enable`, opts in)");
@@ -151579,8 +152528,11 @@ function bootstrapServe() {
     }
     const apiPort = cfg.apiPort ?? target().apiPort;
     spawnServeDetached(apiPort, cliJs);
+    if (!claimLauncherCheck())
+      return;
     Promise.resolve().then(() => (init_launchers(), launchers_exports)).then((m) => m.repairLaunchers({ port: loadConfig().port ?? target().cdpPort }).then((report) => {
       if (report.error) {
+        releaseLauncherCheck();
         console.error(`launcher check failed: ${report.error}`);
         return;
       }
@@ -151590,16 +152542,40 @@ function bootstrapServe() {
         for (const f2 of updated)
           console.error(`  ${f2.path}`);
       }
-    })).catch(() => void 0);
+    })).catch(() => releaseLauncherCheck());
   } catch {
   }
 }
 bootstrapServe();
+function watchHostReenable() {
+  const timer = setInterval(() => {
+    try {
+      const host = hostPluginState();
+      if (host.known && !host.enabled)
+        return;
+      if (!experimentalEnabled(loadConfig()))
+        return;
+      bootstrapServe();
+    } catch {
+    }
+  }, 5e3);
+  timer.unref?.();
+}
+watchHostReenable();
 function disabledNotice() {
   return {
     content: [{
       type: "text",
       text: "Experimental CDP injection is disabled (default since 0.6.0) \u2014 nothing was changed.\nTo opt in, call `enable_experimental` once: it records consent, adds --remote-debugging-port to the client's launch entries and starts the local service (see the README security notes for what that exposes).\n`disable_experimental` undoes all of it, including stripping the flag from the launch entries again."
+    }]
+  };
+}
+function hostDisabledNotice() {
+  return {
+    content: [{
+      type: "text",
+      text: `The plugin is disabled in ${APP}'s plugin manager \u2014 nothing was changed.
+Re-enable zcode-beautify there (then restart the client) before using its tools.`
     }]
   };
 }
@@ -151615,7 +152591,13 @@ server.registerTool = ((name, meta3, handler) => {
     title: typeof meta3.title === "string" ? meta3.title.replace(/ZCode/g, APP) : meta3.title,
     description: typeof meta3.description === "string" ? meta3.description.replace(/ZCode/g, APP) : meta3.description
   };
-  return rawRegister(name, branded, handler);
+  const guarded = name === "beautify_status" || name === "disable_experimental" ? handler : async (...args) => {
+    const host = hostPluginState();
+    if (host.known && !host.enabled)
+      return hostDisabledNotice();
+    return handler(...args);
+  };
+  return rawRegister(name, branded, guarded);
 });
 var TOOL_NAMES = [
   "set_background",
@@ -151652,7 +152634,8 @@ server.registerTool("set_background", {
       return disabledNotice();
     const abs = absoluteExisting(image_path);
     const kind = detectWallpaperType(abs);
-    const { windows } = kind === "scene" || kind === "video" ? await applySceneWallpaper(abs, { blur, dim }) : await applyWallpaper(abs, { blur, dim });
+    const { applySceneWallpaper: applySceneWallpaper2, applyWallpaper: applyWallpaper2 } = await loadSession();
+    const { windows } = kind === "scene" || kind === "video" ? await applySceneWallpaper2(abs, { blur, dim }) : await applyWallpaper2(abs, { blur, dim });
     return {
       content: [{
         type: "text",
@@ -151677,7 +152660,8 @@ server.registerTool("import_scene_wallpaper", {
       return disabledNotice();
     const abs = absoluteExisting(scenePath);
     const stages = [];
-    const { windows, served, scene } = await applySceneWallpaper(abs, {
+    const { applySceneWallpaper: applySceneWallpaper2 } = await loadSession();
+    const { windows, served, scene } = await applySceneWallpaper2(abs, {
       blur,
       dim,
       onProgress: (stage) => {
@@ -151735,8 +152719,9 @@ server.registerTool("apply_options", {
     chat_drag_resize: external_exports.boolean().optional().describe("Drag handles on both edges of the conversation column (\u4E24\u4FA7\u62D6\u62FD\u8C03\u5BBD): true mounts two hidden vertical strips \u2014 hover shows an accent line, dragging resizes the column width symmetrically, double-clicking a strip resets to the tier setting. The dragged width persists locally and outranks chat_width_cap_rem; false removes the strips"),
     chat_session_hover: external_exports.boolean().optional().describe("\u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: true shows a preview card when the mouse rests on a sidebar session row, listing that conversation's real user prompts (oldest \u2192 newest, newest bold, served from ZCode's local session db by the beautify daemon; ZCode's own workspace hover card is hidden while on); false restores stock"),
     chat_session_hover_side: external_exports.boolean().optional().describe("\u4FA7\u680F\u6807\u9898\u60AC\u505C: whether the LEFT task-list session rows trigger the \u4F1A\u8BDD\u6982\u89C8 hover card (true, default); false = only the conversation's turn ticks (\u5BF9\u8BDD\u6982\u8981\u6807\u793A) open it and the sidebar keeps ZCode's own workspace hover card. Only meaningful with chat_session_hover on"),
-    chat_session_hover_max: external_exports.number().min(1).max(60).optional().describe("\u4F1A\u8BDD\u6982\u89C8\u5361\u6700\u591A\u663E\u793A\u51E0\u6761\u63D0\u95EE (1-60, default 10): the card grows up to this many visible rows; excess prompts live in the card's scrollable list (auto-landed on the newest). Only meaningful with chat_session_hover on"),
+    chat_session_hover_max: external_exports.number().min(1).max(60).optional().describe("\u4F1A\u8BDD\u6982\u89C8\u5361\u53EF\u89C1\u884C\u6570 (1-60, default 10): the card window grows up to this many visible rows; ALL prompts stay in the scrollable list (auto-landed on the newest \u2014 scroll up for older questions), never a data cap. Only meaningful with chat_session_hover on"),
     chat_composer_fade: external_exports.number().min(0).max(100).optional().describe("\u8F93\u5165\u6846\u900F\u660E\u5EA6: 0 = stock composer background, 1-100 fades the chat input box's paint toward transparent so the wallpaper shows through (text and border untouched)"),
+    chat_title_cites: external_exports.boolean().optional().describe("\u6807\u9898\u5F15\u7528\u4E0E goal \u6807\u8BB0: sidebar session titles that ZCode auto-generates from a message containing a referenced file currently show the raw Markdown ([file.lua](./path/file.lua)); true (default) renders them like the message bubble \u2014 the file icon plus the file name as an inline chip \u2014 and also converts skill/session/plugin/command mention tokens. Sessions started with /goal get the goal chip put back in front of their generated title (read from ZCode's session db by the serve daemon; hover shows the goal status). false keeps the raw Markdown and no goal marker"),
     chat_loading_icon: external_exports.object({
       mode: external_exports.enum(["default", "classic", "image"]).optional().describe("\u4F1A\u8BDD\u5E95\u90E8\u52A0\u8F7D\u56FE\u6807: default = ZCode 3.18's stock brand-colored orbit glyph, classic = the pre-3.18 3\xD73 pixel-wave dots, image = a user picture/GIF"),
       image_path: external_exports.string().optional().describe("Absolute path of the image/GIF to paint over the loading icon (resolved serve-side; required when mode = image)"),
@@ -151754,13 +152739,13 @@ server.registerTool("apply_options", {
       size: external_exports.number().min(20).max(64).optional().describe("Ball diameter in px (stock 34)")
     }).optional().describe("Panel-opener button look; omitted fields keep their current value")
   }
-}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, list_collapse_all, fab }) => {
+}, async ({ blur, dim, sidebar_dim, monet, wallpaper_visible, fit, bubble, spinner, chat_width_cap_rem, chat_width_inset_rem, chat_hide_elapsed_decimal, chat_drag_resize, chat_session_hover, chat_session_hover_side, chat_session_hover_max, chat_composer_fade, chat_title_cites, chat_loading_icon, list_initial, list_step, list_collapse, list_show_total, list_collapse_all, fab }) => {
   try {
     if (!experimentalEnabled(loadConfig()))
       return disabledNotice();
     const bubbleLook = bubble === void 0 ? void 0 : bubbleLookPatchFromTool(bubble);
     const taskSpinnerLook = spinner === void 0 ? void 0 : Object.fromEntries(Object.entries(spinner).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k === "unread_image_path" ? "unreadImage" : k === "error_image_path" ? "errorImage" : k, v]));
-    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 && chat_hide_elapsed_decimal === void 0 && chat_drag_resize === void 0 && chat_composer_fade === void 0 && chat_session_hover === void 0 && chat_session_hover_side === void 0 && chat_session_hover_max === void 0 ? void 0 : {
+    const chatLook = chat_width_cap_rem === void 0 && chat_width_inset_rem === void 0 && chat_hide_elapsed_decimal === void 0 && chat_drag_resize === void 0 && chat_composer_fade === void 0 && chat_title_cites === void 0 && chat_session_hover === void 0 && chat_session_hover_side === void 0 && chat_session_hover_max === void 0 ? void 0 : {
       ...chat_width_cap_rem !== void 0 ? { widthCapRem: chat_width_cap_rem } : {},
       ...chat_width_inset_rem !== void 0 ? { widthInsetRem: chat_width_inset_rem } : {},
       ...chat_hide_elapsed_decimal !== void 0 ? { hideElapsedDecimal: chat_hide_elapsed_decimal ? 1 : 0 } : {},
@@ -151768,7 +152753,8 @@ server.registerTool("apply_options", {
       ...chat_session_hover !== void 0 ? { sessionHover: chat_session_hover ? 1 : 0 } : {},
       ...chat_session_hover_side !== void 0 ? { sessionHoverSide: chat_session_hover_side ? 1 : 0 } : {},
       ...chat_session_hover_max !== void 0 ? { sessionHoverMax: chat_session_hover_max } : {},
-      ...chat_composer_fade !== void 0 ? { composerFade: chat_composer_fade } : {}
+      ...chat_composer_fade !== void 0 ? { composerFade: chat_composer_fade } : {},
+      ...chat_title_cites !== void 0 ? { titleCites: chat_title_cites ? 1 : 0 } : {}
     };
     const chatLoadLook = chat_loading_icon === void 0 ? void 0 : Object.fromEntries(Object.entries(chat_loading_icon).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k, v]));
     const listPaging = list_initial === void 0 && list_step === void 0 && list_collapse === void 0 && list_show_total === void 0 && list_collapse_all === void 0 ? void 0 : {
@@ -151779,7 +152765,8 @@ server.registerTool("apply_options", {
       ...list_collapse_all !== void 0 ? { collapseAll: list_collapse_all ? 1 : 0 } : {}
     };
     const fabLook = fab === void 0 ? void 0 : Object.fromEntries(Object.entries(fab).filter(([, v]) => v !== void 0).map(([k, v]) => [k === "image_path" ? "image" : k, v]));
-    const windows = await applyColorsOnly({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook, listPaging, fabLook });
+    const { applyColorsOnly: applyColorsOnly2 } = await loadSession();
+    const windows = await applyColorsOnly2({ blur, dim, sidebarDim: sidebar_dim, monet, wallpaperVisible: wallpaper_visible, fit, bubbleLook, taskSpinnerLook, chatLook, chatLoadLook, listPaging, fabLook });
     return {
       content: [{ type: "text", text: `Appearance updated in ${windows} window(s).` }],
       ...bubble !== void 0 ? { _meta: bubbleStudioResultMeta() } : {}
@@ -151844,7 +152831,8 @@ server.registerTool("refresh_theme", {
   try {
     if (!experimentalEnabled(loadConfig()))
       return disabledNotice();
-    const windows = await reapplyStored();
+    const { reapplyStored: reapplyStored2 } = await loadSession();
+    const windows = await reapplyStored2();
     return { content: [{ type: "text", text: `Theme re-injected into ${windows} window(s).` }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
@@ -151856,7 +152844,8 @@ server.registerTool("reset_appearance", {
   inputSchema: {}
 }, async () => {
   try {
-    await resetAppearance();
+    const { resetAppearance: resetAppearance2 } = await loadSession();
+    await resetAppearance2();
     return { content: [{ type: "text", text: "Appearance restored to default." }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Failed: ${err.message}` }], isError: true };
@@ -151944,7 +152933,7 @@ server.registerTool("repair_launchers", {
 }, async ({ action, dry_run }) => {
   try {
     const mode = action ?? "add";
-    const port = loadConfig().port ?? DEFAULT_CONFIG.port;
+    const port = loadConfig().port ?? target().cdpPort;
     const { repairLaunchers: repairLaunchers2 } = await Promise.resolve().then(() => (init_launchers(), launchers_exports));
     const report = await repairLaunchers2({ port, action: mode, dryRun: dry_run });
     if (report.error) {

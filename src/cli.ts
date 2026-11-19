@@ -82,7 +82,10 @@ async function main(): Promise<void> {
     return;
   }
   const app = setTarget(requested);
-  const port = Number(flag("--port") ?? app.cdpPort);
+  // --port wins; otherwise the stored setting, then the target default. The
+  // MCP bootstrap spawns `serve` with only --api-port, so ignoring the saved
+  // port here silently redirected every custom-port install to 9222.
+  const port = Number(flag("--port") ?? loadConfig().port ?? app.cdpPort);
 
   // One-time gate migration for pre-0.6.0 configs: a config with real prior
   // use inherits enabled=true (marked `migrated`); fresh installs stay off.

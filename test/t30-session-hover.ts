@@ -284,9 +284,10 @@ const fixtureSession = {
   check("side=0: turn tick still opens the card", !!w.document.getElementById("zcode-beautify-hover-card"));
 }
 
-// C1d: sessionHoverMax lists EXACTLY the newest N prompts — a short,
-// naturally-ending list; older prompts are simply not rendered, and no
-// scroll-capping inline styles are involved anymore.
+// C1d: sessionHoverMax is the card WINDOW HEIGHT, never a data cap — every
+// prompt stays rendered and older questions are reached by scrolling the
+// list (the 6.3.6 regression sliced to the newest N and silently lost the
+// rest of a long session).
 {
   const { window: w, boot } = makeWindow(() =>
     Promise.resolve({ ok: true, json: () => Promise.resolve(fixtureSession) }));
@@ -296,18 +297,29 @@ const fixtureSession = {
   const card = w.document.getElementById("zcode-beautify-hover-card");
   const rows = card ? Array.from(card.querySelectorAll(".zcode-beautify-hov-row")) : [];
   const list = card?.querySelector(".zcode-beautify-hov-list") as HTMLElement | null;
-  check("max=2: exactly 2 rows rendered (the NEWEST two)", rows.length === 2
-    && rows[0]?.textContent === "第二条 提问 带换行" && rows[1]?.textContent === "最新一条提问");
-  check("max=2: newest row still the bold last", rows[1]?.className.includes("zcode-beautify-hov-last") === true);
-  check("no scroll-capping inline maxHeight", !!list && list.style.maxHeight === "");
+  check("max=2: all 3 rows still rendered (window height, not a data cap)", rows.length === 3
+    && rows[0]?.textContent === "第一条提问" && rows[2]?.textContent === "最新一条提问");
+  check("max=2: newest row still the bold last", rows[2]?.className.includes("zcode-beautify-hov-last") === true);
+  const maxH2 = list ? parseInt(list.style.maxHeight, 10) : NaN;
+  check("max=2: list window is ~2 rows tall", Number.isFinite(maxH2) && maxH2 >= 60 && maxH2 <= 100, list?.style.maxHeight);
 
+  const many = {
+    ...fixtureSession,
+    prompts: Array.from({ length: 70 }, (_, i) => ({ at: i + 1, text: `历史提问 ${i + 1}`, mid: `msg_h${i}` })),
+  };
   const { window: w2, boot: boot2 } = makeWindow(() =>
-    Promise.resolve({ ok: true, json: () => Promise.resolve(fixtureSession) }));
+    Promise.resolve({ ok: true, json: () => Promise.resolve(many) }));
   boot2({ sessionHover: 1, sessionHoverMax: 10 }, "http://127.0.0.1:9223/api/session-preview?t=T1");
   hover(w2, '[data-testid="task-item-sess_aaa"]');
   await sleep(420);
-  const rows2 = w2.document.getElementById("zcode-beautify-hover-card")?.querySelectorAll(".zcode-beautify-hov-row");
-  check("within max: all 3 rows listed", !!rows2 && rows2.length === 3);
+  const card2 = w2.document.getElementById("zcode-beautify-hover-card");
+  const rows2 = card2 ? Array.from(card2.querySelectorAll(".zcode-beautify-hov-row")) : [];
+  const list2 = card2?.querySelector(".zcode-beautify-hov-list") as HTMLElement | null;
+  check("70-prompt session: every prompt row rendered (oldest included)", rows2.length === 70
+    && rows2[0]?.textContent === "历史提问 1" && rows2[69]?.textContent === "历史提问 70");
+  check("70-prompt session: newest remains the bold last", rows2[69]?.className.includes("zcode-beautify-hov-last") === true);
+  const maxH10 = list2 ? parseInt(list2.style.maxHeight, 10) : NaN;
+  check("70-prompt session: window stays ~10 rows tall and scrolls", Number.isFinite(maxH10) && maxH10 >= 200 && maxH10 <= 470, list2?.style.maxHeight);
 }
 
 // C1e: 大会话流畅模式 v2 lifecycle — far off-screen rows get content-visibility
@@ -578,13 +590,35 @@ const fixtureSession = {
       check("title + updatedAt carried", r.data.title === "夹具会话" && r.data.updatedAt === 1794000000000);
     }
     check("unknown id → not-found", (await readSessionPreview("sess_missing", home)).ok === false);
+
+    // Long-session regression: MAX_PROMPTS used to be 60, so a session with
+    // more real prompts silently lost its older questions before the card
+    // ever saw them. The reader must now return the full set (up to the high
+    // safety cap).
+    const dbMany = new sqlite.DatabaseSync(sessionDbPath(home));
+    dbMany.prepare("INSERT INTO session VALUES (?,?,?)").run("sess_many", "长会话夹具", 1794000000001);
+    for (let i = 0; i < 70; i++) {
+      const mid = `msg_many${i}`;
+      dbMany.prepare("INSERT INTO message VALUES (?,?,?,?,?)").run(mid, "sess_many", 100 + i, 1793000000000 + i, JSON.stringify({ role: "user" }));
+      dbMany.prepare("INSERT INTO part VALUES (?,?,?,?,?)").run(null, mid, "sess_many", 0, JSON.stringify({ type: "text", text: `长会话提问 ${i + 1}` }));
+    }
+    dbMany.close();
+    const many = await readSessionPreview("sess_many", home);
+    check("70-prompt session returns every prompt (old MAX_PROMPTS=60 cap gone)",
+      many.ok === true && many.data.prompts.length === 70 && many.data.omitted === 0,
+      many.ok ? `${many.data.prompts.length} prompts, omitted=${many.data.omitted}` : many.reason);
+    if (many.ok) {
+      check("long-session oldest prompt retained", many.data.prompts[0]?.text === "长会话提问 1");
+      check("long-session newest prompt retained", many.data.prompts[69]?.text === "长会话提问 70");
+    }
+
     const nf = await readSessionPreview("sess_missing", home) as { reason?: string };
     check("not-found reason", nf.reason === "not-found");
     const bad = await readSessionPreview("../etc/passwd");
     check("path-shaped id → bad-id", bad.ok === false && bad.reason === "bad-id");
     const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "zb-t30-empty-"));
     check("missing db → unavailable", (await readSessionPreview("sess_fix", emptyHome)).ok === false);
-    check("cap constants sane", MAX_PROMPTS > 0 && MAX_PROMPT_CHARS > 0);
+    check("cap constants sane", MAX_PROMPTS >= 500 && MAX_PROMPT_CHARS > 0, `MAX_PROMPTS=${MAX_PROMPTS}`);
   }
 }
 
@@ -597,7 +631,7 @@ const fixtureSession = {
   check("BOTH manual bootstrap assembly sites carry previewApi", both === 2, `sites=${both}`);
   const injectSrc = read(path.join(root, "src", "core", "inject.ts"));
   check("previewApi gated on chatUi (non-ZCode targets stay stock)",
-    injectSrc.includes("chatUi && normalizeChatLook(config.chatLook).sessionHover === 1"));
+    injectSrc.includes("chatUi && chatLook.sessionHover === 1"));
   const mcpSrc = read(path.join(root, "src", "mcp", "server.ts"));
   check("MCP apply_options exposes chat_session_hover",
     mcpSrc.includes("chat_session_hover") && mcpSrc.includes("sessionHover: chat_session_hover ? 1 : 0"));

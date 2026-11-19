@@ -36,7 +36,7 @@ process.env.ZCODE_BEAUTIFY_DATA_DIR = sandbox;
 
 const { configFile, ensureExperimentalGate, experimentalEnabled, saveConfig } = await import("../src/core/launch.js");
 const { repairLaunchers, psScript } = await import("../src/core/launchers.js");
-const { buildResetScript } = await import("../src/core/cdp.js");
+const { buildResetScript, buildBootstrapScript } = await import("../src/core/cdp.js");
 const { buildPanelScript } = await import("../src/panel/panelScript.js");
 const { VERSION } = await import("../src/version.js");
 
@@ -201,6 +201,14 @@ if (process.platform !== "win32") {
 
   const reset = buildResetScript();
   check("C: reset clears the renderer's cached look", reset.includes("removeItem") && reset.includes("':css'") && reset.includes("':wallpaper'"));
+
+  const disableReset = buildResetScript("zcode-beautify", { disable: true });
+  check("C: disable reset sets the persistent opt-out marker", disableReset.includes("zcode-beautify:disabled"));
+  check("C: disable reset removes panel/plugin nodes and timers",
+    disableReset.includes('[id^="') && disableReset.includes("__zbTimers"));
+  const boot = buildBootstrapScript({ css: "", starter: undefined } as never);
+  check("C: bootstrap refuses to replay under the opt-out marker", boot.includes(":disabled") && boot.includes("return; } catch"));
+  check("C: panel refuses to mount under the opt-out marker", panel.includes("zcode-beautify:disabled"));
 
   const coreSrc = fs.readFileSync(new URL("../src/core/experimental.ts", import.meta.url), "utf8");
   check("C: shared core records consent", coreSrc.includes("consentedAt") && coreSrc.includes("consentVersion"));

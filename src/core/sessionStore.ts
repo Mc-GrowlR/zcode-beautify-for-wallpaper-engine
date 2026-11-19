@@ -50,8 +50,32 @@ export type SessionPreviewResult =
  *  but older builds wrote `session_<hex>` — accept any tight token. */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,96}$/;
 
-export const MAX_PROMPTS = 60;
+/**
+ * Upper bound on prompts returned to the hover card. The card renders every
+ * returned prompt in its scrollable list (sessionHoverMax only sets the
+ * visible window height), so this must not double as a UI truncation: a
+ * 60-row cap made long sessions silently lose their older questions. 1000
+ * keeps the localhost payload/DOM bounded while covering real long sessions;
+ * beyond it `omitted` tells the card how many older prompts were not loaded.
+ */
+export const MAX_PROMPTS = 1000;
 export const MAX_PROMPT_CHARS = 240;
+
+/** One goal target (a session started with /goal) as stored by ZCode. */
+export interface GoalSessionEntry {
+  /** Goal lifecycle status: active / paused / complete / … (raw db value). */
+  status: string;
+  /** Goal summary title (empty when generation failed early). */
+  title: string;
+}
+
+export type GoalSessionsResult =
+  | { ok: true; sessions: Record<string, GoalSessionEntry> }
+  | { ok: false; reason: "unavailable" };
+
+/** Upper bound on the returned map — a runaway table must not bloat the
+ *  token-bearing payload the renderer fetches. */
+const MAX_GOAL_SESSIONS = 4000;
 
 /** Where ZCode keeps its sessions db (same root the desktop app writes). */
 export function sessionDbPath(homeDir: string = os.homedir()): string {
@@ -163,6 +187,45 @@ export async function readSessionPreview(sessionId: string, homeDir: string = os
     };
   } catch {
     // Locked db, corrupted page, schema drift — the hover card falls back.
+    return { ok: false, reason: "unavailable" };
+  } finally {
+    try { db?.close(); } catch { /* already closed */ }
+  }
+}
+
+/**
+ * Reads every goal target ZCode has recorded (session_target table). The
+ * sidebar title of a goal session is generated from the goal objective and
+ * loses the `/goal` command — the renderer uses this map to put a goal chip
+ * back in front of such titles. `homeDir` is injectable for tests.
+ */
+export async function readGoalSessions(homeDir: string = os.homedir()): Promise<GoalSessionsResult> {
+  const dbPath = sessionDbPath(homeDir);
+  if (!fs.existsSync(dbPath)) return { ok: false, reason: "unavailable" };
+  const sqlite = await loadSqlite();
+  if (!sqlite) return { ok: false, reason: "unavailable" };
+
+  let db: SqliteDb | undefined;
+  try {
+    db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
+    try { db.exec("PRAGMA busy_timeout = 400"); } catch { /* older builds */ }
+    const rows = db.prepare(
+      "SELECT session_id, status, summary_title FROM session_target"
+    ).all() as Array<{ session_id?: unknown; status?: unknown; summary_title?: unknown }>;
+    const sessions: Record<string, GoalSessionEntry> = {};
+    for (const row of rows) {
+      const id = typeof row.session_id === "string" ? row.session_id : "";
+      if (!id || !SESSION_ID_RE.test(id)) continue;
+      sessions[id] = {
+        status: typeof row.status === "string" ? row.status : "",
+        title: typeof row.summary_title === "string" ? row.summary_title.slice(0, 200) : "",
+      };
+      if (Object.keys(sessions).length >= MAX_GOAL_SESSIONS) break;
+    }
+    return { ok: true, sessions };
+  } catch {
+    // Missing table on old builds / locked db: the sidebar simply keeps the
+    // plain title (no goal chip), never an error.
     return { ok: false, reason: "unavailable" };
   } finally {
     try { db?.close(); } catch { /* already closed */ }
