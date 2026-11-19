@@ -122,6 +122,13 @@ everything else.
    first marketplace install; the script creates `{ "version": 1, "plugins": [] }`
    when it does not.
 
+   If a previous upgrade copied the current files into an older cache folder
+   (folder/record say `0.6.0` while `.zcode-plugin/plugin.json` says `6.3.6`),
+   the writer detects that single folder and atomically copies it to
+   `cache/<marketplace>/<name>/<version>` before saving; the old folder is kept
+   as a backup and `--dry-run` prints the planned migration. Multiple matching
+   folders are refused — remove or rename the stale copies first.
+
    If you must write it yourself, the record is:
    ```json
    {

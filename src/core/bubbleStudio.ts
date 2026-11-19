@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir, loadConfig } from "./launch.js";
-import { normalizeBubbleLook, type BubbleLookConfig } from "./inject.js";
+import { normalizeBubbleLook, type BubbleLookConfig } from "./bubbleLook.js";
 
 /** URI of the studio page served by this MCP server (resource read). */
 export const BUBBLE_STUDIO_URI = "ui://zcode-beautify/bubble-studio.html";

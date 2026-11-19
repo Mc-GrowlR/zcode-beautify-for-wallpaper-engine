@@ -4,7 +4,7 @@
  */
 
 import { CdpConnection, injectIntoTarget, isUpdaterTarget, listTargets, pickRendererTargets, buildBootstrapScript, buildResetScript } from "./cdp.js";
-import { sanitizeCustomBubbleCss } from "./bubbleRecipes.js";
+import { DEFAULT_BUBBLE_LOOK, normalizeBubbleLook, type BubbleLookConfig, type BubblePreset } from "./bubbleLook.js";
 import { normalizeComponentLook, workbuddyComponentCss, type ComponentLookConfig } from "./componentLook.js";
 import { loadWallpaper, type WallpaperAssets } from "./monet.js";
 import { buildVariableOverrides, buildTransparencyOverrides } from "./tokens.js";
@@ -148,11 +148,27 @@ export interface ChatLookConfig {
    */
   sessionHoverSide: number;
   /**
-   * 会话概览悬停卡 — 最多可见行数 (1-60, default 10): the list grows up to
-   * this many prompt rows; beyond that it stays this tall and the excess
-   * rows live in the scrollable area (the list auto-lands on the newest).
+   * 会话概览悬停卡 — 可见行数 (1-60, default 10): the card window grows up
+   * to this many prompt rows; every prompt stays in the scrollable list (the
+   * list auto-lands on the newest, older questions are reached by scrolling).
+   * This is a window height, never a data cap.
    */
   sessionHoverMax: number;
+  /**
+   * 标题文件引用 (title file citations): 0 = off — sidebar session titles stay
+   * plain text, leaking the raw `[label](path)` markdown ZCode auto-generates
+   * from the first user message; 1 (default) = parse each title with the same
+   * mention rules the message bubble uses and render file/skill/session/
+   * plugin chips (material icon + label) in place of the markdown. ZCode's
+   * sidebar title is a plain-text component (TaskTitleOverflowText), so the
+   * conversion is a DOM-level projection: the title's text node is kept (and
+   * blanked) so React keeps writing into it, and a sibling chip layer renders
+   * the converted parts. Goal sessions (started with /goal) whose generated
+   * title no longer contains the command also get the goal chip put back in
+   * front — the serve daemon reports which session ids are goal targets from
+   * ZCode's session db (`goalApi` in the payload).
+   */
+  titleCites: number;
 }
 
 /**
@@ -238,6 +254,7 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
   const hover = raw?.sessionHover as unknown;
   const hoverSide = raw?.sessionHoverSide as unknown;
   const hoverMax = raw?.sessionHoverMax as unknown;
+  const titleCites = raw?.titleCites as unknown;
   return {
     chatDim: pct(raw?.chatDim),
     maskTop: pct(raw?.maskTop),
@@ -258,42 +275,17 @@ export function normalizeChatLook(raw?: Partial<ChatLookConfig>): ChatLookConfig
     composerFade: typeof raw?.composerFade === "number" && Number.isFinite(raw.composerFade)
       ? pct(raw.composerFade)
       : 50,
+    // absent = 1: the raw-markdown title is the bug this option fixes, so
+    // existing configs (which predate the key) upgrade straight into chips.
+    titleCites: titleCites === 0 || titleCites === false ? 0 : 1,
   };
 }
 
-/**
- * User message bubble look (聊天气泡): preset + tint/radius/width/align.
- * "default" injects nothing — the bubble stays exactly stock. Colors never
- * live here: the injected rules color-mix the live --color-* tokens, so a
- * Monet re-theme restyles the bubble with zero extra work.
- */
-export type BubblePreset = "default" | "accent" | "glass" | "outline" | "flat" | "custom";
-
-export interface BubbleLookConfig {
-  preset: BubblePreset;
-  /** Accent strength 0-100 (mix ratio into the surface background). */
-  tint: number;
-  /** Corner radius 4-24px on the three round corners; the tail stays 2px. */
-  radius: number;
-  /** Max bubble width as % of the conversation column (40-90). */
-  width: number;
-  /** Right is ZCode's stock alignment; left mirrors the tail corner too. */
-  align: "right" | "left";
-  /**
-   * User-authored CSS for preset "custom" — written against the friendly
-   * selectors .zb-bubble / .zb-bubble-row, sanitized here and rewritten to
-   * ZCode's real selectors at injection time (see core/bubbleRecipes.ts).
-   */
-  customCss?: string;
-}
-
-export const DEFAULT_BUBBLE_LOOK: BubbleLookConfig = {
-  preset: "default",
-  tint: 28,
-  radius: 12,
-  width: 70,
-  align: "right",
-};
+// Bubble-look types/defaults live in ./bubbleLook so the MCP server and the
+// studio can use them without pulling this module's jimp/CDP chain; re-exported
+// here for the many existing importers.
+export type { BubbleLookConfig, BubblePreset } from "./bubbleLook.js";
+export { DEFAULT_BUBBLE_LOOK, normalizeBubbleLook } from "./bubbleLook.js";
 
 /**
  * Session-list running indicator (运行中图标): ZCode's sidebar task rows show
@@ -500,23 +492,6 @@ export function resolveSpinnerImageRef(ref: string, apiPort: number, mediaToken:
     return "";
   }
 }
-const BUBBLE_PRESETS: BubblePreset[] = ["default", "accent", "glass", "outline", "flat", "custom"];
-
-/** Clamp a partial bubble look over the defaults (unparsable fields fall back). */
-export function normalizeBubbleLook(raw?: Partial<BubbleLookConfig>): BubbleLookConfig {
-  const num = (v: unknown, min: number, max: number, dflt: number): number =>
-    typeof v === "number" && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : dflt;
-  const preset = BUBBLE_PRESETS.includes(raw?.preset as BubblePreset) ? raw!.preset! : "default";
-  return {
-    preset,
-    tint: num(raw?.tint, 0, 100, DEFAULT_BUBBLE_LOOK.tint),
-    radius: num(raw?.radius, 4, 24, DEFAULT_BUBBLE_LOOK.radius),
-    width: num(raw?.width, 40, 90, DEFAULT_BUBBLE_LOOK.width),
-    align: raw?.align === "left" ? "left" : "right",
-    customCss: sanitizeCustomBubbleCss(raw?.customCss),
-  };
-}
-
 /**
  * Opt-in state for the experimental CDP-injection capability. Off by default:
  * until enabled, the plugin spawns no serve daemon, never touches launch
@@ -663,6 +638,13 @@ export interface BuiltPayload {
    * then never mounts the hover card.
    */
   previewApi?: string;
+  /**
+   * 标题 goal 标记 data source: full URL of the serve endpoint INCLUDING the
+   * per-start token (`http://127.0.0.1:<port>/api/goal-sessions?t=…`). Empty
+   * when 标题文件引用 (titleCites) is off / the target has no chat UI — the
+   * bootstrap then never marks goal sessions in the sidebar.
+   */
+  goalApi?: string;
 }
 
 /** The switching effect comes from the active rotation plan (fallback fade). */
@@ -843,6 +825,9 @@ ${rootSelector} { background: transparent !important; }
     chatLoadLook.image = resolveSpinnerImageRef(chatLoadLook.image, config.apiPort ?? target().apiPort, mediaToken);
     if (!chatLoadLook.image) chatLoadLook.mode = "default";
   }
+  // Normalized once: the chat payload plus the two token-bearing endpoints
+  // below all derive from the same look.
+  const chatLook = chatUi ? normalizeChatLook(config.chatLook) : normalizeChatLook(undefined);
 
   return {
     css: parts.join("\n"),
@@ -857,7 +842,7 @@ ${rootSelector} { background: transparent !important; }
     // Chat extras (bubbles, column width, spinner icons) are bound to ZCode's
     // DOM. On other clients they are forced back to stock so a stored config
     // copied from ZCode can never inject rules for elements that do not exist.
-    chatLook: chatUi ? normalizeChatLook(config.chatLook) : normalizeChatLook(undefined),
+    chatLook,
     bubbleLook: chatUi ? normalizeBubbleLook(config.bubbleLook) : normalizeBubbleLook(undefined),
     componentLook,
     taskSpinnerLook: chatUi ? spinnerLook : normalizeTaskSpinnerLook(undefined),
@@ -870,8 +855,14 @@ ${rootSelector} { background: transparent !important; }
     startupProbe: app.startupProbe,
     // 会话概览悬停卡: only ZCode rows carry session ids, and only when the
     // toggle is on does the bootstrap need the (token-bearing) endpoint.
-    previewApi: chatUi && normalizeChatLook(config.chatLook).sessionHover === 1
+    previewApi: chatUi && chatLook.sessionHover === 1
       ? tok(`http://127.0.0.1:${config.apiPort ?? target().apiPort}/api/session-preview`)
+      : "",
+    // 标题 goal 标记 rides the same title engine as 标题文件引用: goal sessions
+    // lose the /goal command in their generated titles, so the map lets the
+    // renderer put the goal chip back in front of them.
+    goalApi: chatUi && chatLook.titleCites === 1
+      ? tok(`http://127.0.0.1:${config.apiPort ?? target().apiPort}/api/goal-sessions`)
       : "",
   };
 }
@@ -946,13 +937,18 @@ export async function applyToZCode(config: BeautifyConfig, payload: BuiltPayload
   return count;
 }
 
-export async function resetZCode(port: number): Promise<number> {
+export async function resetZCode(
+  port: number,
+  opts: { disable?: boolean } = {}
+): Promise<number> {
   const targets = pickRendererTargets(await listTargets(port));
   let count = 0;
   for (const target of targets) {
     try {
       const conn = await CdpConnection.connect(target.webSocketDebuggerUrl!);
-      await conn.send("Runtime.evaluate", { expression: buildResetScript() });
+      await conn.send("Runtime.evaluate", {
+        expression: buildResetScript("zcode-beautify", { disable: opts.disable === true }),
+      });
       conn.close();
       count++;
     } catch (err) {

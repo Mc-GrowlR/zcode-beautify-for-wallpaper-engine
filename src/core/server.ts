@@ -31,18 +31,32 @@ import { themeFromSourceColor, argbFromRgb } from "@material/material-color-util
 import { buildPanelScript } from "../panel/panelScript.js";
 import { VERSION, FORK_URL, cmpVersion } from "../version.js";
 import { dataDir, loadConfig, saveConfig } from "./launch.js";
-import { target as appTarget } from "./target.js";
+import { fallbackCdpPorts, target as appTarget } from "./target.js";
+import { cleanupLaunchEntries, markExperimentalDisabled } from "./experimental.js";
+import { hostPluginDisabled } from "./pluginGate.js";
 import { sendMediaFile } from "./media.js";
 import { importScene, MissingDependencyError, type SceneImportResult } from "./scenePipeline.js";
 import { listWeWallpapers, resolveWePreview, weDirForPath, weTitleForPath } from "./weLibrary.js";
 import { getInstallGuide, checkFfmpeg } from "./dependencyCheck.js";
 import { execFileP } from "./exec.js";
 import { scenesCacheRoot } from "./cacheManager.js";
-import { readSessionPreview } from "./sessionStore.js";
+import { readGoalSessions, readSessionPreview, sessionDbPath } from "./sessionStore.js";
+import type { RepairReport } from "./launchers.js";
 
 const MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
 const MAX_BODY_BYTES = MAX_WALLPAPER_BYTES + 1024 * 1024;
 const POLL_MS = 1500;
+/**
+ * How long a running serve stays dormant after the host plugin is switched
+ * off, waiting for a quick re-enable (plugin manager off→on) before it exits.
+ * ZCode does not relaunch the MCP process of an existing session on re-enable,
+ * so without this grace a quick toggle could not bring the daemon back; the
+ * MCP-side watchdog covers re-enables after this window / across restarts.
+ */
+const HOST_DISABLE_GRACE_MS = (() => {
+  const raw = Number(process.env.ZCODE_BEAUTIFY_HOST_DISABLE_GRACE_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 2 * 60_000;
+})();
 
 export interface ServeOptions {
   cdpPort: number;
@@ -200,6 +214,30 @@ function isDayPeriod(dn: NonNullable<BeautifyConfig["dayNight"]>): boolean {
 
 /** Cached /api/update-check result (60s) — see the route handler. */
 let updateCheckCache: { at: number; body: unknown } | null = null;
+
+/**
+ * Cached /api/goal-sessions result, keyed by the live db's mtime+size (and
+ * its -wal, since ZCode runs WAL). Every beautified window polls this every
+ * 15s (标题 goal 标记) and each uncached call opens ZCode's SQLite db and scans
+ * session_target. Keying on the files keeps the answer fresh after any write
+ * while idle windows stop re-opening the database; unlike a TTL there is no
+ * window where a newly created goal session goes unseen.
+ */
+let goalSessionsCache: { key: string; body: unknown } | null = null;
+
+function goalSessionsKey(): string {
+  const db = sessionDbPath();
+  const parts: string[] = [];
+  for (const file of [db, `${db}-wal`]) {
+    try {
+      const st = fs.statSync(file);
+      parts.push(`${st.mtimeMs}:${st.size}`);
+    } catch {
+      parts.push("-");
+    }
+  }
+  return parts.join("|");
+}
 
 /**
  * Latest GitHub release of the fork vs the running VERSION. Never throws:
@@ -389,6 +427,9 @@ function sanitize(body: any): Partial<BeautifyConfig> {
           ? Math.min(60, Math.round(cl.sessionHoverMax))
           : 10,
       composerFade: pct(cl.composerFade) ?? 50,
+      // 标题文件引用: absent = 1 (existing configs upgrade into chips); an
+      // explicit 0/false keeps the raw markdown titles.
+      titleCites: cl.titleCites === 0 || cl.titleCites === false ? 0 : 1,
     };
   }
   // User message bubble look (聊天气泡): normalizeBubbleLook fills any field
@@ -456,6 +497,15 @@ let importJob: ImportJob = { running: false, stage: "idle" };
 // --- injection session management -------------------------------------------
 
 const held = new Map<string, HeldSession>();
+/**
+ * Set before the opt-out teardown starts. THE re-injection race: the poll loop
+ * runs every 1.5s and used to re-hold/re-inject renderers while launcher
+ * cleanup + the final response were still in flight; the process then exited
+ * and left a freshly repainted wallpaper/panel behind. Every poll checks this
+ * flag, and it stays true until the process exits (or host re-enable clears it
+ * for the dormant serve path).
+ */
+let shuttingDown = false;
 /** Update-status windows already scrubbed this serve run (for log de-dup). */
 const scrubbedUpdaters = new Set<string>();
 
@@ -532,6 +582,11 @@ async function holdSession(
   if (!target.webSocketDebuggerUrl) return;
   const conn = await CdpConnection.connect(target.webSocketDebuggerUrl);
   await conn.send("Page.enable");
+  // A live serve is authoritative: clear the experimental opt-out marker
+  // before the bootstrap/panel registration so this and future reloads inject.
+  await boundedSend(conn.send("Runtime.evaluate", {
+    expression: `try { localStorage.removeItem('zcode-beautify:disabled'); } catch (e) {}`,
+  })).catch(() => {});
   const session: HeldSession = { conn };
 
   const assets = await getAssets(config);
@@ -553,6 +608,7 @@ async function holdSession(
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
     previewApi: payload.previewApi,
+    goalApi: payload.goalApi,
   });
   const { identifier } = await boundedSend(conn.send("Page.addScriptToEvaluateOnNewDocument", {
     source: bootstrap,
@@ -624,6 +680,7 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
     chatUi: payload.chatUi,
     startupProbe: payload.startupProbe,
     previewApi: payload.previewApi,
+    goalApi: payload.goalApi,
   });
   let ok = 0;
   for (const [id, session] of held) {
@@ -661,7 +718,8 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
   return ok;
 }
 
-async function poll(config: BeautifyConfig, apiPort: number): Promise<void> {
+async function poll(config: BeautifyConfig, apiPort: number): Promise<boolean> {
+  if (shuttingDown) return false;
   try {
     const targets = pickRendererTargets(await listTargets(config.port));
     const current = new Set(targets.map((t) => t.id));
@@ -733,8 +791,10 @@ async function poll(config: BeautifyConfig, apiPort: number): Promise<void> {
         held.delete(id);
       }
     }
+    return targets.length > 0;
   } catch {
     /* CDP not reachable; keep polling */
+    return false;
   }
 }
 
@@ -836,20 +896,66 @@ function migrateLegacySpinnerFiles(): void {
   }
 }
 
+/** Does a CDP port expose at least one renderer window for our target? */
+async function cdpPortHasRenderer(port: number): Promise<boolean> {
+  try {
+    return pickRendererTargets(await listTargets(port)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The configured CDP port when it is live; otherwise the target's built-in
+ * debug port. The fallback exists for unpackaged ZCode builds, whose main
+ * process always opens 9229 (see packages/desktop/src/main/index.ts) even
+ * when the shortcut carries no --remote-debugging-port. We only probe it for
+ * the target's DEFAULT port: tests (and advanced users) passing a custom
+ * --port must never silently attach to some other live client.
+ */
+async function resolveCdpPort(preferred: number): Promise<number> {
+  if (await cdpPortHasRenderer(preferred)) return preferred;
+  if (preferred !== appTarget().cdpPort) return preferred;
+  for (const port of fallbackCdpPorts()) {
+    if (port !== preferred && (await cdpPortHasRenderer(port))) return port;
+  }
+  return preferred;
+}
+
 export async function startServe(opts: ServeOptions): Promise<void> {
-  const { cdpPort, apiPort } = opts;
+  shuttingDown = false;
+  const requestedCdpPort = opts.cdpPort;
+  const apiPort = opts.apiPort;
+  let cdpPort = requestedCdpPort;
   const startedAt = Date.now();
+
+  // Do not even bind the API port while the host plugin manager says the
+  // plugin is off. The runtime watchdog below covers a switch flipped after
+  // startup; this covers a stale bootstrap racing the toggle.
+  if (hostPluginDisabled()) {
+    console.log(`serve: plugin disabled in ${appTarget().appName}'s plugin manager — nothing started`);
+    return;
+  }
+
+  // Packaged clients need the launcher CDP flag; unpackaged ZCode builds
+  // already expose 9229 without it. Resolve before the token/history setup so
+  // every later closure (runtimeConfig, health, poll) sees the active port.
+  const preferredCdpPort = requestedCdpPort;
+  cdpPort = await resolveCdpPort(preferredCdpPort);
+  if (cdpPort !== preferredCdpPort) {
+    console.log(
+      `serve: CDP port ${preferredCdpPort} unavailable — using ${appTarget().appName}'s built-in debugging port ${cdpPort}`
+    );
+  }
 
   // Fresh random token every start; scripts on this machine (watchdog, CLI)
   // read it from <dataDir>/serve.token. The panel receives it in its injected
   // source and sends it as a header; media URLs carry it as ?t=.
+  // The FILE is written only after the duplicate-service check below: several
+  // MCP session processes may race to spawn serve, and a duplicate that writes
+  // the token then exits would clobber the running service's token (CLI/MCP
+  // disable then gets 401 while the already-injected panel still works).
   mediaToken = crypto.randomBytes(24).toString("hex");
-  try {
-    fs.mkdirSync(dataDir(), { recursive: true });
-    fs.writeFileSync(path.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
-  } catch {
-    /* best effort — auth degrades to tokenless only for /api/health */
-  }
   migrateLegacySpinnerFiles();
 
   // --- recently-used wallpaper history (F8) --------------------------------
@@ -930,6 +1036,14 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       `a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) — ` +
         `open its panel, or stop that process first`
     );
+  }
+  // We own the API port: persist the token only now, so a duplicate that
+  // aborts above can never overwrite the running service's token.
+  try {
+    fs.mkdirSync(dataDir(), { recursive: true });
+    fs.writeFileSync(path.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
+  } catch {
+    /* best effort — auth degrades to tokenless only for /api/health */
   }
 
   // A request handler that rejects would otherwise take the whole process down
@@ -1207,30 +1321,44 @@ export async function startServe(opts: ServeOptions): Promise<void> {
       // --- experimental opt-out (disable_experimental / panel) ---------------
       // Tears every held session down — injected nodes AND the renderer's
       // cached copy, or a restart would self-heal the look right back — then
-      // exits so poll() cannot pick the renderers up again. The gate flip
-      // itself is the caller's job; this daemon is only the live teardown.
+      // exits so poll() cannot pick the renderers up again.
+      //
+      // The panel posts here directly, so this route must also persist the
+      // gate and strip the launcher flag. The old split ("this daemon only
+      // does the live teardown; the caller flips the gate") was false for the
+      // panel: the gate stayed enabled, so the next app start's MCP bootstrap
+      // spawned a fresh daemon and re-added the CDP flag — the button looked
+      // like it did nothing after a restart.
       if (req.method === "POST" && url.pathname === "/api/experimental/disable") {
-        let cleared = 0;
-        for (const [id, session] of held) {
-          try {
-            if (session.themeScriptId) {
-              await session.conn
-                .send("Page.removeScriptToEvaluateOnNewDocument", { identifier: session.themeScriptId })
-                .catch(() => {});
-              session.themeScriptId = undefined;
-            }
-            await session.conn.send("Runtime.evaluate", { expression: buildResetScript() });
-            cleared++;
-          } catch {
-            /* session already dead */
-          }
-          session.conn.close();
-          held.delete(id);
+        // Stop the poll loop BEFORE any teardown work: it must never re-hold
+        // a renderer between our reset and process exit.
+        shuttingDown = true;
+        // Gate first: a session starting during teardown must not respawn us.
+        let gate: { port: number; apiPort: number };
+        try {
+          gate = markExperimentalDisabled();
+        } catch (err) {
+          // Config write failed: the daemon stays up (and must keep polling)
+          // rather than exiting with the gate still enabled.
+          shuttingDown = false;
+          throw err;
         }
-        // Without this the rotation would re-apply a playlist wallpaper into
-        // any session that still exists between here and process exit.
-        stopRotationTimers();
-        sendJson(res, 200, { ok: true, cleared });
+        const cleared = await teardownHeldSessions();
+        const purged = await purgeLiveRenderers();
+        let launchers: RepairReport | undefined;
+        // Test hook: keep the real Desktop/Start Menu/registry untouched in
+        // the serve smoke test. Production never sets this.
+        if (process.env.ZCODE_BEAUTIFY_SKIP_LAUNCHERS !== "1") {
+          try {
+            launchers = await cleanupLaunchEntries(gate.port);
+          } catch (err) {
+            launchers = { supported: true, dryRun: false, fixes: [], error: (err as Error).message };
+          }
+        }
+        sendJson(res, 200, { ok: true, cleared, purged, launchers });
+        console.log(
+          `serve: experimental disable — cleared ${cleared} held session(s), purged ${purged} live renderer(s); stopping`
+        );
         // Leave a beat for the response to flush, then stop for good: the
         // bootstrap only respawns a daemon while the gate is enabled.
         setTimeout(() => process.exit(0), 200).unref();
@@ -1268,6 +1396,24 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         } else {
           sendJson(res, 503, { ok: false, error: "session store unavailable" });
         }
+        return;
+      }
+
+      // --- goal session map (标题 goal 标记) -------------------------------------
+      // A session started with /goal gets a generated title that no longer
+      // contains the command; the sidebar title engine asks this endpoint
+      // which session ids are goal targets and puts the goal chip back.
+      if (req.method === "GET" && url.pathname === "/api/goal-sessions") {
+        const key = goalSessionsKey();
+        if (!goalSessionsCache || goalSessionsCache.key !== key) {
+          const result = await readGoalSessions();
+          if (!result.ok) {
+            sendJson(res, 503, { ok: false, error: "session store unavailable" });
+            return;
+          }
+          goalSessionsCache = { key, body: { ok: true, sessions: result.sessions } };
+        }
+        sendJson(res, 200, goalSessionsCache.body);
         return;
       }
 
@@ -2169,6 +2315,75 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     }
   }
 
+  /**
+   * Removes every injected artifact we own and closes the held CDP sockets.
+   * Shared by the opt-out route and the host-plugin-off watchdog; rotation
+   * timers stop first-class too, or a playlist tick would repaint a wallpaper
+   * into a window that is still alive between teardown and process exit.
+   */
+  async function teardownHeldSessions(): Promise<number> {
+    let cleared = 0;
+    for (const [id, session] of held) {
+      try {
+        if (session.themeScriptId) {
+          await boundedSend(
+            session.conn.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: session.themeScriptId }),
+            5000
+          ).catch(() => {});
+          session.themeScriptId = undefined;
+        }
+        await boundedSend(
+          session.conn.send("Runtime.evaluate", {
+            expression: buildResetScript("zcode-beautify", { disable: true }),
+          }),
+          5000
+        );
+        cleared++;
+      } catch {
+        /* session already dead */
+      }
+      session.conn.close();
+      held.delete(id);
+    }
+    stopRotationTimers();
+    return cleared;
+  }
+
+  /**
+   * Opens a FRESH CDP connection to every live renderer and runs the disable
+   * teardown. Held sessions go stale (page reload changed the target, or an
+   * earlier serve owned the page); relying on them alone is how a stopped
+   * service used to leave the wallpaper/panel painted. The purge also sets the
+   * persistent disabled marker so stale addScript registrations skip on reload.
+   */
+  async function purgeLiveRenderers(): Promise<number> {
+    let purged = 0;
+    try {
+      const targets = pickRendererTargets(await listTargets(cdpPort));
+      for (const target of targets) {
+        if (!target.webSocketDebuggerUrl) continue;
+        let conn: CdpConnection | undefined;
+        try {
+          conn = await CdpConnection.connect(target.webSocketDebuggerUrl);
+          await boundedSend(
+            conn.send("Runtime.evaluate", {
+              expression: buildResetScript("zcode-beautify", { disable: true }),
+            }),
+            5000
+          );
+          purged++;
+        } catch {
+          /* target vanished/reloaded concurrently — next disable retries */
+        } finally {
+          try { conn?.close(); } catch { /* already closed */ }
+        }
+      }
+    } catch {
+      /* CDP unreachable: the held-session pass above is the only teardown */
+    }
+    return purged;
+  }
+
   async function playRotationEntry(index: number): Promise<void> {
     const gen = rotationGen;
     const s = rotationNow();
@@ -2305,13 +2520,58 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   const dayNightTimer = setInterval(dayNightTick, 20_000);
   dayNightTimer.unref?.();
 
+  // The host plugin manager can switch the plugin off while this detached
+  // daemon is running (it outlives the MCP process that spawned it). That
+  // switch never reaches us as a signal — the host config is the only trace —
+  // so without this watchdog the old theme kept being repainted after every
+  // app restart even though the plugin manager showed "disabled".
+  const stopIfHostDisabled = async (): Promise<boolean> => {
+    if (!hostPluginDisabled()) return false;
+    shuttingDown = true;
+    const cleared = await teardownHeldSessions();
+    const graceLabel = HOST_DISABLE_GRACE_MS >= 60_000
+      ? `${Math.round(HOST_DISABLE_GRACE_MS / 60_000)} min`
+      : `${Math.round(HOST_DISABLE_GRACE_MS / 1000)}s`;
+    console.log(
+      `serve: plugin disabled in ${appTarget().appName}'s plugin manager — removed ${cleared} injected window(s); waiting up to ${graceLabel} for re-enable`
+    );
+    // ZCode does not relaunch the MCP process of an existing session when the
+    // plugin manager is switched back on. Stay dormant (API up, no injection)
+    // for a short grace so a quick off→on toggle resumes this same daemon;
+    // after that, exit and let the MCP-side watchdog / next app start recover.
+    const deadline = Date.now() + HOST_DISABLE_GRACE_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (!hostPluginDisabled()) {
+        console.log("serve: plugin re-enabled — resuming injection");
+        shuttingDown = false;
+        startRotation();
+        return false;
+      }
+    }
+    console.log("serve: plugin still disabled — stopping");
+    process.exit(0);
+    return true;
+  };
+
   // Initial pass, then keep polling so restarts of the app get re-injected.
+  if (await stopIfHostDisabled()) return;
   await poll(runtimeConfig(), apiPort);
   // Resume an enabled rotation playlist (re-applies entry 0).
   startRotation();
   for (;;) {
     await new Promise((r) => setTimeout(r, POLL_MS));
-    await poll(runtimeConfig(), apiPort);
+    if (await stopIfHostDisabled()) return;
+    const polled = await poll(runtimeConfig(), apiPort);
+    if (!polled) {
+      // The app restarted (possibly switching between the launcher flag port
+      // and the built-in dev port) — re-resolve and keep serving.
+      const next = await resolveCdpPort(preferredCdpPort);
+      if (next !== cdpPort) {
+        cdpPort = next;
+        console.log(`serve: CDP port switched to ${cdpPort}`);
+      }
+    }
   }
 }
 

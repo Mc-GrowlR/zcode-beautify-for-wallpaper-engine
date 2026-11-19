@@ -252,10 +252,23 @@ check("mask click closes the modal", $id("zb-chlog-win").hidden);
   const cdpPort = await freePort();
   const apiPort = await freePort();
   const base = `http://127.0.0.1:${apiPort}`;
+  // Sandbox the host gate too (t13 pattern): a real machine may have the
+  // plugin switched off in its plugin manager, which now stops serve.
+  const hostConfig = path.join(tmp, "host-plugins.json");
+  fs.writeFileSync(hostConfig, JSON.stringify({ plugins: { enabledPlugins: { "zcode-beautify@test": true } } }));
   const child = spawn(
     process.execPath,
     [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), "src/cli.ts", "serve", "--port", String(cdpPort), "--api-port", String(apiPort)],
-    { cwd: root, env: { ...process.env, ZCODE_BEAUTIFY_DATA_DIR: tmp }, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        ZCODE_BEAUTIFY_DATA_DIR: tmp,
+        ZCODE_BEAUTIFY_HOST_CONFIG: hostConfig,
+        ZCODE_BEAUTIFY_SKIP_LAUNCHERS: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
   );
   let bootLog = "";
   child.stdout!.on("data", (d: Buffer) => { bootLog += d.toString(); });

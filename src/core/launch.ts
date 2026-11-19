@@ -11,7 +11,6 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { listTargets } from "./cdp.js";
 import { executableCandidates, findExecutable, target, type AppTarget } from "./target.js";
 import { VERSION } from "../version.js";
 
@@ -196,6 +195,10 @@ export interface LaunchResult {
  * single-instance lock blocks us and the user must restart it themselves.
  */
 export async function launchApp(port: number, t: AppTarget = target()): Promise<LaunchResult> {
+  // Deferred: the MCP bootstrap imports this module for config/gate helpers on
+  // every session start, and cdp.ts is a large module it never touches unless
+  // it actually launches the app.
+  const { listTargets } = await import("./cdp.js");
   try {
     await listTargets(port);
     return { started: false, reason: "already-running-with-cdp" };

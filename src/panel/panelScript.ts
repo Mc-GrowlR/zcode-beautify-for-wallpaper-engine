@@ -42,6 +42,9 @@ export function buildPanelScript(
   var HAS_UPDATER = ${JSON.stringify(hasUpdater)};
   var PROBE = ${JSON.stringify(opts.appName === "WorkBuddy" ? "workbuddy-skeleton" : "zcode-body-class")};
   var IS_WB = PROBE === 'workbuddy-skeleton';
+  // Experimental opt-out marker: stale panel registrations must not resurrect
+  // an offline panel after a reload while the plugin's injection is stopped.
+  try { if (localStorage.getItem('zcode-beautify:disabled') === '1') return; } catch (e) {}
   var VERSION = ${JSON.stringify(VERSION)};
   var REPO_URL = ${JSON.stringify(REPO_URL)};
   var FORK_URL = ${JSON.stringify(FORK_URL)};
@@ -358,6 +361,23 @@ export function buildPanelScript(
     '.zb-set-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }',
     '.zb-set-name { font-size: 12.5px; }',
     '.zb-set-sub { font-size: 11px; opacity: .5; line-height: 1.45; }',
+    // Child option (从属选项): rows that belong to the toggle above them — the
+    // rail + indent makes it read as "收起按钮 → 一次性收回" / "自定分页 →
+    // 初始展开 / 每次加载" instead of peer settings. Right edge stays put, so
+    // controls line up with the parent row's; only the text block steps in.
+    // The rail drops out of the parent row's bottom edge (first child) and
+    // runs continuously through consecutive children (middle/…), stopping at
+    // the LAST child's middle where its tick meets the row.
+    '.zb-set.zb-set-child { position: relative; margin-left: 14px; padding: 3px 0 7px 18px;',
+      ' border-top: 0; }',
+    '.zb-set.zb-set-child::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;',
+      ' width: 0; border-left: 1px solid rgba(122,162,247,.32); }',
+    '.zb-set.zb-child-first::before { top: -8px; }',
+    '.zb-set.zb-child-last::before { bottom: 50%; }',
+    '.zb-set.zb-set-child::after { content: ""; position: absolute; left: 0; top: 50%;',
+      ' width: 10px; border-bottom: 1px solid rgba(122,162,247,.32); }',
+    '.zb-set.zb-set-child .zb-set-name { font-size: 11.5px; color: rgba(232,232,234,.86); }',
+    '.zb-set.zb-set-child .zb-set-sub { font-size: 10.5px; opacity: .42; }',
     '.zb-ctrl { flex: none; display: flex; align-items: center; gap: 8px; }',
     // Toggle switch (reference-style pill), used via <label class="zb-sw">.
     '.zb-sw { display: inline-flex; align-items: center; cursor: pointer; flex: none; }',
@@ -725,6 +745,8 @@ export function buildPanelScript(
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">耗时秒数去小数</span><span class="zb-set-sub">对话下方"工作中"耗时的秒数不带小数位(53.4 秒 → 53 秒)</span></div>' +
       '        <div class="zb-ctrl"><label class="zb-sw"><input type="checkbox" id="zb-chat-elapsed" title="隐藏对话下方运行耗时的秒数小数:实时改写渲染文本,只保留整秒;关闭后恢复原生显示"></label>' +
       '          <button class="zb-btn" id="zb-chat-elapsed-test" title="测试部件:在对话区种一行仿真「工作中」耗时行(每秒跳动、秒数带小数,仿 3.18 前原生格式)。开着本开关小数会被实时吃掉,关掉则下个跳动恢复小数——用于直观验证改写链路;再点一次移除">▶ 测试</button></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">标题引用与 goal 标记</span><span class="zb-set-sub">侧栏会话标题里引用的文件改画成气泡同款的「图标+文件名」胶囊,不再露出 [文件名](路径) 的 Markdown 原文;目录/技能/会话/插件等引用标记同样转换;/goal 启动的会话即使标题被改写也会补回 goal 标记</span></div>' +
+      '        <label class="zb-sw"><input type="checkbox" id="zb-chat-title-cites" title="标题引用与 goal 标记:侧栏会话标题自动取自首条消息,其中的 [文件名](路径) 原本原样显示成 Markdown;开启后按气泡同款规则转成文件胶囊(扩展名图标+文件名,可悬停看路径),并同样处理目录/技能/会话/插件/命令引用;用 /goal 启动的会话在标题里补回 goal 标记(悬停显示目标状态);关闭恢复原生 Markdown 原文"></label></div>' +
       '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">聊天区暗度</span><span class="zb-set-sub">对话列背后的额外压暗,消息文字浮在其上不受影响</span></div>' +
     '        <input type="range" id="zb-chat-dim" min="0" max="100" step="1" value="0"><span class="zb-val"><span id="zb-chat-dim-val">0.00</span></span></div>' +
     '      <div class="zb-set zb-slide"><div class="zb-set-main"><span class="zb-set-name">遮罩上端</span><span class="zb-set-sub">窗口顶部向下渐隐遮罩的浓度</span></div>' +
@@ -815,8 +837,8 @@ export function buildPanelScript(
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover" title="悬停侧边栏会话行或对话区左侧提问刻度(v4-turn-navigator)时弹出概览卡:列出该会话你发过的每条提问(旧→新,最新加粗),数据来自本机 ZCode 会话库;开启期间隐藏官方悬停信息卡(工作区信息卡与单条提问预览卡),关闭即恢复"></label></div>' +
       '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">侧栏标题悬停</span><span class="zb-set-sub">左侧任务列表的会话标题是否弹出概览卡;关闭后侧栏恢复官方的工作区悬停卡,对话区提问刻度条不受影响</span></div>' +
       '        <label class="zb-sw"><input type="checkbox" id="zb-chat-hover-side" title="是否在左侧任务列表的会话标题上弹出概览卡:开=侧栏会话行悬停弹卡(隐藏官方工作区信息卡),关=侧栏恢复官方悬停卡,仅对话区提问刻度条弹卡"></label></div>' +
-      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">最多显示</span><span class="zb-set-sub">概览卡只列出最新的几条提问(1-60),更早的不显示;最新一条加粗</span></div>' +
-      '        <div class="zb-ctrl"><input type="number" id="zb-chat-hover-max" min="1" max="60" step="1" title="概览卡列出的提问行数:只显示最新的 N 条,更早的不进入列表(1-60,默认10)"><span style="opacity:.6">条</span></div></div>' +
+      '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">可见行数</span><span class="zb-set-sub">概览卡窗口最多同时显示几行提问(1-60);更早的提问保留在卡内,向上滚动即可查看;最新一条加粗</span></div>' +
+      '        <div class="zb-ctrl"><input type="number" id="zb-chat-hover-max" min="1" max="60" step="1" title="概览卡可见行数(窗口高度):超出部分保留在卡内滚动查看,不丢历史提问(1-60,默认10)"><span style="opacity:.6">条</span></div></div>' +
     '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">数据来源</span><span class="zb-set-sub">读取本机 ZCode 会话库(~/.zcode/cli/db),仅在你悬停时查询;美化服务未运行时降级为显示完整会话标题</span></div></div>' +
     '      </div>' +
     '    </div>' +
@@ -825,13 +847,13 @@ export function buildPanelScript(
     '      <div class="zb-card">' +
     '      <div class="zb-set"><div class="zb-set-main"><span class="zb-set-name">自定分页</span><span class="zb-set-sub">改写左侧项目卡会话列表的分页行为;原生为展开 5 条、每次加载 5 条、无收起按钮</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-on" title="开启后由下方三个数值接管项目卡的会话分页;关闭恢复原生 5/+5"></label></div>' +
-    '      <div class="zb-set" id="zb-list-init-row" hidden><div class="zb-set-main"><span class="zb-set-name">初始展开</span><span class="zb-set-sub">展开项目时直接显示的会话条数(1-100;原生 5)</span></div>' +
+    '      <div class="zb-set zb-set-child zb-child-first" id="zb-list-init-row" hidden><div class="zb-set-main"><span class="zb-set-name">初始展开</span><span class="zb-set-sub">展开项目时直接显示的会话条数(1-100;原生 5)</span></div>' +
     '        <div class="zb-ctrl"><input type="number" id="zb-list-init" min="1" max="100" step="1" title="项目卡展开时的会话行数(1-100)"><span style="opacity:.6">条</span></div></div>' +
-    '      <div class="zb-set" id="zb-list-step-row" hidden><div class="zb-set-main"><span class="zb-set-name">每次加载</span><span class="zb-set-sub">每点一次"显示更多"追加的条数(1-100;原生 5)</span></div>' +
+    '      <div class="zb-set zb-set-child zb-child-last" id="zb-list-step-row" hidden><div class="zb-set-main"><span class="zb-set-name">每次加载</span><span class="zb-set-sub">每点一次"显示更多"追加的条数(1-100;原生 5)</span></div>' +
     '        <div class="zb-ctrl"><input type="number" id="zb-list-step" min="1" max="100" step="1" title="每次点击显示更多追加的行数(1-100)"><span style="opacity:.6">条</span></div></div>' +
     '      <div class="zb-set" id="zb-list-collapse-row" hidden><div class="zb-set-main"><span class="zb-set-name">收起按钮</span><span class="zb-set-sub">在"显示更多"旁加一个"收起",一键折回初始条数(原生展开后无法收回)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapse" title="显示收起按钮:点击后列表折回初始展开条数"></label></div>' +
-    '      <div class="zb-set" id="zb-list-collapseall-row" hidden><div class="zb-set-main"><span class="zb-set-name">一次性收回</span><span class="zb-set-sub">收起是否一次折回初始条数(默认是);否时每点一次收起,按"每次加载"的条数逐步收回,收到初始条数后按钮消失</span></div>' +
+    '      <div class="zb-set zb-set-child zb-child-first zb-child-last" id="zb-list-collapseall-row" hidden><div class="zb-set-main"><span class="zb-set-name">一次性收回</span><span class="zb-set-sub">收起是否一次折回初始条数(默认是);否时每点一次收起,按"每次加载"的条数逐步收回,收到初始条数后按钮消失</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-collapseall" title="是:收起一键折回初始展开条数;否:每点一次收起按每次加载的条数逐步收回"></label></div>' +
     '      <div class="zb-set" id="zb-list-total-row" hidden><div class="zb-set-main"><span class="zb-set-name">显示剩余</span><span class="zb-set-sub">在"显示更多"旁显示还有多少条未显示,随展开递减、全部显示后自动消失(默认开启;为准确计数,列表的全部会话行会预先载入,多余的仍隐藏)</span></div>' +
     '        <label class="zb-sw"><input type="checkbox" id="zb-list-total" title="显示更多旁的还有 N 条指示:开启后该列表全部会话行会预先挂载(多余的仍隐藏),剩余数才可知"></label></div>' +
@@ -1328,7 +1350,7 @@ export function buildPanelScript(
           $('zb-dn-dayblur').value = dn.dayBlur; $('zb-dn-nightblur').value = dn.nightBlur;
         }
         var cl = c.chatLook || {};
-        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0, cl.sessionHover ?? 0, cl.sessionHoverSide ?? 1, cl.sessionHoverMax ?? 10);
+        setChatSliders(cl.chatDim ?? 0, cl.maskTop ?? 0, cl.maskBottom ?? 0, cl.frost ?? 0, cl.widthCapRem ?? 0, cl.widthInsetRem ?? 0, cl.perfSmooth ?? 0, cl.hideElapsedDecimal ?? 0, cl.dragResize ?? 0, cl.composerFade ?? 0, cl.sessionHover ?? 0, cl.sessionHoverSide ?? 1, cl.sessionHoverMax ?? 10, cl.titleCites ?? 1);
         setBubbleUI(c.bubbleLook || {});
         setSpinnerUI(c.taskSpinnerLook || {});
         setLoadUI(c.chatLoadLook || {}, c.chatLoadImageUrl || '');
@@ -1519,7 +1541,7 @@ export function buildPanelScript(
     $('zb-chat-width-cap').value = cap;
     $('zb-chat-width-inset').value = cap > 0 ? inset : 12;
   }
-  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf, hov, side, hmax) {
+  function setChatSliders(d, mu, mb, f, cap, inset, perf, dec, drag, cf, hov, side, hmax, tc) {
     $('zb-chat-dim').value = d; $('zb-chat-dim-val').textContent = (d / 100).toFixed(2);
     $('zb-chat-top').value = mu; $('zb-chat-top-val').textContent = (mu / 100).toFixed(2);
     $('zb-chat-bot').value = mb; $('zb-chat-bot-val').textContent = (mb / 100).toFixed(2);
@@ -1538,6 +1560,8 @@ export function buildPanelScript(
     if (hovSideEl) hovSideEl.checked = side !== 0;
     var hovMaxEl = $('zb-chat-hover-max');
     if (hovMaxEl) hovMaxEl.value = String(hmax && hmax >= 1 ? hmax : 10);
+    var tcEl = $('zb-chat-title-cites');
+    if (tcEl) tcEl.checked = tc !== 0;
     reflectChatWidth(cap ?? 0, inset ?? 0);
     // Reflecting SERVER state: drop the drag-preview inline vars so the
     // injected :root block (the authoritative values) rules again — inline
@@ -1577,6 +1601,7 @@ export function buildPanelScript(
           sessionHover: $('zb-chat-hover') && $('zb-chat-hover').checked ? 1 : 0,
           sessionHoverSide: $('zb-chat-hover-side') && $('zb-chat-hover-side').checked ? 1 : 0,
           sessionHoverMax: Math.max(1, Math.min(60, Math.round(Number($('zb-chat-hover-max') && $('zb-chat-hover-max').value) || 10))),
+          titleCites: $('zb-chat-title-cites') ? ($('zb-chat-title-cites').checked ? 1 : 0) : 1,
           composerFade: Number($('zb-chat-composer').value) || 0
         }
       }, function (d) { if (d && d.error) status(d.error); });
@@ -1642,6 +1667,8 @@ export function buildPanelScript(
   // 会话概览的两个新档位: 侧栏标题是否弹卡(开关) / 最多可见行数(数字,1-60)
   $('zb-chat-hover-side') && $('zb-chat-hover-side').addEventListener('change', pushChatLook);
   $('zb-chat-hover-max') && $('zb-chat-hover-max').addEventListener('input', pushChatLook);
+  // 标题文件引用: sidebar titles render file mention chips instead of markdown.
+  $('zb-chat-title-cites') && $('zb-chat-title-cites').addEventListener('change', pushChatLook);
   ['zb-chat-width-cap', 'zb-chat-width-inset'].forEach(function (id) {
     $(id).addEventListener('change', function () {
       var max = id === 'zb-chat-width-cap' ? 120 : 24;
