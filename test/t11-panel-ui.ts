@@ -88,7 +88,9 @@ const SCRIPT = buildPanelScript(9223, "t11-token", false);
   // Elements the SERVE side injects, or the panel creates at runtime (its own
   // <style>); pane ids are composed at runtime (zb-tab-<name>) and checked
   // explicitly above.
-  const external = new Set(["zcode-beautify-wallpaper", "zcode-beautify-style", "zcode-beautify-panel-style"]);
+  const external = new Set(["zcode-beautify-wallpaper", "zcode-beautify-style", "zcode-beautify-panel-style",
+    // ZCode 4.0's own startup overlay, read-only by the startup probe.
+    "loading"]);
   const missing = [...referenced].filter((id) => !htmlIds.has(id) && !external.has(id) && !id.startsWith("zb-tab-"));
   check("every JS-referenced id exists in panel HTML", missing.length === 0, missing.join(","));
 

@@ -4,7 +4,7 @@
 
 Fork of [Logocceai/zcode-beautify](https://github.com/Logocceai/zcode-beautify), actively maintained by [Mc-GrowlR](https://github.com/Mc-GrowlR) — this is where the feature development continues (see [CHANGES.md](CHANGES.md) for the full 0.3.0 → 6.1.x history).
 
-Beautify the **ZCode desktop client**: use any image — or any **video / Wallpaper Engine scene wallpaper** — as a background wallpaper and adapt the whole UI with Material Design 3 (Monet) dynamic color; restyle the chat area (message bubbles, conversation-column width & drag handles, a large-session smooth mode, the working-row loading icon, composer transparency) — plus a live settings panel for real-time tuning. On top of the upstream base this fork adds: dynamic wallpapers (WE scene / video import with seamless loops), the local Wallpaper Engine library browser, scheduled rotation playlists, the full chat-area restyling suite, ZCode 3.18 support, and dual-client coverage (ZCode + WorkBuddy).
+Beautify the **ZCode desktop client**: use any image — or any **video / Wallpaper Engine scene wallpaper** — as a background wallpaper and adapt the whole UI with Material Design 3 (Monet) dynamic color; restyle the chat area (message bubbles, conversation-column width & drag handles, a large-session smooth mode, the working-row loading icon, composer transparency) — plus a live settings panel for real-time tuning. On top of the upstream base this fork adds: dynamic wallpapers (WE scene / video import with seamless loops), the local Wallpaper Engine library browser, scheduled rotation playlists, the full chat-area restyling suite, ZCode 3.18 and 4.0 support, and dual-client coverage (ZCode + WorkBuddy).
 
 > 🧩 **Since 0.5.0 the same plugin also targets the WorkBuddy desktop client.** Pass `--target workbuddy` (or install it through the bundled `.codebuddy-plugin` manifest, which sets `BEAUTIFY_TARGET=workbuddy`): the wallpaper layer and Monet palette are re-mapped onto WorkBuddy's `--wb-*` design tokens. Ports (9222/9333 CDP, 9223/9334 API), data dirs and launcher entries are isolated per client, so both can run at once. Chat-area extras stay ZCode-only — they bind to ZCode's DOM, and the panel hides those tabs automatically under WorkBuddy.
 
@@ -37,6 +37,7 @@ Beautify the **ZCode desktop client**: use any image — or any **video / Wallpa
 - **Live settings panel** — a draggable panel inside ZCode with three tabs: **Wallpaper** (grouped library, import with progress and dependency guidance, current look), **Rotation** (playlists), and **Settings** — blur/dim sliders, framing modes, Monet and wallpaper-visibility toggles, chat-area masks (dim / gradient / veil), day-night eye care, recording resolution, config export/import, recent history, and reset. Changes preview instantly and persist.
 - **Zero-touch serve** — the MCP server starts the background service automatically when ZCode launches, so the panel is simply always there.
 - **Self-healing launch entries** — while `serve` runs, every ZCode launch entry (desktop / start-menu / taskbar shortcuts — OneDrive-redirected folders included — plus the `zcode://` protocol handler and Explorer context-menu verbs) is kept carrying `--remote-debugging-port` automatically, so the theme survives ZCode restarts *and* updater-rebuilt shortcuts. `repair-launchers` scans and fixes them on demand with a structured report (machine-wide entries are reported, not modified). The theme itself also survives renderer reloads, and the last look is cached in `localStorage` as a fallback.
+- **Startup overlay (survives updates)** — `/install-overlay` appends one loader line to ZCode's `resources/app.asar` main entry. From then on every start forces the CDP port on and launches serve from the Electron main process, independent of the plugin manager's enabledPlugins and of the shortcut's `--remote-debugging-port` flag. A ZCode update replaces app.asar and removes the line; after the first explicit install the plugin re-stages the patch automatically from the MCP bootstrap (applied after a full quit), and `/install-overlay` repairs it on demand. `/uninstall-overlay` strips the loader, writes an opt-out marker, and restores the default look. This modifies client files (the same technique as zusage) and only happens after an explicit install.
 - **Conversation control** — bundled slash commands `/beautify` and `/bubble`, plus MCP tools (`set_background`, `import_scene_wallpaper`, `apply_options`, `repair_launchers`, …), let the ZCode agent set the wallpaper, tune the theme, or restyle your chat bubbles from a plain-language description — bubble changes additionally open the interactive Bubble Studio gallery on ZCode 3.16+.
 
 ## How it works
@@ -141,6 +142,10 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 | `serve [--detach] [--api-port M]` | Watch mode + settings panel + local control API (default API port 9223); `--detach` survives the shell that started it |
 | `watch` | Headless watch mode: re-inject whenever ZCode restarts |
 | `repair-launchers [--dry-run] [--remove]` | Scan/fix every launch entry so ZCode always starts with the CDP port; `--remove` strips the flag from every entry instead (the rollback) |
+| `overlay install [--asar P] [--plugin-root D] [--no-enable] [--dry-run]` | Install/repair the startup overlay: append a loader to the app.asar main entry that forces CDP and starts serve on every launch. While ZCode runs the patch is staged and applied automatically after a full quit; enables the experimental gate unless `--no-enable` |
+| `overlay remove [--keep-experimental]` | Strip the overlay, write the opt-out marker, stop serve and restore the default look (`--keep-experimental` leaves the gate on) |
+| `overlay status [--json]` | Show injection state, runtime dir, pending swap and opt-out |
+| `overlay finalize` | Apply a pending asar swap by hand (normally done by the detached monitor) |
 | `reset` | Remove wallpaper and color overrides |
 | `status` | Show CDP reachability and renderer targets |
 
@@ -165,12 +170,13 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 
 ```
 ├─ src/
-│  ├─ cli.ts                 # CLI entry: launch / apply / apply-scene / colors / reset / status / watch / serve / repair-launchers
+│  ├─ cli.ts                 # CLI entry: launch / apply / apply-scene / colors / reset / status / watch / serve / repair-launchers / overlay
 │  ├─ core/
 │  │  ├─ cdp.ts              # Minimal Chrome DevTools Protocol client + injection scripts
 │  │  ├─ inject.ts           # Assembles the injected payload (wallpaper layer + token overrides + chat look)
 │  │  ├─ launch.ts           # Config persistence + ZCode launcher (single-instance aware)
 │  │  ├─ launchers.ts        # Launch-entry repair: shortcuts + registry handlers keep the CDP port
+│  │  ├─ overlay.ts          # Startup overlay: app.asar patch/strip + staged swap + update auto-heal
 │  │  ├─ monet.ts            # Image decode, MD3 source-color extraction, smart-fit analysis
 │  │  ├─ tokens.ts           # MD3 schemes → ZCode's Tailwind v4 --color-* variables
 │  │  ├─ session.ts          # Shared apply/reset operations used by CLI and MCP
@@ -189,6 +195,10 @@ You can also just type `/beautify <image path>` in ZCode and let the agent do it
 │  └─ mcp/server.ts          # MCP server exposing tools to the ZCode agent
 ├─ commands/beautify.md      # /beautify slash command
 ├─ commands/bubble.md        # /bubble slash command (restyle bubbles from a description)
+├─ commands/install-overlay.md   # /install-overlay: patch the app.asar startup loader
+├─ commands/uninstall-overlay.md # /uninstall-overlay: strip the loader + opt out
+├─ runtime/overlay-loader.cjs    # Main-process loader: force CDP + start serve
+├─ runtime/overlay-monitor.cjs   # Completes the staged asar swap after a full quit
 ├─ skills/beautify/SKILL.md  # Agent-facing workflow documentation
 ├─ .zcode-plugin/plugin.json # ZCode plugin manifest (commands, skills, MCP server)
 ├─ marketplace.json          # Marketplace index so the repo is discoverable in ZCode
@@ -232,14 +242,17 @@ The injection mechanism is **experimental** and **off by default** (since 0.6.0)
 - Starts the local service and re-enables the self-heal that keeps those entries carrying the flag across client updates.
 - Records consent (timestamp + plugin version) in the plugin's config. Installations that predate 0.6.0 keep working once, marked as migrated; the panel shows the state with a one-click opt-out.
 
+**Startup overlay (survives client updates and cleared plugin settings).** The CDP launch-entry route above depends on the plugin manager starting the MCP server *and* on ZCode being launched with the flag. A ZCode update replaces `resources/app.asar`, rebuilds the Start Menu shortcut without the flag, and restarts itself — so after an update the plugin often has no service and no port. `/install-overlay` (or `zcode-beautify overlay install`) appends one loader line to the app.asar main entry. At every start the loader, running in the Electron main process before `app.ready`, forces `--remote-debugging-port` and starts the detached serve; it no longer matters whether the plugin manager was reset or the shortcut lost its arguments. The first install is explicit; afterwards the plugin re-stages the patch automatically when an update replaces app.asar (the swap waits for a full quit, then applies). The loader still honors an explicit plugin-manager disable and the `.plugin-overlay-optout` marker, and a missing/cleared host config is treated as "not disabled" — the case this feature exists for. This modifies client files and can trigger antivirus heuristics; `/uninstall-overlay` strips only this plugin's line (no backup restore, no downgrade), writes the opt-out marker, stops serve and restores the default look.
+
 **What that exposes:** the CDP port binds to `127.0.0.1` (loopback only) but is **unauthenticated** — any process running as your user can attach to the renderer while the port is open. The plugin's own control API is additionally token-gated, but the CDP port itself is Chromium behavior outside this plugin's control. Don't enable it on a machine with untrusted local users or software.
 
 **Recovery / uninstall:**
 
 - `disable_experimental` (MCP) or `zcode-beautify disable` stops the service, clears the injected theme including the renderer's cached copy, and strips the flag from the launch entries again (`--keep-launchers` keeps it). Fully quit and restart ZCode afterwards. Stored wallpaper settings are kept, so re-enabling later restores the look.
 - `zcode-beautify repair-launchers --remove` only strips the flag — the rollback for what pre-0.6.0 versions wrote automatically, without touching anything else.
-- Uninstalling the plugin: run `node <plugin>/dist/cli.js disable` (or `repair-launchers --remove`) first, then remove the plugin.
-- Upgrades: ZCode's updater rebuilds the Start Menu shortcut without the flag; while enabled, the self-heal re-adds it on the next ZCode start — while disabled, nothing is ever re-added.
+- Removing the startup overlay: `/uninstall-overlay` (or `node <plugin>/dist/cli.js overlay remove`) strips the app.asar loader line, writes the opt-out marker, stops serve and restores the default look; personal settings are kept.
+- Uninstalling the plugin: run `node <plugin>/dist/cli.js overlay remove` first, then `disable` (or `repair-launchers --remove`), then remove the plugin.
+- Upgrades: ZCode's updater replaces app.asar and rebuilds the Start Menu shortcut without the flag. With the startup overlay installed, the patch is re-staged automatically after an update (applied after a full quit); with only launch-entry self-heal, the flag is re-added on the next ZCode start — while disabled, nothing is ever re-added.
 
 ## Risks & limitations
 

@@ -46,6 +46,12 @@ import type { RepairReport } from "./launchers.js";
 const MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
 const MAX_BODY_BYTES = MAX_WALLPAPER_BYTES + 1024 * 1024;
 const POLL_MS = 1500;
+/** Startup/injection cadence: a window that appears right after launch must
+ *  not wait a full idle poll before it gets its wallpaper and FAB. */
+const POLL_FAST_MS = 150;
+/** How long the fast cadence survives without progress (app closed, injection
+ *  failing) before it settles back to the idle 1.5 s probe. */
+const POLL_BURST_MS = 30_000;
 /**
  * How long a running serve stays dormant after the host plugin is switched
  * off, waiting for a quick re-enable (plugin manager off→on) before it exits.
@@ -78,6 +84,98 @@ function rememberAssets(file: string, mtimeMs: number, assets: WallpaperAssets):
   assetsCache.set(file, { mtimeMs, assets });
   if (assetsCache.size > 6) {
     assetsCache.delete(assetsCache.keys().next().value as string);
+  }
+}
+
+/**
+ * Cross-process Monet cache. Every serve restart used to re-decode the
+ * wallpaper with jimp before the first injection (实测: ~235 ms for a single
+ * 89 KB PNG; seconds for a 4K JPEG). The extracted theme/focus and the
+ * processed data URI depend only on the source file, so persist them beside
+ * the wallpaper library and skip the decoder on the next start.
+ *
+ * Keyed by resolved source path, invalidated by mtime+size, written
+ * asynchronously after injection so the disk write never delays the first
+ * paint. A schema bump discards old shapes.
+ */
+const ASSET_CACHE_SCHEMA = 3;
+const ASSET_CACHE_MAX_DATA_URI = 12 * 1024 * 1024;
+const ASSET_CACHE_MAX_FILES = 12;
+
+function assetCacheFile(sourcePath: string): string {
+  const key = crypto.createHash("sha1").update(path.resolve(sourcePath).toLowerCase()).digest("hex");
+  return path.join(dataDir(), "assets", key + ".json");
+}
+
+function readAssetCache(sourcePath: string, mtimeMs: number, size: number): WallpaperAssets | undefined {
+  try {
+    const raw = JSON.parse(fs.readFileSync(assetCacheFile(sourcePath), "utf8")) as {
+      schema?: number;
+      sourcePath?: string;
+      mtimeMs?: number;
+      size?: number;
+      assets?: { dataUri?: string; sourceArgb?: number; focus?: WallpaperAssets["focus"] };
+    };
+    if (raw?.schema !== ASSET_CACHE_SCHEMA) return undefined;
+    if (raw.sourcePath !== path.resolve(sourcePath) || raw.mtimeMs !== mtimeMs || raw.size !== size) return undefined;
+    const cached = raw.assets;
+    if (!cached || typeof cached.dataUri !== "string" || typeof cached.sourceArgb !== "number" || !cached.focus) return undefined;
+    // TonalPalette/Scheme are class instances with methods — JSON would strip
+    // tone()/etc. Rebuild the theme from the cached source ARGB (pure math,
+    // ~1 ms) instead of persisting the instance.
+    return {
+      dataUri: cached.dataUri,
+      sourceArgb: cached.sourceArgb,
+      focus: cached.focus,
+      theme: themeFromSourceColor(cached.sourceArgb),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAssetCache(sourcePath: string, mtimeMs: number, size: number, assets: WallpaperAssets): void {
+  try {
+    if (assets.dataUri.length > ASSET_CACHE_MAX_DATA_URI) return;
+    const file = assetCacheFile(sourcePath);
+    const body = JSON.stringify({
+      schema: ASSET_CACHE_SCHEMA,
+      sourcePath: path.resolve(sourcePath),
+      mtimeMs,
+      size,
+      assets: {
+        dataUri: assets.dataUri,
+        sourceArgb: assets.sourceArgb,
+        focus: assets.focus,
+      },
+    });
+    fs.promises.mkdir(path.dirname(file), { recursive: true })
+      .then(() => fs.promises.writeFile(file + ".tmp", body))
+      .then(() => fs.promises.rename(file + ".tmp", file))
+      .then(() => pruneAssetCache())
+      .catch(() => { /* cache is best effort */ });
+  } catch {
+    /* cache is best effort */
+  }
+}
+
+async function pruneAssetCache(): Promise<void> {
+  try {
+    const dir = path.join(dataDir(), "assets");
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    const files = entries.filter((e) => e.isFile() && e.name.endsWith(".json"));
+    if (files.length <= ASSET_CACHE_MAX_FILES) return;
+    const withTime = await Promise.all(files.map(async (e) => {
+      const full = path.join(dir, e.name);
+      const st = await fs.promises.stat(full).catch(() => undefined);
+      return { full, at: st?.mtimeMs ?? 0 };
+    }));
+    withTime.sort((a, b) => a.at - b.at);
+    for (const f of withTime.slice(0, withTime.length - ASSET_CACHE_MAX_FILES)) {
+      await fs.promises.rm(f.full, { force: true }).catch(() => {});
+    }
+  } catch {
+    /* no cache dir yet */
   }
 }
 
@@ -128,6 +226,22 @@ function withPinnedTheme(assets: WallpaperAssets, config: BeautifyConfig): Wallp
 async function getAssets(config: BeautifyConfig): Promise<WallpaperAssets | undefined> {
   const wallpaperPath = config.wallpaperPath;
   if (!wallpaperPath || !fs.existsSync(wallpaperPath)) return undefined;
+  // Cache keyed by the SELECTED wallpaper (video loop or image), not the
+  // derived thumb: a hit must skip themeThumbFor entirely — that call probes
+  // ffmpeg (~230 ms when absent) before it can even look at the decoded cache.
+  const wallpaperStat = fs.statSync(wallpaperPath);
+  const mtimeMs = wallpaperStat.mtimeMs;
+  const cached = assetsCache.get(wallpaperPath);
+  if (cached?.mtimeMs === mtimeMs) {
+    assetsCache.delete(wallpaperPath);
+    assetsCache.set(wallpaperPath, cached); // refresh LRU position
+    return withPinnedTheme(cached.assets, config);
+  }
+  const disk = readAssetCache(wallpaperPath, mtimeMs, wallpaperStat.size);
+  if (disk) {
+    rememberAssets(wallpaperPath, mtimeMs, disk);
+    return withPinnedTheme(disk, config);
+  }
   // Scene wallpaper: wallpaperPath is the loop VIDEO — jimp can't decode it.
   // The poster frame next to the loop carries the Monet source colors.
   // Library images sample a small ffmpeg-generated thumb instead.
@@ -136,16 +250,10 @@ async function getAssets(config: BeautifyConfig): Promise<WallpaperAssets | unde
       ? path.join(path.dirname(wallpaperPath), "poster.jpg")
       : await themeThumbFor(wallpaperPath);
   if (!fs.existsSync(sourcePath)) return undefined;
-  const mtimeMs = fs.statSync(sourcePath).mtimeMs;
-  const cached = assetsCache.get(sourcePath);
-  if (cached?.mtimeMs === mtimeMs) {
-    assetsCache.delete(sourcePath);
-    assetsCache.set(sourcePath, cached); // refresh LRU position
-    return withPinnedTheme(cached.assets, config);
-  }
   try {
     const assets = await loadWallpaper(sourcePath);
-    rememberAssets(sourcePath, mtimeMs, assets);
+    rememberAssets(wallpaperPath, mtimeMs, assets);
+    writeAssetCache(wallpaperPath, mtimeMs, wallpaperStat.size, assets);
     return withPinnedTheme(assets, config);
   } catch {
     return undefined; // undecodable wallpaper: inject without Monet rather than not at all
@@ -581,15 +689,18 @@ async function holdSession(
 ): Promise<void> {
   if (!target.webSocketDebuggerUrl) return;
   const conn = await CdpConnection.connect(target.webSocketDebuggerUrl);
-  await conn.send("Page.enable");
+  // Fast startup polling can reach a page target before its renderer is ready
+  // to answer; an unbounded Page.enable would freeze the whole poll loop.
+  await boundedSend(conn.send("Page.enable"), 4000);
   // A live serve is authoritative: clear the experimental opt-out marker
   // before the bootstrap/panel registration so this and future reloads inject.
   await boundedSend(conn.send("Runtime.evaluate", {
     expression: `try { localStorage.removeItem('zcode-beautify:disabled'); } catch (e) {}`,
   })).catch(() => {});
   const session: HeldSession = { conn };
-
+  const injectAt = Date.now();
   const assets = await getAssets(config);
+  const assetsMs = Date.now() - injectAt;
   const payload = buildPayload(lookConfigFor(config), assets, mediaToken);
   const bootstrap = buildBootstrapScript({
     css: payload.css,
@@ -634,12 +745,22 @@ async function holdSession(
     chatUi: app.supportsChatUi,
     hasUpdater: app.updaterUrlIncludes.length > 0,
   });
-  await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
+  await boundedSend(conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript }), 8000);
   // Runtime.evaluate does NOT reject when the script itself throws — surface
   // exceptionDetails or a broken panel fails silently ("injected" in the log).
   const panelEval = await boundedSend(conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true }));
   if (panelEval?.exceptionDetails) {
     console.error(`serve: panel script threw — ${JSON.stringify(panelEval.exceptionDetails).slice(0, 400)}`);
+  }
+  if (process.env.BEAUTIFY_TIMING === "1") {
+    console.error(`serve: inject timing ${JSON.stringify({
+      target: target.id,
+      totalMs: Date.now() - injectAt,
+      assetsMs,
+      assetCache: assets ? "loaded" : "none",
+      bootstrapChars: bootstrap.length,
+      panelChars: panelScript.length,
+    })}`);
   }
 
   held.set(target.id, session);
@@ -718,8 +839,19 @@ async function pushConfigToSessions(config: BeautifyConfig): Promise<number> {
   return ok;
 }
 
-async function poll(config: BeautifyConfig, apiPort: number): Promise<boolean> {
-  if (shuttingDown) return false;
+export interface PollState {
+  /** CDP endpoint answered (even with zero renderer windows). */
+  reachable: boolean;
+  /** Main renderer windows found this pass. */
+  rendererTargets: number;
+  /** Windows currently held (injected). */
+  held: number;
+  /** Every renderer window found is already held. */
+  settled: boolean;
+}
+
+async function poll(config: BeautifyConfig, apiPort: number): Promise<PollState> {
+  if (shuttingDown) return { reachable: false, rendererTargets: 0, held: held.size, settled: false };
   try {
     const targets = pickRendererTargets(await listTargets(config.port));
     const current = new Set(targets.map((t) => t.id));
@@ -780,8 +912,12 @@ async function poll(config: BeautifyConfig, apiPort: number): Promise<boolean> {
         try {
           await holdSession(t, config, apiPort);
           console.log(`serve: panel + theme injected into "${t.title}" (${t.id})`);
-        } catch {
-          /* retry next tick */
+        } catch (err) {
+          // A page target can exist before its renderer answers. Retry on the
+          // next (fast) tick; keep one line for diagnosis instead of silence.
+          if (process.env.BEAUTIFY_TIMING === "1") {
+            console.error(`serve: inject retry "${t.title}" — ${(err as Error).message}`);
+          }
         }
       }
     }
@@ -791,10 +927,10 @@ async function poll(config: BeautifyConfig, apiPort: number): Promise<boolean> {
         held.delete(id);
       }
     }
-    return targets.length > 0;
+    return { reachable: true, rendererTargets: targets.length, held: held.size, settled: targets.length > 0 && held.size >= targets.length };
   } catch {
     /* CDP not reachable; keep polling */
-    return false;
+    return { reachable: false, rendererTargets: 0, held: held.size, settled: false };
   }
 }
 
@@ -926,8 +1062,14 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   shuttingDown = false;
   const requestedCdpPort = opts.cdpPort;
   const apiPort = opts.apiPort;
+  // Provisional port: the API/health endpoint must not wait for a slow or
+  // absent CDP endpoint (a packaged client can take seconds to open the
+  // window; a black-holed port used to add the full 3s probe timeout to
+  // health). The built-in-port fallback is resolved in the BACKGROUND below.
   let cdpPort = requestedCdpPort;
   const startedAt = Date.now();
+  const timing: Record<string, number> = {};
+  const mark = (name: string): void => { timing[name] = Date.now() - startedAt; };
 
   // Do not even bind the API port while the host plugin manager says the
   // plugin is off. The runtime watchdog below covers a switch flipped after
@@ -938,15 +1080,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
   }
 
   // Packaged clients need the launcher CDP flag; unpackaged ZCode builds
-  // already expose 9229 without it. Resolve before the token/history setup so
-  // every later closure (runtimeConfig, health, poll) sees the active port.
+  // already expose 9229 without it. The fallback probe runs after listen
+  // (see below) so a slow CDP endpoint never delays /api/health.
   const preferredCdpPort = requestedCdpPort;
-  cdpPort = await resolveCdpPort(preferredCdpPort);
-  if (cdpPort !== preferredCdpPort) {
-    console.log(
-      `serve: CDP port ${preferredCdpPort} unavailable — using ${appTarget().appName}'s built-in debugging port ${cdpPort}`
-    );
-  }
 
   // Fresh random token every start; scripts on this machine (watchdog, CLI)
   // read it from <dataDir>/serve.token. The panel receives it in its injected
@@ -1030,7 +1166,9 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     throw new Error("provide hash or existing path");
   };
 
+  const duplicateProbeAt = Date.now();
   const already = await existingServePid(apiPort);
+  timing.duplicateCheckMs = Date.now() - duplicateProbeAt;
   if (already !== undefined) {
     throw new Error(
       `a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) — ` +
@@ -1146,7 +1284,10 @@ export async function startServe(opts: ServeOptions): Promise<void> {
         // OLD loop video: the upload "applied" while the wallpaper never
         // changed. An upload is always an image — clear the scene state.
         const themeSrc = await themeThumbFor(dest);
-        rememberAssets(themeSrc, fs.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
+        const destStat = fs.statSync(dest);
+        const uploadedAssets = await loadWallpaper(themeSrc);
+        rememberAssets(dest, destStat.mtimeMs, uploadedAssets);
+        writeAssetCache(dest, destStat.mtimeMs, destStat.size, uploadedAssets);
         const nextCfg: BeautifyConfig = {
           ...config,
           wallpaperPath: dest,
@@ -1314,6 +1455,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
           cdpPort,
           apiPort,
           experimental: { enabled: exp?.enabled === true, migrated: exp?.migrated === true },
+          timings: timing,
         });
         return;
       }
@@ -2210,6 +2352,7 @@ export async function startServe(opts: ServeOptions): Promise<void> {
     server.once("error", reject);
     server.listen(apiPort, "127.0.0.1", resolve);
   });
+  mark("listenMs");
 
   // The listen-time listener above is one-shot; without a permanent one, any
   // later server error would be an unhandled 'error' event and crash serve.
@@ -2219,6 +2362,27 @@ export async function startServe(opts: ServeOptions): Promise<void> {
 
   console.log(`serve: control API on http://127.0.0.1:${apiPort} — Ctrl+C to stop`);
   console.log(`serve: injecting into ${appTarget().appName} renderers on CDP port ${cdpPort}`);
+
+  // Built-in-port fallback (unpackaged ZCode opens 9229 without the shortcut
+  // flag) is resolved in the background: /api/health is already answering, and
+  // the first poll below uses the provisional port meanwhile. A wrong
+  // provisional port simply fails the first poll; the fast retry picks the
+  // resolved one up.
+  const startCdpResolution = (): void => {
+    void resolveCdpPort(preferredCdpPort)
+      .then((next) => {
+        if (next !== cdpPort) {
+          cdpPort = next;
+          console.log(
+            `serve: CDP port ${preferredCdpPort} unavailable — using ${appTarget().appName}'s built-in debugging port ${cdpPort}`
+          );
+        }
+        timing.cdpResolveMs = Date.now() - startedAt;
+        return next;
+      })
+      .catch(() => preferredCdpPort);
+  };
+  startCdpResolution();
 
   // --- wallpaper rotation (定时播放) ------------------------------------------
   // Three modes: "sequence" plays every entry for its duration in order and
@@ -2556,22 +2720,40 @@ export async function startServe(opts: ServeOptions): Promise<void> {
 
   // Initial pass, then keep polling so restarts of the app get re-injected.
   if (await stopIfHostDisabled()) return;
-  await poll(runtimeConfig(), apiPort);
+  let pollState = await poll(runtimeConfig(), apiPort);
+  mark("firstPollMs");
   // Resume an enabled rotation playlist (re-applies entry 0).
   startRotation();
+  if (process.env.BEAUTIFY_TIMING === "1") {
+    console.error(`serve timing ${JSON.stringify(timing)}`);
+  }
+  // Adaptive cadence: 150 ms while the app is starting / a renderer is still
+  // waiting for its injection, 1.5 s once every window is held. The old fixed
+  // 1.5 s sleep put up to 1.5 s between "window exists" and "wallpaper
+  // visible" on every start.
+  let fastUntil = Date.now() + POLL_BURST_MS;
+  let lastTargets = pollState.rendererTargets;
+  let lastResolveAt = Date.now();
+  let delay = pollState.settled ? POLL_MS : POLL_FAST_MS;
   for (;;) {
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await new Promise((r) => setTimeout(r, delay));
     if (await stopIfHostDisabled()) return;
-    const polled = await poll(runtimeConfig(), apiPort);
-    if (!polled) {
+    pollState = await poll(runtimeConfig(), apiPort);
+    if (!pollState.reachable) {
       // The app restarted (possibly switching between the launcher flag port
-      // and the built-in dev port) — re-resolve and keep serving.
-      const next = await resolveCdpPort(preferredCdpPort);
-      if (next !== cdpPort) {
-        cdpPort = next;
-        console.log(`serve: CDP port switched to ${cdpPort}`);
+      // and the built-in dev port) — re-resolve (throttled) and keep the fast
+      // cadence so a starting window is caught immediately.
+      fastUntil = Date.now() + POLL_BURST_MS;
+      lastTargets = 0;
+      if (Date.now() - lastResolveAt > 5000) {
+        lastResolveAt = Date.now();
+        startCdpResolution();
       }
+    } else if (pollState.rendererTargets !== lastTargets) {
+      lastTargets = pollState.rendererTargets;
+      fastUntil = Date.now() + POLL_BURST_MS;
     }
+    delay = pollState.settled ? POLL_MS : (Date.now() < fastUntil ? POLL_FAST_MS : POLL_MS);
   }
 }
 

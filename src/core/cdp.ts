@@ -7,6 +7,7 @@
 
 import { bubbleRecipes, rewriteCustomBubbleCss, BUBBLE_SELECTOR_REAL, BUBBLE_ROW_SELECTOR_REAL } from "./bubbleRecipes.js";
 import { TARGETS, target, type AppTarget } from "./target.js";
+import { startupProbeJs } from "./startupProbe.js";
 // Type-only: erased at compile time, so no runtime cycle with inject.js.
 import type { BubbleLookConfig } from "./inject.js";
 
@@ -229,6 +230,7 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
+  var ZB_NAV_T0 = (window.performance && performance.now) ? performance.now() : Date.now();
   // Disable teardown marker: old Page.addScriptToEvaluateOnNewDocument
   // registrations replay on every reload, so a disabled plugin would otherwise
   // repaint the wallpaper/theme from a previous generation's baked payload.
@@ -237,22 +239,15 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
   var CHAT_UI = ${JSON.stringify(payload.chatUi !== false)};
   var PROBE = ${JSON.stringify(payload.startupProbe ?? "zcode-body-class")};
-  // The startup screen phase (body carries zcode-startup-* but not yet
-  // -ready, or WorkBuddy still shows its skeleton overlay) covers the window
-  // with loading art — a wallpaper layer and the panel FAB on top of it look
-  // broken. With startupClean the whole bootstrap (and the panel) waits for
-  // the app shell; without it everything mounts at once.
-  var inStartupScreen = function() {
-    if (!document.body) return true;
-    if (PROBE === 'workbuddy-skeleton') {
-      var sk = document.querySelector('#sk-overlay, #skeleton-root');
-      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
-      var root = document.querySelector('#root');
-      return !root || root.childElementCount === 0;
-    }
-    var cls = document.body.className || '';
-    return /zcode-startup/.test(cls) && !/ready/.test(cls);
-  };
+  // The startup screen phase covers the window with loading art — a wallpaper
+  // layer and the panel FAB on top of it look broken. With startupClean the
+  // whole bootstrap (and the panel) waits for the app shell; without it
+  // everything mounts at once. The probe handles both ZCode 3.18 (body class)
+  // and 4.0 (class-less body + #loading overlay) — see startupProbe.ts.
+${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
+  // A startup screen that never clears must not suppress the look forever:
+  // after this cap the bootstrap mounts anyway (better late than never).
+  var MAX_STARTUP_WAIT_MS = 15000;
   var runBootstrapBody = function() {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
@@ -958,6 +953,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           + '@container conversation (min-width:864px){'
           + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
           + '}'
+          // ZCode 4.0 collapsed those two tiers into one max-w-xl holder
+          // (class "@min-[624px]/conversation:max-w-xl"). Give it its own
+          // breakpoint so the width cap lands where the column appears.
+          + '@container conversation (min-width:624px){'
+          + '[class*="/conversation:max-w-xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
+          + '}'
         : '')
       + (dragOn
         // 两侧拖拽调宽 width tiers: two px vars read by BOTH classes so the
@@ -980,6 +981,10 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           + '[class*="conversation:max-w-6xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 72) + 'rem)!important;'
           + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? inset : 24) + 'rem))!important}'
           + '}'
+          + '@container conversation (min-width:624px){'
+          + '[class*="/conversation:max-w-xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 36) + 'rem)!important;'
+          + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? Math.max(inset, 6) : 6) + 'rem))!important}'
+          + '}'
           // The strips: fixed 9px hit zones hugging the column edges,
           // invisible until hover (a 3px accent line), col-resize cursor.
           // z-index 40 stays under Tailwind's z-50 dropdown/modals.
@@ -994,12 +999,12 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
           // relayouts on top of the virtualizer's re-measure). While a drag
           // is active the transition is cut and the width updates in
           // quantized 16px steps (see GRIP_STEP) instead of every pointermove.
-          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{transition:none!important}'
+          + 'html.zb-grip-active [class*="conversation:max-w-"]{transition:none!important}'
           // Composer floor (实测: if a width var ever goes invalid the calc
           // becomes unset → the composer holder, a flex-row child, collapses
           // to min-content (~40px strip) while block-parented message holders
           // just fill. A literal floor can never go invalid).
-          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{min-width:460px!important}'
+          + 'html.zb-grip-active [class*="conversation:max-w-"]{min-width:460px!important}'
         : '')
       // 标题文件引用 chips: the sidebar title is plain text, so the converted
       // parts render through these rules. Colors ride the same
@@ -2364,8 +2369,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
         } catch (e2) {}
       }
     }
-    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]') : null;
-    if (!holder) holder = document.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]');
+    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-"]') : null;
+    if (!holder) holder = document.querySelector('[class*="conversation:max-w-"]');
     window.__zcodeBeautify.gripHolder = holder;
     // Content width the holder's percentage width resolves against (parent
     // content box) — the inset var derives from it. Cached for pointermove's
@@ -3072,18 +3077,76 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
     localStorage.setItem(MARKER + ':wallpaper', ${JSON.stringify(payload.wallpaperDataUri ?? "")});
   } catch (e) {}
   };
+  var zbDisabled = function() {
+    try { if (localStorage.getItem(MARKER + ':disabled') === '1') return true; } catch (e) {}
+    return !!(window.__zcodeBeautify && window.__zcodeBeautify.disabled);
+  };
+  var zbRunBody = function() {
+    var bodyAt = (window.performance && performance.now) ? performance.now() : Date.now();
+    runBootstrapBody();
+    if (window.__zcodeBeautify) {
+      var t = window.__zcodeBeautify.timing || (window.__zcodeBeautify.timing = {});
+      t.navStartMs = bodyAt - ZB_NAV_T0;
+      t.bootstrapMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - bodyAt;
+    }
+  };
+  var zbMountPending = function() {
+    var fn = window.__zcodeBeautify && window.__zcodeBeautify.pendingBootstrap;
+    window.__zcodeBeautify.pendingBootstrap = null;
+    if (typeof fn === 'function' && !zbDisabled()) fn();
+  };
+  var zbClearStartupWait = function() {
+    if (window.__zcodeBeautify.startupMO) {
+      try { window.__zcodeBeautify.startupMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.startupMO = null;
+    }
+    if (window.__zcodeBeautify.startupTimer) {
+      clearTimeout(window.__zcodeBeautify.startupTimer);
+      window.__zcodeBeautify.startupTimer = null;
+    }
+    if (window.__zcodeBeautify.startupCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.startupCheckTimer);
+      window.__zcodeBeautify.startupCheckTimer = null;
+    }
+  };
+  // Coalesce the startup-screen probe to at most once per 32 ms: the observer
+  // sees every class/child mutation while React mounts, and an unthrottled
+  // getComputedStyle per record is a needless main-thread tax during boot.
+  var zbScheduleStartupCheck = function() {
+    if (window.__zcodeBeautify.startupCheckTimer) return;
+    window.__zcodeBeautify.startupCheckTimer = setTimeout(function() {
+      window.__zcodeBeautify.startupCheckTimer = null;
+      if (!window.__zcodeBeautify || zbDisabled()) return;
+      if (!inStartupScreen()) { zbClearStartupWait(); zbMountPending(); }
+    }, 32);
+  };
   var runBootstrap = function() {
-    if (!STARTUP_CLEAN || !inStartupScreen()) { runBootstrapBody(); return; }
-    if (window.__zcodeBeautify.startupMO) return; // a waiter is already armed
-    var mo = new MutationObserver(function() {
-      if (!inStartupScreen()) {
-        mo.disconnect();
-        window.__zcodeBeautify.startupMO = null;
-        runBootstrapBody();
-      }
-    });
-    window.__zcodeBeautify.startupMO = mo;
-    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+    if (zbDisabled()) return;
+    if (!STARTUP_CLEAN || !inStartupScreen()) {
+      zbClearStartupWait();
+      window.__zcodeBeautify.pendingBootstrap = null;
+      zbRunBody();
+      return;
+    }
+    // Every eval replaces the pending body, so a newer serve generation wins
+    // over the closure an older registration armed. Idempotent: one MO only.
+    window.__zcodeBeautify.pendingBootstrap = zbRunBody;
+    if (!window.__zcodeBeautify.startupMO) {
+      var mo = new MutationObserver(zbScheduleStartupCheck);
+      window.__zcodeBeautify.startupMO = mo;
+      mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    }
+    if (!window.__zcodeBeautify.startupTimer) {
+      window.__zcodeBeautify.startupTimer = setTimeout(function() {
+        window.__zcodeBeautify.startupTimer = null;
+        if (zbDisabled()) return;
+        // Hard cap: a startup screen that never clears must not suppress the
+        // look forever. Mount even if the probe still says "startup".
+        zbClearStartupWait();
+        zbMountPending();
+      }, MAX_STARTUP_WAIT_MS);
+    }
   };
   // The addScriptToEvaluateOnNewDocument registration replays at document
   // creation, where documentElement is still null — appending the style or
@@ -3092,6 +3155,8 @@ export function buildBootstrapScript(payload: InjectionPayload): string {
   if (document.documentElement) runBootstrap();
   else {
     var zbWaitMount = function() {
+      if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+      if (zbDisabled()) return;
       if (document.documentElement) runBootstrap();
       else setTimeout(zbWaitMount, 10);
     };
@@ -3190,6 +3255,36 @@ export function buildResetScript(
       window.__zcodeBeautify.tcGoalTimer = null;
     }
     window.__zcodeBeautify.tcObsStamp = null;
+    // A startup waiter armed by a previous injection must die with this
+    // generation: without this, disabling the plugin while the client is
+    // still on its startup screen lets the parked bootstrap fire when the
+    // screen clears and repaint the look after the teardown.
+    if (window.__zcodeBeautify.startupMO) {
+      try { window.__zcodeBeautify.startupMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.startupMO = null;
+    }
+    if (window.__zcodeBeautify.startupTimer) {
+      clearTimeout(window.__zcodeBeautify.startupTimer);
+      window.__zcodeBeautify.startupTimer = null;
+    }
+    if (window.__zcodeBeautify.startupCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.startupCheckTimer);
+      window.__zcodeBeautify.startupCheckTimer = null;
+    }
+    window.__zcodeBeautify.pendingBootstrap = null;
+    if (window.__zcodeBeautify.panelMO) {
+      try { window.__zcodeBeautify.panelMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.panelMO = null;
+    }
+    if (window.__zcodeBeautify.panelTimer) {
+      clearTimeout(window.__zcodeBeautify.panelTimer);
+      window.__zcodeBeautify.panelTimer = null;
+    }
+    if (window.__zcodeBeautify.panelCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.panelCheckTimer);
+      window.__zcodeBeautify.panelCheckTimer = null;
+    }
+    window.__zcodeBeautify.pendingPanel = null;
   }
 ${opts.disable ? `  // 停用（与「还原外观」不同）：留下持久禁用标记，旧代
   // addScriptToEvaluateOnNewDocument 在下次 reload 时自检退出；同时把面板

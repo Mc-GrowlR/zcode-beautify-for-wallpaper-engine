@@ -315,6 +315,37 @@ var init_target = __esm({
   }
 });
 
+// dist/core/startupProbe.js
+function startupProbeJs(probe) {
+  return `var inStartupScreen = function() {
+    if (!document.body) return true;
+    if (${JSON.stringify(probe)} === 'workbuddy-skeleton') {
+      var sk = document.querySelector('#sk-overlay, #skeleton-root');
+      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
+      var wbRoot = document.querySelector('#root');
+      return !wbRoot || wbRoot.childElementCount === 0;
+    }
+    var cls = document.body.className || '';
+    if (/zcode-startup/.test(cls)) return !/ready/.test(cls);
+    // ZCode 4.0: no startup class while loading \u2014 the full-screen overlay is
+    // the only signal. Check that it is actually visible: a stale hidden node
+    // must not block the mount after the app marked itself ready.
+    var load = document.getElementById('loading');
+    if (load) {
+      try {
+        var lcs = getComputedStyle(load);
+        if (lcs.display !== 'none' && lcs.visibility !== 'hidden' && Number(lcs.opacity || '1') > 0.05) return true;
+      } catch (e) {}
+    }
+    return false;
+  };`;
+}
+var init_startupProbe = __esm({
+  "dist/core/startupProbe.js"() {
+    "use strict";
+  }
+});
+
 // dist/core/cdp.js
 var cdp_exports = {};
 __export(cdp_exports, {
@@ -382,6 +413,7 @@ function buildBootstrapScript(payload) {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
+  var ZB_NAV_T0 = (window.performance && performance.now) ? performance.now() : Date.now();
   // Disable teardown marker: old Page.addScriptToEvaluateOnNewDocument
   // registrations replay on every reload, so a disabled plugin would otherwise
   // repaint the wallpaper/theme from a previous generation's baked payload.
@@ -390,22 +422,15 @@ function buildBootstrapScript(payload) {
   var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
   var CHAT_UI = ${JSON.stringify(payload.chatUi !== false)};
   var PROBE = ${JSON.stringify(payload.startupProbe ?? "zcode-body-class")};
-  // The startup screen phase (body carries zcode-startup-* but not yet
-  // -ready, or WorkBuddy still shows its skeleton overlay) covers the window
-  // with loading art \u2014 a wallpaper layer and the panel FAB on top of it look
-  // broken. With startupClean the whole bootstrap (and the panel) waits for
-  // the app shell; without it everything mounts at once.
-  var inStartupScreen = function() {
-    if (!document.body) return true;
-    if (PROBE === 'workbuddy-skeleton') {
-      var sk = document.querySelector('#sk-overlay, #skeleton-root');
-      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
-      var root = document.querySelector('#root');
-      return !root || root.childElementCount === 0;
-    }
-    var cls = document.body.className || '';
-    return /zcode-startup/.test(cls) && !/ready/.test(cls);
-  };
+  // The startup screen phase covers the window with loading art \u2014 a wallpaper
+  // layer and the panel FAB on top of it look broken. With startupClean the
+  // whole bootstrap (and the panel) waits for the app shell; without it
+  // everything mounts at once. The probe handles both ZCode 3.18 (body class)
+  // and 4.0 (class-less body + #loading overlay) \u2014 see startupProbe.ts.
+${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
+  // A startup screen that never clears must not suppress the look forever:
+  // after this cap the bootstrap mounts anyway (better late than never).
+  var MAX_STARTUP_WAIT_MS = 15000;
   var runBootstrapBody = function() {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
@@ -1111,6 +1136,12 @@ function buildBootstrapScript(payload) {
           + '@container conversation (min-width:864px){'
           + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
           + '}'
+          // ZCode 4.0 collapsed those two tiers into one max-w-xl holder
+          // (class "@min-[624px]/conversation:max-w-xl"). Give it its own
+          // breakpoint so the width cap lands where the column appears.
+          + '@container conversation (min-width:624px){'
+          + '[class*="/conversation:max-w-xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
+          + '}'
         : '')
       + (dragOn
         // \u4E24\u4FA7\u62D6\u62FD\u8C03\u5BBD width tiers: two px vars read by BOTH classes so the
@@ -1133,6 +1164,10 @@ function buildBootstrapScript(payload) {
           + '[class*="conversation:max-w-6xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 72) + 'rem)!important;'
           + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? inset : 24) + 'rem))!important}'
           + '}'
+          + '@container conversation (min-width:624px){'
+          + '[class*="/conversation:max-w-xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 36) + 'rem)!important;'
+          + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? Math.max(inset, 6) : 6) + 'rem))!important}'
+          + '}'
           // The strips: fixed 9px hit zones hugging the column edges,
           // invisible until hover (a 3px accent line), col-resize cursor.
           // z-index 40 stays under Tailwind's z-50 dropdown/modals.
@@ -1147,12 +1182,12 @@ function buildBootstrapScript(payload) {
           // relayouts on top of the virtualizer's re-measure). While a drag
           // is active the transition is cut and the width updates in
           // quantized 16px steps (see GRIP_STEP) instead of every pointermove.
-          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{transition:none!important}'
+          + 'html.zb-grip-active [class*="conversation:max-w-"]{transition:none!important}'
           // Composer floor (\u5B9E\u6D4B: if a width var ever goes invalid the calc
           // becomes unset \u2192 the composer holder, a flex-row child, collapses
           // to min-content (~40px strip) while block-parented message holders
           // just fill. A literal floor can never go invalid).
-          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{min-width:460px!important}'
+          + 'html.zb-grip-active [class*="conversation:max-w-"]{min-width:460px!important}'
         : '')
       // \u6807\u9898\u6587\u4EF6\u5F15\u7528 chips: the sidebar title is plain text, so the converted
       // parts render through these rules. Colors ride the same
@@ -2517,8 +2552,8 @@ function buildBootstrapScript(payload) {
         } catch (e2) {}
       }
     }
-    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]') : null;
-    if (!holder) holder = document.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]');
+    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-"]') : null;
+    if (!holder) holder = document.querySelector('[class*="conversation:max-w-"]');
     window.__zcodeBeautify.gripHolder = holder;
     // Content width the holder's percentage width resolves against (parent
     // content box) \u2014 the inset var derives from it. Cached for pointermove's
@@ -3225,18 +3260,76 @@ function buildBootstrapScript(payload) {
     localStorage.setItem(MARKER + ':wallpaper', ${JSON.stringify(payload.wallpaperDataUri ?? "")});
   } catch (e) {}
   };
+  var zbDisabled = function() {
+    try { if (localStorage.getItem(MARKER + ':disabled') === '1') return true; } catch (e) {}
+    return !!(window.__zcodeBeautify && window.__zcodeBeautify.disabled);
+  };
+  var zbRunBody = function() {
+    var bodyAt = (window.performance && performance.now) ? performance.now() : Date.now();
+    runBootstrapBody();
+    if (window.__zcodeBeautify) {
+      var t = window.__zcodeBeautify.timing || (window.__zcodeBeautify.timing = {});
+      t.navStartMs = bodyAt - ZB_NAV_T0;
+      t.bootstrapMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - bodyAt;
+    }
+  };
+  var zbMountPending = function() {
+    var fn = window.__zcodeBeautify && window.__zcodeBeautify.pendingBootstrap;
+    window.__zcodeBeautify.pendingBootstrap = null;
+    if (typeof fn === 'function' && !zbDisabled()) fn();
+  };
+  var zbClearStartupWait = function() {
+    if (window.__zcodeBeautify.startupMO) {
+      try { window.__zcodeBeautify.startupMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.startupMO = null;
+    }
+    if (window.__zcodeBeautify.startupTimer) {
+      clearTimeout(window.__zcodeBeautify.startupTimer);
+      window.__zcodeBeautify.startupTimer = null;
+    }
+    if (window.__zcodeBeautify.startupCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.startupCheckTimer);
+      window.__zcodeBeautify.startupCheckTimer = null;
+    }
+  };
+  // Coalesce the startup-screen probe to at most once per 32 ms: the observer
+  // sees every class/child mutation while React mounts, and an unthrottled
+  // getComputedStyle per record is a needless main-thread tax during boot.
+  var zbScheduleStartupCheck = function() {
+    if (window.__zcodeBeautify.startupCheckTimer) return;
+    window.__zcodeBeautify.startupCheckTimer = setTimeout(function() {
+      window.__zcodeBeautify.startupCheckTimer = null;
+      if (!window.__zcodeBeautify || zbDisabled()) return;
+      if (!inStartupScreen()) { zbClearStartupWait(); zbMountPending(); }
+    }, 32);
+  };
   var runBootstrap = function() {
-    if (!STARTUP_CLEAN || !inStartupScreen()) { runBootstrapBody(); return; }
-    if (window.__zcodeBeautify.startupMO) return; // a waiter is already armed
-    var mo = new MutationObserver(function() {
-      if (!inStartupScreen()) {
-        mo.disconnect();
-        window.__zcodeBeautify.startupMO = null;
-        runBootstrapBody();
-      }
-    });
-    window.__zcodeBeautify.startupMO = mo;
-    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+    if (zbDisabled()) return;
+    if (!STARTUP_CLEAN || !inStartupScreen()) {
+      zbClearStartupWait();
+      window.__zcodeBeautify.pendingBootstrap = null;
+      zbRunBody();
+      return;
+    }
+    // Every eval replaces the pending body, so a newer serve generation wins
+    // over the closure an older registration armed. Idempotent: one MO only.
+    window.__zcodeBeautify.pendingBootstrap = zbRunBody;
+    if (!window.__zcodeBeautify.startupMO) {
+      var mo = new MutationObserver(zbScheduleStartupCheck);
+      window.__zcodeBeautify.startupMO = mo;
+      mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    }
+    if (!window.__zcodeBeautify.startupTimer) {
+      window.__zcodeBeautify.startupTimer = setTimeout(function() {
+        window.__zcodeBeautify.startupTimer = null;
+        if (zbDisabled()) return;
+        // Hard cap: a startup screen that never clears must not suppress the
+        // look forever. Mount even if the probe still says "startup".
+        zbClearStartupWait();
+        zbMountPending();
+      }, MAX_STARTUP_WAIT_MS);
+    }
   };
   // The addScriptToEvaluateOnNewDocument registration replays at document
   // creation, where documentElement is still null \u2014 appending the style or
@@ -3245,6 +3338,8 @@ function buildBootstrapScript(payload) {
   if (document.documentElement) runBootstrap();
   else {
     var zbWaitMount = function() {
+      if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+      if (zbDisabled()) return;
       if (document.documentElement) runBootstrap();
       else setTimeout(zbWaitMount, 10);
     };
@@ -3329,6 +3424,36 @@ function buildResetScript(marker = "zcode-beautify", opts = {}) {
       window.__zcodeBeautify.tcGoalTimer = null;
     }
     window.__zcodeBeautify.tcObsStamp = null;
+    // A startup waiter armed by a previous injection must die with this
+    // generation: without this, disabling the plugin while the client is
+    // still on its startup screen lets the parked bootstrap fire when the
+    // screen clears and repaint the look after the teardown.
+    if (window.__zcodeBeautify.startupMO) {
+      try { window.__zcodeBeautify.startupMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.startupMO = null;
+    }
+    if (window.__zcodeBeautify.startupTimer) {
+      clearTimeout(window.__zcodeBeautify.startupTimer);
+      window.__zcodeBeautify.startupTimer = null;
+    }
+    if (window.__zcodeBeautify.startupCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.startupCheckTimer);
+      window.__zcodeBeautify.startupCheckTimer = null;
+    }
+    window.__zcodeBeautify.pendingBootstrap = null;
+    if (window.__zcodeBeautify.panelMO) {
+      try { window.__zcodeBeautify.panelMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.panelMO = null;
+    }
+    if (window.__zcodeBeautify.panelTimer) {
+      clearTimeout(window.__zcodeBeautify.panelTimer);
+      window.__zcodeBeautify.panelTimer = null;
+    }
+    if (window.__zcodeBeautify.panelCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.panelCheckTimer);
+      window.__zcodeBeautify.panelCheckTimer = null;
+    }
+    window.__zcodeBeautify.pendingPanel = null;
   }
 ${opts.disable ? `  // \u505C\u7528\uFF08\u4E0E\u300C\u8FD8\u539F\u5916\u89C2\u300D\u4E0D\u540C\uFF09\uFF1A\u7559\u4E0B\u6301\u4E45\u7981\u7528\u6807\u8BB0\uFF0C\u65E7\u4EE3
   // addScriptToEvaluateOnNewDocument \u5728\u4E0B\u6B21 reload \u65F6\u81EA\u68C0\u9000\u51FA\uFF1B\u540C\u65F6\u628A\u9762\u677F
@@ -3346,6 +3471,7 @@ var init_cdp = __esm({
     "use strict";
     init_bubbleRecipes();
     init_target();
+    init_startupProbe();
     CdpError = class extends Error {
     };
     CdpConnection = class _CdpConnection {
@@ -9335,7 +9461,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs17 = __require("fs");
+    var fs18 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -9450,14 +9576,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports.write = function(path17, frames, spec, encoder) {
+    exports.write = function(path18, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path17.match(/\.[a-zA-Z]+$/);
+      const matches = path18.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path17}' has an unexpected suffix`);
+        throw new Error(`GIF '${path18}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path17, gif2.buffer).then(() => {
+        return _writeBinary(path18, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -9529,9 +9655,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path17) {
+    function _readBinary(path18) {
       return new Promise((resolve, reject) => {
-        fs17.readFile(path17, (err, buffer) => {
+        fs18.readFile(path18, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -9539,9 +9665,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path17, buffer) {
+    function _writeBinary(path18, buffer) {
       return new Promise((resolve, reject) => {
-        fs17.writeFile(path17, buffer, (err) => {
+        fs18.writeFile(path18, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -11552,9 +11678,9 @@ var require_decoder = __commonJS({
         return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
       }
       constructor.prototype = {
-        load: function load(path17) {
+        load: function load(path18) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path17, true);
+          xhr.open("GET", path18, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -22457,8 +22583,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -22766,11 +22892,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -26583,8 +26709,8 @@ var init_parseUtil2 = __esm({
     init_errors2();
     init_en2();
     makeIssue2 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -26892,11 +27018,11 @@ var init_types3 = __esm({
     init_parseUtil2();
     init_util2();
     ParseInputLazyPath2 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -31494,8 +31620,8 @@ var init_parseUtil3 = __esm({
     init_errors3();
     init_en3();
     makeIssue3 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -31803,11 +31929,11 @@ var init_types4 = __esm({
     init_parseUtil3();
     init_util3();
     ParseInputLazyPath3 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -35648,8 +35774,8 @@ var init_parseUtil4 = __esm({
     init_errors4();
     init_en4();
     makeIssue4 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -35957,11 +36083,11 @@ var init_types5 = __esm({
     init_parseUtil4();
     init_util4();
     ParseInputLazyPath4 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -40084,11 +40210,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path17) {
-      path17 = String(path17);
-      let last = path17.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path18) {
+      path18 = String(path18);
+      let last = path18.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path17.length;
+      let hasPath = last.length < path18.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -46626,8 +46752,8 @@ function isTokenizerStreamBoundsError(error) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error.stack);
 }
-async function fileTypeFromFile(path17, options) {
-  return new FileTypeParser2(options).fromFile(path17, options);
+async function fileTypeFromFile(path18, options) {
+  return new FileTypeParser2(options).fromFile(path18, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -46658,9 +46784,9 @@ var init_file_type = __esm({
           }
         }
       }
-      async fromFile(path17) {
+      async fromFile(path18) {
         this.options.signal?.throwIfAborted();
-        const fileHandle = await fs3.open(path17, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+        const fileHandle = await fs3.open(path18, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
         const fileStat = await fileHandle.stat();
         if (!fileStat.isFile()) {
           await fileHandle.close();
@@ -46669,7 +46795,7 @@ var init_file_type = __esm({
         const tokenizer = new FileTokenizer(fileHandle, {
           ...this.getTokenizerOptions(),
           fileInfo: {
-            path: path17,
+            path: path18,
             size: fileStat.size
           }
         });
@@ -47004,9 +47130,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path17, options) {
-      const mimeType = import_lite.default.getType(path17);
-      await writeFile(path17, await this.getBuffer(mimeType, options));
+    async write(path18, options) {
+      const mimeType = import_lite.default.getType(path18);
+      await writeFile(path18, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -47655,8 +47781,8 @@ var init_parseUtil5 = __esm({
     init_errors5();
     init_en5();
     makeIssue5 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -47964,11 +48090,11 @@ var init_types6 = __esm({
     init_parseUtil5();
     init_util6();
     ParseInputLazyPath5 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -52413,8 +52539,8 @@ var init_parseUtil6 = __esm({
     init_errors6();
     init_en6();
     makeIssue6 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -52722,11 +52848,11 @@ var init_types7 = __esm({
     init_parseUtil6();
     init_util7();
     ParseInputLazyPath6 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -56580,8 +56706,8 @@ var init_parseUtil7 = __esm({
     init_errors7();
     init_en7();
     makeIssue7 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -56889,11 +57015,11 @@ var init_types8 = __esm({
     init_parseUtil7();
     init_util8();
     ParseInputLazyPath7 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -60874,8 +61000,8 @@ var init_parseUtil8 = __esm({
     init_errors8();
     init_en8();
     makeIssue8 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -61183,11 +61309,11 @@ var init_types9 = __esm({
     init_parseUtil8();
     init_util9();
     ParseInputLazyPath8 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -65036,8 +65162,8 @@ var init_parseUtil9 = __esm({
     init_errors9();
     init_en9();
     makeIssue9 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -65345,11 +65471,11 @@ var init_types10 = __esm({
     init_parseUtil9();
     init_util10();
     ParseInputLazyPath9 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -69235,8 +69361,8 @@ var init_parseUtil10 = __esm({
     init_errors10();
     init_en10();
     makeIssue10 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -69544,11 +69670,11 @@ var init_types11 = __esm({
     init_parseUtil10();
     init_util11();
     ParseInputLazyPath10 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -73386,8 +73512,8 @@ var init_parseUtil11 = __esm({
     init_errors11();
     init_en11();
     makeIssue11 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -73695,11 +73821,11 @@ var init_types12 = __esm({
     init_parseUtil11();
     init_util12();
     ParseInputLazyPath11 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -77772,8 +77898,8 @@ var init_parseUtil12 = __esm({
     init_errors12();
     init_en12();
     makeIssue12 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -78081,11 +78207,11 @@ var init_types13 = __esm({
     init_parseUtil12();
     init_util13();
     ParseInputLazyPath12 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -81942,8 +82068,8 @@ var init_parseUtil13 = __esm({
     init_errors13();
     init_en13();
     makeIssue13 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -82251,11 +82377,11 @@ var init_types14 = __esm({
     init_parseUtil13();
     init_util14();
     ParseInputLazyPath13 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -86269,8 +86395,8 @@ var init_parseUtil14 = __esm({
     init_errors14();
     init_en14();
     makeIssue14 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -86578,11 +86704,11 @@ var init_types16 = __esm({
     init_parseUtil14();
     init_util15();
     ParseInputLazyPath14 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -90546,8 +90672,8 @@ var init_parseUtil15 = __esm({
     init_errors15();
     init_en15();
     makeIssue15 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -90855,11 +90981,11 @@ var init_types17 = __esm({
     init_parseUtil15();
     init_util16();
     ParseInputLazyPath15 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -97596,8 +97722,8 @@ var init_parseUtil16 = __esm({
     init_errors16();
     init_en16();
     makeIssue16 = (params) => {
-      const { data, path: path17, errorMaps, issueData } = params;
-      const fullPath = [...path17, ...issueData.path || []];
+      const { data, path: path18, errorMaps, issueData } = params;
+      const fullPath = [...path18, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -97905,11 +98031,11 @@ var init_types18 = __esm({
     init_parseUtil16();
     init_util17();
     ParseInputLazyPath16 = class {
-      constructor(parent, value, path17, key) {
+      constructor(parent, value, path18, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path17;
+        this._path = path18;
         this._key = key;
       }
       get path() {
@@ -113272,7 +113398,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.6";
+    VERSION = "6.4.0";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";
@@ -115536,6 +115662,947 @@ var init_experimental = __esm({
   }
 });
 
+// dist/core/overlay.js
+var overlay_exports = {};
+__export(overlay_exports, {
+  OVERLAY_LINE_RE: () => OVERLAY_LINE_RE,
+  PENDING_DEADLINE_MS: () => PENDING_DEADLINE_MS,
+  autoHealOverlay: () => autoHealOverlay,
+  buildPatchedAsar: () => buildPatchedAsar,
+  defaultPluginRoot: () => defaultPluginRoot,
+  finalizePending: () => finalizePending,
+  findAppAsar: () => findAppAsar,
+  hasOverlayLine: () => hasOverlayLine,
+  inspectAsar: () => inspectAsar,
+  installOverlay: () => installOverlay,
+  isAppRunning: () => isAppRunning,
+  overlayDir: () => overlayDir,
+  overlayInjectionLine: () => overlayInjectionLine,
+  overlayPaths: () => overlayPaths,
+  overlayStatus: () => overlayStatus,
+  readAsarFile: () => readAsarFile,
+  readAsarLayout: () => readAsarLayout,
+  readOverlayState: () => readOverlayState,
+  readPending: () => readPending,
+  removeOverlay: () => removeOverlay,
+  stripOverlayLine: () => stripOverlayLine,
+  syncRuntime: () => syncRuntime
+});
+import { createHash } from "node:crypto";
+import { execFileSync as execFileSync3, spawn as spawn4 } from "node:child_process";
+import fs11 from "node:fs";
+import path12 from "node:path";
+import { pathToFileURL } from "node:url";
+function overlayDir() {
+  const override = process.env.ZCODE_BEAUTIFY_OVERLAY_DIR?.trim();
+  return override ? path12.resolve(override) : path12.join(dataDir(), "overlay");
+}
+function overlayPaths() {
+  const dir = overlayDir();
+  return {
+    dir,
+    loader: path12.join(dir, "overlay-loader.cjs"),
+    cli: path12.join(dir, "beautify-cli.mjs"),
+    monitor: path12.join(dir, "overlay-monitor.cjs"),
+    state: path12.join(dir, "overlay.json"),
+    pending: path12.join(dir, "overlay-pending.json"),
+    optOut: path12.join(dir, ".plugin-overlay-optout"),
+    log: path12.join(dir, "overlay.log"),
+    lock: path12.join(dir, "overlay-install.lock"),
+    autoHealStamp: path12.join(dir, "autoheal.stamp")
+  };
+}
+function findAppAsar(app = target()) {
+  const envName = app.id === "zcode" ? "ZCODE_BEAUTIFY_ASAR" : "WORKBUDDY_BEAUTIFY_ASAR";
+  const override = process.env[envName]?.trim();
+  if (override)
+    return path12.resolve(override);
+  const exe = findExecutable(app);
+  if (!exe) {
+    throw new Error(`${app.appName} executable not found; set ${app.exeEnvVars[0]} (or install the client) and retry \u2014 the overlay patches <install dir>/resources/app.asar`);
+  }
+  const exeDir = path12.dirname(exe);
+  if (process.platform === "darwin" && app.id === "zcode") {
+    return path12.resolve(exeDir, "..", "Resources", "app.asar");
+  }
+  return path12.join(exeDir, "resources", "app.asar");
+}
+function defaultPluginRoot() {
+  const env = process.env.ZCODE_BEAUTIFY_PLUGIN_ROOT?.trim();
+  if (env && fs11.existsSync(path12.join(env, "runtime", "overlay-loader.cjs")))
+    return path12.resolve(env);
+  const starts = [];
+  if (process.argv[1])
+    starts.push(path12.dirname(path12.resolve(process.argv[1])));
+  starts.push(process.cwd());
+  for (const start of starts) {
+    let dir = start;
+    for (let i2 = 0; i2 < 8; i2++) {
+      if (fs11.existsSync(path12.join(dir, "runtime", "overlay-loader.cjs")))
+        return dir;
+      const parent = path12.dirname(dir);
+      if (parent === dir)
+        break;
+      dir = parent;
+    }
+  }
+  throw new Error("cannot locate the zcode-beautify plugin root (runtime/overlay-loader.cjs missing); pass --plugin-root <dir>");
+}
+function readExact(fd, length, position) {
+  const buf = Buffer.alloc(length);
+  let done = 0;
+  while (done < length) {
+    const n2 = fs11.readSync(fd, buf, done, length - done, position + done);
+    if (n2 <= 0)
+      throw new Error(`unexpected end of file at byte ${position + done}`);
+    done += n2;
+  }
+  return buf;
+}
+function writeAll(fd, buf) {
+  let done = 0;
+  while (done < buf.length)
+    done += fs11.writeSync(fd, buf, done, buf.length - done);
+}
+function nodeAt(header, filePath) {
+  let cur = { files: header.files };
+  for (const segment of filePath.split("/").filter(Boolean)) {
+    cur = cur?.files?.[segment];
+    if (!cur)
+      return void 0;
+  }
+  return cur;
+}
+function flatten(node, prefix = "") {
+  const out = [];
+  for (const [name, child] of Object.entries(node.files ?? {})) {
+    const p2 = `${prefix}/${name}`;
+    if (child && typeof child === "object" && child.files)
+      out.push(...flatten(child, p2));
+    else
+      out.push({ path: p2, node: child });
+  }
+  return out;
+}
+function readInlineFile(fd, layout, node) {
+  if (node.unpacked)
+    throw new Error("file is unpacked; not inside app.asar");
+  const size = Number(node.size);
+  const offset = Number(node.offset);
+  if (!Number.isFinite(size) || !Number.isFinite(offset) || size < 0 || offset < 0) {
+    throw new Error(`invalid asar file entry (size=${String(node.size)}, offset=${String(node.offset)})`);
+  }
+  return readExact(fd, size, layout.dataStart + offset);
+}
+function readAsarLayout(fd) {
+  const head = readExact(fd, 16, 0);
+  const prefix = head.readUInt32LE(0);
+  const headerSize = head.readUInt32LE(4);
+  const stringSize = head.readUInt32LE(8);
+  const jsonSize = head.readUInt32LE(12);
+  if (prefix !== 4)
+    throw new Error(`not an Electron asar (pickle prefix ${prefix})`);
+  if (headerSize < 8 || jsonSize === 0 || jsonSize > MAX_HEADER || stringSize < jsonSize + 4) {
+    throw new Error(`unsupported asar header (header=${headerSize}, string=${stringSize}, json=${jsonSize})`);
+  }
+  if (headerSize !== stringSize + 4) {
+    throw new Error(`unsupported asar header layout (header=${headerSize}, string=${stringSize})`);
+  }
+  let header;
+  try {
+    header = JSON.parse(readExact(fd, jsonSize, 16).toString("utf8"));
+  } catch (err) {
+    throw new Error(`cannot parse app.asar header: ${err.message}`);
+  }
+  if (!header || typeof header !== "object" || !header.files)
+    throw new Error("app.asar header has no files map");
+  const packageNode = header.files["package.json"];
+  if (!packageNode || packageNode.unpacked || packageNode.link) {
+    throw new Error("app.asar root package.json is missing or unpacked");
+  }
+  let pkg;
+  try {
+    pkg = JSON.parse(readInlineFile(fd, { header, dataStart: 8 + headerSize, entryPath: "", entryNode: {} }, packageNode).toString("utf8"));
+  } catch (err) {
+    throw new Error(`cannot read app.asar package.json: ${err.message}`);
+  }
+  const main2 = typeof pkg.main === "string" ? pkg.main : "";
+  const entryPath = main2.replace(/^[.][\\/]+/, "").replace(/^[\\/]+/, "").replace(/\\/g, "/");
+  if (!entryPath || entryPath.split("/").includes(".."))
+    throw new Error(`app.asar package.json has an invalid main entry: ${main2 || "(empty)"}`);
+  const entryNode = nodeAt(header, entryPath);
+  if (!entryNode || entryNode.unpacked || entryNode.link)
+    throw new Error(`app.asar main entry ${entryPath} is missing or unpacked`);
+  if (typeof entryNode.size !== "number")
+    throw new Error(`app.asar main entry ${entryPath} has no size`);
+  return { header, dataStart: 8 + headerSize, entryPath, entryNode };
+}
+function readAsarFile(asarPath, filePath) {
+  const fd = fs11.openSync(asarPath, "r");
+  try {
+    const layout = readAsarLayout(fd);
+    const node = nodeAt(layout.header, filePath.replace(/^\/+/, "").replace(/\\/g, "/"));
+    if (!node)
+      throw new Error(`file not found in app.asar: ${filePath}`);
+    return readInlineFile(fd, layout, node);
+  } finally {
+    try {
+      fs11.closeSync(fd);
+    } catch {
+    }
+  }
+}
+function overlayInjectionLine(loaderPath) {
+  const url = pathToFileURL(loaderPath).href;
+  return `
+;import(${JSON.stringify(url)}).then(() => null, (e) => console.error("[zcode-beautify] overlay load failed", e));`;
+}
+function stripOverlayLine(entry) {
+  return entry.toString("utf8").replace(OVERLAY_LINE_RE, "");
+}
+function hasOverlayLine(entry) {
+  OVERLAY_LINE_RE.lastIndex = 0;
+  return OVERLAY_LINE_RE.test(entry.toString("utf8"));
+}
+function inspectAsar(asarPath, loaderPath = overlayPaths().loader) {
+  const result = { asar: asarPath, exists: false, injected: false, current: false, loaderUrls: [] };
+  let fd;
+  try {
+    fd = fs11.openSync(asarPath, "r");
+    result.exists = true;
+    const layout = readAsarLayout(fd);
+    result.entryPath = layout.entryPath;
+    result.fileCount = flatten(layout.header).length;
+    const entry = readInlineFile(fd, layout, layout.entryNode).toString("utf8");
+    result.injected = hasOverlayLine(entry);
+    result.loaderUrls = [...entry.matchAll(/import\("([^"]*overlay-loader\.cjs)"\)/g)].map((m) => m[1]);
+    const wanted = pathToFileURL(path12.resolve(loaderPath)).href;
+    result.current = result.injected && result.loaderUrls.length > 0 && result.loaderUrls.every((u2) => u2 === wanted);
+  } catch (err) {
+    result.error = err.message;
+  } finally {
+    if (fd !== void 0) {
+      try {
+        fs11.closeSync(fd);
+      } catch {
+      }
+    }
+  }
+  return result;
+}
+function integrityFor(data) {
+  const blocks = [];
+  for (let i2 = 0; i2 < data.length; i2 += BLOCK) {
+    blocks.push(createHash("sha256").update(data.subarray(i2, Math.min(i2 + BLOCK, data.length))).digest("hex"));
+  }
+  return {
+    algorithm: "SHA256",
+    hash: createHash("sha256").update(data).digest("hex"),
+    blockSize: BLOCK,
+    blocks
+  };
+}
+function fileStamp(file) {
+  const st = fs11.statSync(file);
+  return { size: st.size, mtimeMs: st.mtimeMs, ino: st.ino, dev: st.dev };
+}
+function sameStamp(a2, b) {
+  return a2.size === b.size && a2.mtimeMs === b.mtimeMs && a2.ino === b.ino && a2.dev === b.dev;
+}
+function copyRange(src, dst, start, length, buf) {
+  let done = 0;
+  while (done < length) {
+    const want = Math.min(buf.length, length - done);
+    const n2 = fs11.readSync(src, buf, 0, want, start + done);
+    if (n2 <= 0)
+      throw new Error(`unexpected end of source asar at byte ${start + done}`);
+    let written = 0;
+    while (written < n2)
+      written += fs11.writeSync(dst, buf, written, n2 - written);
+    done += n2;
+  }
+}
+function buildPatchedAsar(srcPath, dstPath, mode, loaderPath) {
+  const before = fileStamp(srcPath);
+  const src = fs11.openSync(srcPath, "r");
+  let dst;
+  try {
+    const layout = readAsarLayout(src);
+    const oldEntry = readInlineFile(src, layout, layout.entryNode);
+    const stripped = stripOverlayLine(oldEntry);
+    const newEntry = Buffer.from(mode === "install" ? stripped + overlayInjectionLine(loaderPath) : stripped, "utf8");
+    const header = JSON.parse(JSON.stringify(layout.header));
+    const entryNode = nodeAt(header, layout.entryPath);
+    if (!entryNode)
+      throw new Error(`main entry ${layout.entryPath} vanished from the cloned header`);
+    entryNode.size = newEntry.length;
+    entryNode.integrity = integrityFor(newEntry);
+    const files = flatten(header).filter((f2) => !f2.node.unpacked && !f2.node.link).sort((a2, b) => Number(a2.node.offset ?? 0) - Number(b.node.offset ?? 0));
+    if (files.length === 0)
+      throw new Error("app.asar has no inline files");
+    let offset = 0;
+    const plan = [];
+    for (const file of files) {
+      const isEntry = file.path === `/${layout.entryPath}`;
+      const size = isEntry ? newEntry.length : Number(file.node.size);
+      const srcOffset = Number(file.node.offset ?? 0);
+      if (!Number.isFinite(size) || size < 0 || !Number.isFinite(srcOffset) || srcOffset < 0) {
+        throw new Error(`invalid asar file entry: ${file.path}`);
+      }
+      file.node.offset = String(offset);
+      plan.push({ path: file.path, node: file.node, srcOffset, size, replaced: isEntry ? newEntry : void 0 });
+      offset += size;
+    }
+    const headerJson = Buffer.from(JSON.stringify(header), "utf8");
+    const stringSize = Math.ceil((headerJson.length + 4) / ALIGN) * ALIGN;
+    const headerSize = stringSize + 4;
+    const dataStart = 8 + headerSize;
+    const totalBytes = dataStart + offset;
+    fs11.rmSync(dstPath, { force: true });
+    dst = fs11.openSync(dstPath, "w");
+    const prefix = Buffer.alloc(16);
+    prefix.writeUInt32LE(4, 0);
+    prefix.writeUInt32LE(headerSize, 4);
+    prefix.writeUInt32LE(stringSize, 8);
+    prefix.writeUInt32LE(headerJson.length, 12);
+    writeAll(dst, prefix);
+    writeAll(dst, headerJson);
+    const padding = stringSize - headerJson.length - 4;
+    if (padding > 0)
+      writeAll(dst, Buffer.alloc(padding));
+    if (fs11.fstatSync(dst).size !== dataStart)
+      throw new Error("internal error: asar header padding mismatch");
+    const chunk = Buffer.alloc(COPY_CHUNK);
+    for (const part of plan) {
+      if (part.replaced)
+        writeAll(dst, part.replaced);
+      else
+        copyRange(src, dst, layout.dataStart + part.srcOffset, part.size, chunk);
+    }
+    if (fs11.fstatSync(dst).size !== totalBytes) {
+      throw new Error(`internal error: asar length ${fs11.fstatSync(dst).size} != expected ${totalBytes}`);
+    }
+    fs11.fsyncSync(dst);
+    fs11.closeSync(dst);
+    dst = void 0;
+    const after = fileStamp(srcPath);
+    if (!sameStamp(before, after)) {
+      fs11.rmSync(dstPath, { force: true });
+      throw new Error("app.asar changed while it was being read (client update in progress?) \u2014 nothing was replaced");
+    }
+    const check = inspectAsar(dstPath, loaderPath);
+    if (!check.exists || check.error) {
+      fs11.rmSync(dstPath, { force: true });
+      throw new Error(`patched asar failed verification: ${check.error ?? "unreadable"}`);
+    }
+    if (check.entryPath !== layout.entryPath) {
+      fs11.rmSync(dstPath, { force: true });
+      throw new Error(`patched asar entry changed: ${check.entryPath} != ${layout.entryPath}`);
+    }
+    if (mode === "install" && !check.current) {
+      fs11.rmSync(dstPath, { force: true });
+      throw new Error("patched asar does not carry the expected loader line \u2014 nothing was replaced");
+    }
+    if (mode === "remove" && check.injected) {
+      fs11.rmSync(dstPath, { force: true });
+      throw new Error("patched asar still carries a loader line \u2014 nothing was replaced");
+    }
+    return {
+      entryPath: layout.entryPath,
+      files: plan.length,
+      bytes: totalBytes,
+      entryBytes: newEntry.length,
+      injected: mode === "install",
+      source: { size: before.size, mtimeMs: before.mtimeMs }
+    };
+  } finally {
+    try {
+      fs11.closeSync(src);
+    } catch {
+    }
+    if (dst !== void 0) {
+      try {
+        fs11.closeSync(dst);
+      } catch {
+      }
+      try {
+        fs11.rmSync(dstPath, { force: true });
+      } catch {
+      }
+    }
+  }
+}
+function isAppRunning(app = target()) {
+  try {
+    if (process.platform === "win32") {
+      const out2 = execFileSync3("tasklist", ["/NH", "/FI", `IMAGENAME eq ${app.exeName}`], {
+        encoding: "utf8",
+        timeout: 1e4,
+        windowsHide: true
+      });
+      return out2.toLowerCase().includes(app.exeName.toLowerCase());
+    }
+    const out = execFileSync3("pgrep", ["-x", app.exeName.replace(/\.exe$/i, "")], {
+      encoding: "utf8",
+      timeout: 1e4
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+function readOverlayState() {
+  try {
+    const parsed = JSON.parse(fs11.readFileSync(overlayPaths().state, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function writeOverlayState(patch) {
+  const paths = overlayPaths();
+  fs11.mkdirSync(paths.dir, { recursive: true });
+  const previous = readOverlayState();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const next = {
+    schema: 1,
+    version: VERSION,
+    ...previous,
+    ...patch,
+    installedAt: previous?.installedAt ?? (patch.installed ? now : void 0),
+    updatedAt: now
+  };
+  const tmp = paths.state + ".tmp";
+  fs11.writeFileSync(tmp, JSON.stringify(next, null, 2));
+  fs11.renameSync(tmp, paths.state);
+  return next;
+}
+function readPending() {
+  try {
+    const parsed = JSON.parse(fs11.readFileSync(overlayPaths().pending, "utf8"));
+    return parsed && typeof parsed === "object" && parsed.tmp ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function writePending(info) {
+  const paths = overlayPaths();
+  fs11.mkdirSync(paths.dir, { recursive: true });
+  const tmp = paths.pending + ".tmp";
+  fs11.writeFileSync(tmp, JSON.stringify(info, null, 2));
+  fs11.renameSync(tmp, paths.pending);
+}
+function cancelPending() {
+  const paths = overlayPaths();
+  const pending = readPending();
+  if (pending) {
+    try {
+      fs11.rmSync(pending.tmp, { force: true });
+    } catch {
+    }
+  }
+  try {
+    fs11.rmSync(paths.pending, { force: true });
+  } catch {
+  }
+}
+function copyAtomic(src, dst) {
+  const tmp = `${dst}.tmp-${process.pid}`;
+  fs11.copyFileSync(src, tmp);
+  try {
+    fs11.renameSync(tmp, dst);
+  } catch (err) {
+    try {
+      fs11.rmSync(tmp, { force: true });
+    } catch {
+    }
+    throw err;
+  }
+}
+function syncRuntime(pluginRoot = defaultPluginRoot()) {
+  const paths = overlayPaths();
+  const sources = [
+    { src: path12.join(pluginRoot, "runtime", "overlay-loader.cjs"), dst: paths.loader, label: "overlay-loader.cjs" },
+    { src: path12.join(pluginRoot, "runtime", "overlay-monitor.cjs"), dst: paths.monitor, label: "overlay-monitor.cjs" },
+    { src: path12.join(pluginRoot, "dist", "cli.js"), dst: paths.cli, label: "dist/cli.js" }
+  ];
+  fs11.mkdirSync(paths.dir, { recursive: true });
+  const copied = [];
+  for (const file of sources) {
+    if (!fs11.existsSync(file.src)) {
+      throw new Error(`overlay runtime file missing: ${file.src} \u2014 the plugin package is incomplete (run \`npm run bundle\` before installing)`);
+    }
+    copyAtomic(file.src, file.dst);
+    copied.push(file.label);
+  }
+  return { dir: paths.dir, loader: paths.loader, cli: paths.cli, monitor: paths.monitor, copied };
+}
+function sleep2(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+    }
+  }
+}
+function withLock(fn) {
+  const paths = overlayPaths();
+  fs11.mkdirSync(paths.dir, { recursive: true });
+  let fd = null;
+  const deadline = Date.now() + 2500;
+  for (; ; ) {
+    try {
+      fd = fs11.openSync(paths.lock, "wx");
+      break;
+    } catch {
+      try {
+        const age = Date.now() - fs11.statSync(paths.lock).mtimeMs;
+        if (age > LOCK_STALE_MS) {
+          fs11.rmSync(paths.lock, { force: true });
+          continue;
+        }
+      } catch {
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`another overlay install is already running (lock: ${paths.lock})`);
+      }
+      sleep2(100);
+    }
+  }
+  try {
+    fs11.writeFileSync(fd, String(process.pid));
+    return fn();
+  } finally {
+    try {
+      fs11.closeSync(fd);
+    } catch {
+    }
+    try {
+      fs11.rmSync(paths.lock, { force: true });
+    } catch {
+    }
+  }
+}
+function spawnMonitor() {
+  const paths = overlayPaths();
+  if (!fs11.existsSync(paths.monitor))
+    return false;
+  try {
+    const nodeExe = process.env.ZCODE_BEAUTIFY_NODE?.trim() || process.execPath;
+    const child = spawn4(nodeExe, [paths.monitor], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      cwd: paths.dir,
+      env: { ...process.env }
+    });
+    child.on("error", () => {
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+function applyBuiltAsar(asar, tmp, mode, entryPath, source) {
+  try {
+    fs11.renameSync(tmp, asar);
+    return { applied: true };
+  } catch (err) {
+    const message = err.message;
+    if (!isAppRunning())
+      return { applied: false, error: message };
+    const pending = {
+      schema: 1,
+      mode,
+      asar,
+      tmp,
+      source,
+      entryPath,
+      createdAt: Date.now(),
+      version: VERSION
+    };
+    writePending(pending);
+    const monitor = spawnMonitor();
+    return { applied: false, pending, error: monitor ? void 0 : "could not start the background swap monitor; after quitting the client run `overlay finalize`" };
+  }
+}
+function installOverlay(options = {}) {
+  const paths = overlayPaths();
+  if (target().id !== "zcode") {
+    return {
+      ok: false,
+      asar: options.asarPath ?? "",
+      alreadyInjected: false,
+      applied: false,
+      pending: false,
+      injected: false,
+      error: "the startup overlay is currently implemented for ZCode only (WorkBuddy uses the CDP launch path)"
+    };
+  }
+  if (options.dryRun) {
+    let asar;
+    try {
+      asar = options.asarPath ? path12.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", alreadyInjected: false, applied: false, pending: false, injected: false, error: err.message };
+    }
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error) {
+      return {
+        ok: false,
+        asar,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: `cannot read ${asar}: ${inspection.error ?? "file missing"}`
+      };
+    }
+    return {
+      ok: true,
+      asar,
+      entryPath: inspection.entryPath,
+      alreadyInjected: inspection.current,
+      applied: false,
+      pending: false,
+      injected: inspection.injected
+    };
+  }
+  fs11.mkdirSync(paths.dir, { recursive: true });
+  return withLock(() => {
+    let asar;
+    try {
+      asar = options.asarPath ? path12.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", alreadyInjected: false, applied: false, pending: false, injected: false, error: err.message };
+    }
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error) {
+      return {
+        ok: false,
+        asar,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: `cannot read ${asar}: ${inspection.error ?? "file missing"}`
+      };
+    }
+    const runtime = syncRuntime(options.pluginRoot);
+    try {
+      fs11.rmSync(paths.optOut, { force: true });
+    } catch {
+    }
+    if (inspection.current) {
+      writeOverlayState({
+        installed: true,
+        asarPath: asar,
+        pluginRoot: options.pluginRoot ?? readOverlayState()?.pluginRoot,
+        loaderPath: paths.loader,
+        lastResult: "already-injected"
+      });
+      return {
+        ok: true,
+        asar,
+        entryPath: inspection.entryPath,
+        runtimeDir: runtime.dir,
+        alreadyInjected: true,
+        applied: false,
+        pending: false,
+        injected: true
+      };
+    }
+    cancelPending();
+    const tmp = asar + TMP_SUFFIX;
+    let stats;
+    try {
+      stats = buildPatchedAsar(asar, tmp, "install", paths.loader);
+    } catch (err) {
+      return {
+        ok: false,
+        asar,
+        entryPath: inspection.entryPath,
+        runtimeDir: runtime?.dir,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: err.message
+      };
+    }
+    const swap = applyBuiltAsar(asar, tmp, "install", stats.entryPath, stats.source);
+    if (!swap.applied && !swap.pending) {
+      return {
+        ok: false,
+        asar,
+        entryPath: stats.entryPath,
+        runtimeDir: runtime?.dir,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: `cannot replace app.asar: ${swap.error ?? "unknown error"}`,
+        stats
+      };
+    }
+    writeOverlayState({
+      installed: true,
+      asarPath: asar,
+      pluginRoot: options.pluginRoot ?? readOverlayState()?.pluginRoot,
+      loaderPath: paths.loader,
+      lastResult: swap.applied ? "applied" : "pending"
+    });
+    return {
+      ok: true,
+      asar,
+      entryPath: stats.entryPath,
+      runtimeDir: runtime.dir,
+      alreadyInjected: false,
+      applied: swap.applied,
+      pending: Boolean(swap.pending),
+      injected: swap.applied,
+      stats,
+      warning: swap.pending && swap.error ? swap.error : void 0
+    };
+  });
+}
+function removeOverlay(options = {}) {
+  const paths = overlayPaths();
+  if (options.dryRun) {
+    let asar;
+    try {
+      asar = options.asarPath ? path12.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", injected: false, applied: false, pending: false, alreadyClean: true, optOut: fs11.existsSync(paths.optOut), error: err.message };
+    }
+    const inspection = inspectAsar(asar, paths.loader);
+    return {
+      ok: true,
+      asar,
+      entryPath: inspection.entryPath,
+      injected: inspection.injected,
+      applied: false,
+      pending: false,
+      alreadyClean: !inspection.injected,
+      optOut: fs11.existsSync(paths.optOut),
+      error: inspection.error
+    };
+  }
+  fs11.mkdirSync(paths.dir, { recursive: true });
+  fs11.writeFileSync(paths.optOut, `zcode-beautify overlay uninstalled ${(/* @__PURE__ */ new Date()).toISOString()}
+`);
+  return withLock(() => {
+    let asar;
+    try {
+      asar = options.asarPath ? path12.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", injected: false, applied: false, pending: false, alreadyClean: true, optOut: true, error: err.message };
+    }
+    cancelPending();
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error) {
+      writeOverlayState({ installed: false, asarPath: asar, removedAt: (/* @__PURE__ */ new Date()).toISOString(), lastResult: "asar-unreadable" });
+      return {
+        ok: true,
+        asar,
+        injected: false,
+        applied: false,
+        pending: false,
+        alreadyClean: true,
+        optOut: true,
+        error: inspection.error
+      };
+    }
+    if (!inspection.injected) {
+      writeOverlayState({ installed: false, asarPath: asar, removedAt: (/* @__PURE__ */ new Date()).toISOString(), lastResult: "already-clean" });
+      return { ok: true, asar, entryPath: inspection.entryPath, injected: false, applied: false, pending: false, alreadyClean: true, optOut: true };
+    }
+    const tmp = asar + TMP_SUFFIX;
+    let stats;
+    try {
+      stats = buildPatchedAsar(asar, tmp, "remove", paths.loader);
+    } catch (err) {
+      return {
+        ok: false,
+        asar,
+        entryPath: inspection.entryPath,
+        injected: true,
+        applied: false,
+        pending: false,
+        alreadyClean: false,
+        optOut: true,
+        error: err.message
+      };
+    }
+    const swap = applyBuiltAsar(asar, tmp, "remove", stats.entryPath, stats.source);
+    if (!swap.applied && !swap.pending) {
+      writeOverlayState({ installed: true, asarPath: asar, lastResult: "remove-failed" });
+      return {
+        ok: false,
+        asar,
+        entryPath: stats.entryPath,
+        injected: true,
+        applied: false,
+        pending: false,
+        alreadyClean: false,
+        optOut: true,
+        error: `cannot replace app.asar: ${swap.error ?? "unknown error"}`
+      };
+    }
+    writeOverlayState({
+      installed: Boolean(swap.pending),
+      asarPath: asar,
+      removedAt: swap.applied ? (/* @__PURE__ */ new Date()).toISOString() : void 0,
+      lastResult: swap.applied ? "removed" : "remove-pending"
+    });
+    return {
+      ok: true,
+      asar,
+      entryPath: stats.entryPath,
+      injected: !swap.applied,
+      applied: swap.applied,
+      pending: Boolean(swap.pending),
+      alreadyClean: false,
+      optOut: true,
+      warning: swap.pending && swap.error ? swap.error : void 0
+    };
+  });
+}
+function finalizePending() {
+  const pending = readPending();
+  if (!pending)
+    return { ok: true, applied: false };
+  const paths = overlayPaths();
+  return withLock(() => {
+    const current = readPending();
+    if (!current)
+      return { ok: true, applied: false };
+    if (!fs11.existsSync(current.tmp)) {
+      fs11.rmSync(paths.pending, { force: true });
+      return { ok: false, applied: false, error: "pending package is missing" };
+    }
+    if (isAppRunning())
+      return { ok: true, applied: false, pending: current };
+    try {
+      const st = fs11.statSync(current.asar);
+      if (st.size !== current.source.size || Math.abs(st.mtimeMs - current.source.mtimeMs) > 1) {
+        fs11.rmSync(current.tmp, { force: true });
+        fs11.rmSync(paths.pending, { force: true });
+        return { ok: false, applied: false, error: "app.asar changed after the package was staged; discarded the stale pending package" };
+      }
+      fs11.renameSync(current.tmp, current.asar);
+      fs11.rmSync(paths.pending, { force: true });
+      writeOverlayState({
+        installed: current.mode === "install",
+        asarPath: current.asar,
+        lastResult: current.mode === "install" ? "applied" : "removed",
+        removedAt: current.mode === "remove" ? (/* @__PURE__ */ new Date()).toISOString() : void 0
+      });
+      return { ok: true, applied: true };
+    } catch (err) {
+      return { ok: false, applied: false, pending: current, error: err.message };
+    }
+  });
+}
+function overlayStatus(options = {}) {
+  const paths = overlayPaths();
+  let asar = "";
+  let inspection;
+  let asarError;
+  try {
+    asar = options.asarPath ? path12.resolve(options.asarPath) : findAppAsar();
+    inspection = inspectAsar(asar, paths.loader);
+    asarError = inspection.error;
+  } catch (err) {
+    asarError = err.message;
+  }
+  return {
+    app: target().appName,
+    version: VERSION,
+    asar,
+    asarExists: Boolean(inspection?.exists),
+    entryPath: inspection?.entryPath,
+    injected: Boolean(inspection?.injected),
+    current: Boolean(inspection?.current),
+    loaderUrls: inspection?.loaderUrls ?? [],
+    optOut: fs11.existsSync(paths.optOut),
+    experimentalEnabled: experimentalEnabled(loadConfig()),
+    runtimeDir: paths.dir,
+    runtimeFiles: {
+      loader: fs11.existsSync(paths.loader),
+      cli: fs11.existsSync(paths.cli),
+      monitor: fs11.existsSync(paths.monitor)
+    },
+    state: readOverlayState(),
+    pending: readPending(),
+    error: asarError
+  };
+}
+function autoHealOverlay() {
+  try {
+    const state = readOverlayState();
+    if (!state?.installed)
+      return;
+    const paths = overlayPaths();
+    if (fs11.existsSync(paths.optOut))
+      return;
+    if (!experimentalEnabled(loadConfig()))
+      return;
+    const pending = readPending();
+    if (pending)
+      return;
+    const asar = state.asarPath && fs11.existsSync(state.asarPath) ? state.asarPath : findAppAsar();
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error || inspection.current)
+      return;
+    const st = fs11.statSync(asar);
+    const key = `${VERSION} ${st.size} ${Math.round(st.mtimeMs)}`;
+    try {
+      const previous = fs11.readFileSync(paths.autoHealStamp, "utf8").trim();
+      const age = Date.now() - fs11.statSync(paths.autoHealStamp).mtimeMs;
+      if (previous === key && age < 10 * 6e4)
+        return;
+    } catch {
+    }
+    fs11.mkdirSync(paths.dir, { recursive: true });
+    fs11.writeFileSync(paths.autoHealStamp, key);
+    const root = defaultPluginRoot();
+    const cli = path12.join(root, "dist", "cli.js");
+    if (!fs11.existsSync(cli))
+      return;
+    const child = spawn4(process.execPath, [cli, "overlay", "install", "--auto", "--no-enable", "--quiet"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...process.env }
+    });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+var ALIGN, BLOCK, MAX_HEADER, COPY_CHUNK, TMP_SUFFIX, LOCK_STALE_MS, PENDING_MAX_AGE_MS, OVERLAY_LINE_RE, PENDING_DEADLINE_MS;
+var init_overlay = __esm({
+  "dist/core/overlay.js"() {
+    "use strict";
+    init_launch();
+    init_target();
+    init_version();
+    ALIGN = 4;
+    BLOCK = 4 * 1024 * 1024;
+    MAX_HEADER = 64 * 1024 * 1024;
+    COPY_CHUNK = 4 * 1024 * 1024;
+    TMP_SUFFIX = ".beautify.tmp";
+    LOCK_STALE_MS = 10 * 6e4;
+    PENDING_MAX_AGE_MS = 24 * 60 * 6e4;
+    OVERLAY_LINE_RE = /\n?;import\("[^"]*overlay-loader\.cjs"\)\.then\(\(\) => null, \(e\) => console\.error\("\[zcode-beautify\] overlay load failed", e\)\);?/g;
+    PENDING_DEADLINE_MS = PENDING_MAX_AGE_MS;
+  }
+});
+
 // dist/panel/panelScript.js
 function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}) {
   const api = `http://127.0.0.1:${apiPort}`;
@@ -115588,6 +116655,10 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   function mt(url) { return TOKEN ? url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + TOKEN : url; }
   var ROOT_ID = ${JSON.stringify(PANEL_ROOT_ID)};
   var runPanel = function() {
+  // Disable may land while the panel is parked behind the startup screen; the
+  // parked callback must not resurrect the FAB after teardown.
+  try { if (localStorage.getItem('zcode-beautify:disabled') === '1') return; } catch (e) {}
+  if (window.__zcodeBeautify && window.__zcodeBeautify.disabled) return;
   // Always rebuild: an older panel left in the DOM would otherwise shadow the
   // current script version forever (the old build skipped installation).
   var stale = document.getElementById(ROOT_ID);
@@ -119961,22 +121032,42 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   })();
 
   $('zb-fab').addEventListener('click', function () {
+    var zbOpenT0 = (window.performance && performance.now) ? performance.now() : Date.now();
     var p = $('zb-panel');
     p.hidden = !p.hidden;
     if (!p.hidden) {
-      // A previously dragged panel can sit (partially) outside the viewport,
-      // which reads as "the panel did not open". Pull it back in.
-      var r = p.getBoundingClientRect();
-      if (r.width && (r.right < 40 || r.bottom < 40 || r.left > window.innerWidth - 40 || r.top > window.innerHeight - 40)) {
-        p.style.left = ''; p.style.top = ''; p.style.right = ''; p.style.bottom = '';
-      }
-      activateSavedTab();
-      beat(true);
-      if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
+      // Unhide FIRST and touch nothing else: activateSavedTab()/beat(true)
+      // (~90 ms) and even getBoundingClientRect() (forces a full layout of the
+      // panel's DOM, ~60-90 ms) used to run before the first paint. The panel
+      // is already built, so toggling hidden is the whole visible action; the
+      // refresh and the off-viewport rescue run after a frame.
+      var afterPaint = function(fn) {
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(function() { requestAnimationFrame(function() { fn(); }); });
+        } else setTimeout(fn, 32);
+      };
+      afterPaint(function() {
+        if (window.__zcodeBeautify && window.__zcodeBeautify.panelTiming) {
+          window.__zcodeBeautify.panelTiming.openPaintMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - zbOpenT0;
+        }
+        if (p.hidden) return; // closed again in the meantime
+        var r = p.getBoundingClientRect();
+        if (r.width && (r.right < 40 || r.bottom < 40 || r.left > window.innerWidth - 40 || r.top > window.innerHeight - 40)) {
+          p.style.left = ''; p.style.top = ''; p.style.right = ''; p.style.bottom = '';
+        }
+        activateSavedTab();
+        beat(true);
+        if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
+      });
     } else {
       hideHoverPreview(); // thumbnails vanish under the closed panel
       if (root.getAttribute('data-offline') !== '1') beat(false);
       if (rotStateTimer) { clearInterval(rotStateTimer); rotStateTimer = null; }
+    }
+    if (window.__zcodeBeautify) {
+      var pt = window.__zcodeBeautify.panelTiming || (window.__zcodeBeautify.panelTiming = {});
+      pt.openHandlerMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - zbOpenT0;
+      pt.openCount = (pt.openCount || 0) + 1;
     }
   });
 
@@ -120031,29 +121122,78 @@ function buildPanelScript(apiPort, apiToken = "", startupClean = true, opts = {}
   // The registration replays at document creation where <body> does not exist
   // yet \u2014 document.body.appendChild would throw and the panel would never
   // come back after a reload. Wait for the parser (a few ms at most).
-  var zbStartupOn = function() {
-    if (!document.body) return false;
-    if (PROBE === 'workbuddy-skeleton') {
-      var sk = document.querySelector('#sk-overlay, #skeleton-root');
-      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
-      var root = document.querySelector('#root');
-      return !root || root.childElementCount === 0;
+  // Same 3.18 / 4.0 startup probe as the theme bootstrap (startupProbe.ts).
+${startupProbeJs(opts.appName === "WorkBuddy" ? "workbuddy-skeleton" : "zcode-body-class")}
+  var zbStartupOn = inStartupScreen;
+  var MAX_STARTUP_WAIT_MS = 15000;
+  var zbMount = function() {
+    var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+    runPanel();
+    if (window.__zcodeBeautify) {
+      var pt = window.__zcodeBeautify.panelTiming || (window.__zcodeBeautify.panelTiming = {});
+      pt.mountMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
     }
-    var cls = document.body.className || '';
-    return /zcode-startup/.test(cls) && !/ready/.test(cls);
   };
-  var zbMount = function() { runPanel(); };
+  var zbPanelDisabled = function() {
+    try { if (localStorage.getItem('zcode-beautify:disabled') === '1') return true; } catch (e) {}
+    return !!(window.__zcodeBeautify && window.__zcodeBeautify.disabled);
+  };
+  var zbPanelClearWait = function() {
+    if (window.__zcodeBeautify && window.__zcodeBeautify.panelMO) {
+      try { window.__zcodeBeautify.panelMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.panelMO = null;
+    }
+    if (window.__zcodeBeautify && window.__zcodeBeautify.panelTimer) {
+      clearTimeout(window.__zcodeBeautify.panelTimer);
+      window.__zcodeBeautify.panelTimer = null;
+    }
+    if (window.__zcodeBeautify && window.__zcodeBeautify.panelCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.panelCheckTimer);
+      window.__zcodeBeautify.panelCheckTimer = null;
+    }
+  };
+  var zbSchedulePanelCheck = function() {
+    if (window.__zcodeBeautify.panelCheckTimer) return;
+    window.__zcodeBeautify.panelCheckTimer = setTimeout(function() {
+      if (!window.__zcodeBeautify) return;
+      window.__zcodeBeautify.panelCheckTimer = null;
+      if (zbPanelDisabled()) return;
+      if (!zbStartupOn()) { zbPanelClearWait(); zbPanelMountPending(); }
+    }, 32);
+  };
+  var zbPanelMountPending = function() {
+    var fn = window.__zcodeBeautify && window.__zcodeBeautify.pendingPanel;
+    if (window.__zcodeBeautify) window.__zcodeBeautify.pendingPanel = null;
+    if (typeof fn === 'function' && !zbPanelDisabled()) fn();
+  };
   var zbPanelWait = function() {
+    if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+    if (zbPanelDisabled()) return;
     if (!document.body) { setTimeout(zbPanelWait, 20); return; }
     // The startup screen shows loading art \u2014 mounting the FAB/panel on top
     // of it looks broken; hold off until the app marks itself ready.
     if (STARTUP_CLEAN && zbStartupOn()) {
-      var mo = new MutationObserver(function() {
-        if (!zbStartupOn()) { mo.disconnect(); zbMount(); }
-      });
-      mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      // Newest generation wins; an older registration's parked closure must
+      // not keep the old panel after a serve restart.
+      window.__zcodeBeautify.pendingPanel = zbMount;
+      if (!window.__zcodeBeautify.panelMO) {
+        var mo = new MutationObserver(zbSchedulePanelCheck);
+        window.__zcodeBeautify.panelMO = mo;
+        mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      }
+      if (!window.__zcodeBeautify.panelTimer) {
+        window.__zcodeBeautify.panelTimer = setTimeout(function() {
+          window.__zcodeBeautify.panelTimer = null;
+          if (zbPanelDisabled()) return;
+          // Hard cap: mount even if the startup screen never clears.
+          zbPanelClearWait();
+          zbPanelMountPending();
+        }, MAX_STARTUP_WAIT_MS);
+      }
       return;
     }
+    zbPanelClearWait();
+    window.__zcodeBeautify.pendingPanel = null;
     zbMount();
   };
   zbPanelWait();
@@ -120066,17 +121206,18 @@ var init_panelScript = __esm({
     "use strict";
     init_version();
     init_bubbleRecipes();
+    init_startupProbe();
     PANEL_ROOT_ID = "zcode-beautify-panel-root";
   }
 });
 
 // dist/core/pluginGate.js
-import fs11 from "node:fs";
+import fs12 from "node:fs";
 import os2 from "node:os";
-import path12 from "node:path";
+import path13 from "node:path";
 function readJson(file) {
   try {
-    return JSON.parse(fs11.readFileSync(file, "utf8"));
+    return JSON.parse(fs12.readFileSync(file, "utf8"));
   } catch {
     return void 0;
   }
@@ -120114,27 +121255,27 @@ function readScope(file, scope, targetId) {
 function userConfigPath(targetId, home, env) {
   const override = env[HOST_CONFIG_ENV[targetId]]?.trim();
   if (override)
-    return path12.resolve(override);
-  return targetId === "workbuddy" ? path12.join(home, ".workbuddy", "settings.json") : path12.join(home, ".zcode", "cli", "config.json");
+    return path13.resolve(override);
+  return targetId === "workbuddy" ? path13.join(home, ".workbuddy", "settings.json") : path13.join(home, ".zcode", "cli", "config.json");
 }
 function workspaceConfigPath(workingDirectory) {
-  let dir = path12.resolve(workingDirectory);
+  let dir = path13.resolve(workingDirectory);
   for (; ; ) {
-    const candidate = path12.join(dir, ".zcode", "config.json");
+    const candidate = path13.join(dir, ".zcode", "config.json");
     try {
-      if (fs11.statSync(candidate).isFile())
+      if (fs12.statSync(candidate).isFile())
         return candidate;
     } catch {
     }
-    const parent = path12.dirname(dir);
+    const parent = path13.dirname(dir);
     if (parent === dir)
       return void 0;
     dir = parent;
   }
 }
 function samePath(a2, b) {
-  const na = path12.resolve(a2);
-  const nb = path12.resolve(b);
+  const na = path13.resolve(a2);
+  const nb = path13.resolve(b);
   return process.platform === "win32" ? na.toLowerCase() === nb.toLowerCase() : na === nb;
 }
 function hostPluginState(options = {}) {
@@ -120190,11 +121331,11 @@ var init_pluginGate = __esm({
 });
 
 // dist/core/media.js
-import fs12 from "node:fs";
+import fs13 from "node:fs";
 function sendMediaFile(req, res, filePath) {
   let stat;
   try {
-    stat = fs12.statSync(filePath);
+    stat = fs13.statSync(filePath);
   } catch {
     return false;
   }
@@ -120232,10 +121373,10 @@ function sendMediaFile(req, res, filePath) {
       "Content-Range": `bytes ${start}-${end}/${stat.size}`,
       "Content-Length": end - start + 1
     });
-    fs12.createReadStream(filePath, { start, end }).on("error", () => res.destroy()).pipe(res);
+    fs13.createReadStream(filePath, { start, end }).on("error", () => res.destroy()).pipe(res);
   } else {
     res.writeHead(200, { ...headers, "Content-Length": stat.size });
-    fs12.createReadStream(filePath).on("error", () => res.destroy()).pipe(res);
+    fs13.createReadStream(filePath).on("error", () => res.destroy()).pipe(res);
   }
   return true;
 }
@@ -120256,18 +121397,18 @@ var init_media = __esm({
 });
 
 // dist/core/weLibrary.js
-import fs13 from "node:fs";
-import path13 from "node:path";
+import fs14 from "node:fs";
+import path14 from "node:path";
 function isDirWithEntries(p2) {
   try {
-    return fs13.statSync(p2).isDirectory() && fs13.readdirSync(p2).length > 0;
+    return fs14.statSync(p2).isDirectory() && fs14.readdirSync(p2).length > 0;
   } catch {
     return false;
   }
 }
 function readJsonSafe(file) {
   try {
-    return JSON.parse(fs13.readFileSync(file, "utf8"));
+    return JSON.parse(fs14.readFileSync(file, "utf8"));
   } catch {
     return void 0;
   }
@@ -120277,8 +121418,8 @@ function findWeRoots() {
   const seen = /* @__PURE__ */ new Set();
   for (const lib of steamLibraryCandidates()) {
     const candidates = [
-      ["workshop", path13.join(lib, "steamapps", "workshop", "content", "431960")],
-      ["myprojects", path13.join(lib, "steamapps", "common", "wallpaper_engine", "projects", "myprojects")]
+      ["workshop", path14.join(lib, "steamapps", "workshop", "content", "431960")],
+      ["myprojects", path14.join(lib, "steamapps", "common", "wallpaper_engine", "projects", "myprojects")]
     ];
     for (const [kind, dir] of candidates) {
       const key = dir.toLowerCase();
@@ -120295,17 +121436,17 @@ function weInstallDirs() {
   for (const root of findWeRoots()) {
     if (root.kind !== "workshop")
       continue;
-    dirs.add(path13.resolve(root.dir, "..", "..", "..", "common", "wallpaper_engine"));
+    dirs.add(path14.resolve(root.dir, "..", "..", "..", "common", "wallpaper_engine"));
   }
   for (const lib of steamLibraryCandidates()) {
-    dirs.add(path13.join(lib, "steamapps", "common", "wallpaper_engine"));
+    dirs.add(path14.join(lib, "steamapps", "common", "wallpaper_engine"));
   }
-  return [...dirs].filter((d) => fs13.existsSync(path13.join(d, "config.json")));
+  return [...dirs].filter((d) => fs14.existsSync(path14.join(d, "config.json")));
 }
 function listWeFolders() {
   const out = [];
   for (const install of weInstallDirs()) {
-    const config = readJsonSafe(path13.join(install, "config.json"));
+    const config = readJsonSafe(path14.join(install, "config.json"));
     const userNodes = Object.values(config ?? {}).filter((v) => Boolean(v) && typeof v === "object" && !Array.isArray(v) && "general" in v);
     for (const node of userNodes) {
       const general = node.general;
@@ -120345,15 +121486,15 @@ function listWeWallpapers() {
   for (const root of findWeRoots()) {
     let entries;
     try {
-      entries = fs13.readdirSync(root.dir);
+      entries = fs14.readdirSync(root.dir);
     } catch {
       continue;
     }
     for (const name of entries) {
-      const dir = path13.join(root.dir, name);
+      const dir = path14.join(root.dir, name);
       let stat;
       try {
-        stat = fs13.statSync(dir);
+        stat = fs14.statSync(dir);
       } catch {
         continue;
       }
@@ -120362,11 +121503,11 @@ function listWeWallpapers() {
       const type = detectWallpaperType(dir);
       if (type !== "scene" && type !== "video" && type !== "web")
         continue;
-      const project = readJsonSafe(path13.join(dir, "project.json"));
+      const project = readJsonSafe(path14.join(dir, "project.json"));
       const title = typeof project?.title === "string" && project.title.trim() ? project.title.trim() : name;
       const declared = typeof project?.preview === "string" ? project.preview : void 0;
-      const previewName = declared && PREVIEW_NAME_RE.test(declared) ? declared : PREVIEW_FALLBACKS.find((f2) => fs13.existsSync(path13.join(dir, f2)));
-      const usable = previewName ? fs13.existsSync(path13.join(dir, previewName)) : false;
+      const previewName = declared && PREVIEW_NAME_RE.test(declared) ? declared : PREVIEW_FALLBACKS.find((f2) => fs14.existsSync(path14.join(dir, f2)));
+      const usable = previewName ? fs14.existsSync(path14.join(dir, previewName)) : false;
       let folder = folderByKey.get(name);
       if (!folder) {
         const dirLower = dir.toLowerCase();
@@ -120381,9 +121522,9 @@ function listWeWallpapers() {
       if (type === "video") {
         for (const sub of ["", "files"]) {
           try {
-            const hit = fs13.readdirSync(path13.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
+            const hit = fs14.readdirSync(path14.join(dir, sub)).find((e2) => /.(mp4|webm)$/i.test(e2));
             if (hit) {
-              videoFile = path13.join(dir, sub, hit);
+              videoFile = path14.join(dir, sub, hit);
               break;
             }
           } catch {
@@ -120410,17 +121551,17 @@ function listWeWallpapers() {
 function weDirForPath(p2) {
   let abs;
   try {
-    abs = path13.resolve(p2).toLowerCase();
+    abs = path14.resolve(p2).toLowerCase();
   } catch {
     return void 0;
   }
   for (const root of findWeRoots()) {
-    const rootLower = root.dir.toLowerCase() + path13.sep;
+    const rootLower = root.dir.toLowerCase() + path14.sep;
     if (!abs.startsWith(rootLower))
       continue;
-    const id = abs.slice(rootLower.length).split(path13.sep)[0];
+    const id = abs.slice(rootLower.length).split(path14.sep)[0];
     if (id)
-      return path13.join(root.dir, id);
+      return path14.join(root.dir, id);
   }
   return void 0;
 }
@@ -120428,7 +121569,7 @@ function weTitleForPath(p2) {
   const dir = weDirForPath(p2);
   if (!dir)
     return void 0;
-  const project = readJsonSafe(path13.join(dir, "project.json"));
+  const project = readJsonSafe(path14.join(dir, "project.json"));
   return typeof project?.title === "string" && project.title.trim() ? project.title.trim() : void 0;
 }
 function resolveWePreview(source, id, file, nameRe = PREVIEW_NAME_RE) {
@@ -120442,14 +121583,14 @@ function resolveWePreview(source, id, file, nameRe = PREVIEW_NAME_RE) {
   const root = findWeRoots().find((r2) => r2.kind === kind);
   if (!root)
     return void 0;
-  const dir = path13.resolve(root.dir, id);
-  const rootResolved = path13.resolve(root.dir);
-  if (!dir.toLowerCase().startsWith(rootResolved.toLowerCase() + path13.sep))
+  const dir = path14.resolve(root.dir, id);
+  const rootResolved = path14.resolve(root.dir);
+  if (!dir.toLowerCase().startsWith(rootResolved.toLowerCase() + path14.sep))
     return void 0;
-  const fileAbs = path13.resolve(dir, file);
-  if (path13.dirname(fileAbs).toLowerCase() !== dir.toLowerCase())
+  const fileAbs = path14.resolve(dir, file);
+  if (path14.dirname(fileAbs).toLowerCase() !== dir.toLowerCase())
     return void 0;
-  return fs13.existsSync(fileAbs) ? fileAbs : void 0;
+  return fs14.existsSync(fileAbs) ? fileAbs : void 0;
 }
 var PREVIEW_FALLBACKS, PREVIEW_NAME_RE;
 var init_weLibrary = __esm({
@@ -120463,11 +121604,11 @@ var init_weLibrary = __esm({
 });
 
 // dist/core/sessionStore.js
-import fs14 from "node:fs";
+import fs15 from "node:fs";
 import os3 from "node:os";
-import path14 from "node:path";
+import path15 from "node:path";
 function sessionDbPath(homeDir = os3.homedir()) {
-  return path14.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+  return path15.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
 }
 async function loadSqlite() {
   if (sqliteMod !== void 0)
@@ -120498,7 +121639,7 @@ async function readSessionPreview(sessionId, homeDir = os3.homedir()) {
   if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId))
     return { ok: false, reason: "bad-id" };
   const dbPath = sessionDbPath(homeDir);
-  if (!fs14.existsSync(dbPath))
+  if (!fs15.existsSync(dbPath))
     return { ok: false, reason: "unavailable" };
   const sqlite = await loadSqlite();
   if (!sqlite)
@@ -120561,7 +121702,7 @@ async function readSessionPreview(sessionId, homeDir = os3.homedir()) {
 }
 async function readGoalSessions(homeDir = os3.homedir()) {
   const dbPath = sessionDbPath(homeDir);
-  if (!fs14.existsSync(dbPath))
+  if (!fs15.existsSync(dbPath))
     return { ok: false, reason: "unavailable" };
   const sqlite = await loadSqlite();
   if (!sqlite)
@@ -120614,16 +121755,81 @@ __export(server_exports, {
   startServe: () => startServe
 });
 import http from "node:http";
-import fs15 from "node:fs";
-import path15 from "node:path";
+import fs16 from "node:fs";
+import path16 from "node:path";
 import crypto2 from "node:crypto";
-import { execFile as execFile4, spawn as spawn4 } from "node:child_process";
+import { execFile as execFile4, spawn as spawn5 } from "node:child_process";
 import { promisify as promisify4 } from "node:util";
 import { fileURLToPath } from "node:url";
 function rememberAssets(file, mtimeMs, assets) {
   assetsCache.set(file, { mtimeMs, assets });
   if (assetsCache.size > 6) {
     assetsCache.delete(assetsCache.keys().next().value);
+  }
+}
+function assetCacheFile(sourcePath) {
+  const key = crypto2.createHash("sha1").update(path16.resolve(sourcePath).toLowerCase()).digest("hex");
+  return path16.join(dataDir(), "assets", key + ".json");
+}
+function readAssetCache(sourcePath, mtimeMs, size) {
+  try {
+    const raw = JSON.parse(fs16.readFileSync(assetCacheFile(sourcePath), "utf8"));
+    if (raw?.schema !== ASSET_CACHE_SCHEMA)
+      return void 0;
+    if (raw.sourcePath !== path16.resolve(sourcePath) || raw.mtimeMs !== mtimeMs || raw.size !== size)
+      return void 0;
+    const cached = raw.assets;
+    if (!cached || typeof cached.dataUri !== "string" || typeof cached.sourceArgb !== "number" || !cached.focus)
+      return void 0;
+    return {
+      dataUri: cached.dataUri,
+      sourceArgb: cached.sourceArgb,
+      focus: cached.focus,
+      theme: themeFromSourceColor(cached.sourceArgb)
+    };
+  } catch {
+    return void 0;
+  }
+}
+function writeAssetCache(sourcePath, mtimeMs, size, assets) {
+  try {
+    if (assets.dataUri.length > ASSET_CACHE_MAX_DATA_URI)
+      return;
+    const file = assetCacheFile(sourcePath);
+    const body = JSON.stringify({
+      schema: ASSET_CACHE_SCHEMA,
+      sourcePath: path16.resolve(sourcePath),
+      mtimeMs,
+      size,
+      assets: {
+        dataUri: assets.dataUri,
+        sourceArgb: assets.sourceArgb,
+        focus: assets.focus
+      }
+    });
+    fs16.promises.mkdir(path16.dirname(file), { recursive: true }).then(() => fs16.promises.writeFile(file + ".tmp", body)).then(() => fs16.promises.rename(file + ".tmp", file)).then(() => pruneAssetCache()).catch(() => {
+    });
+  } catch {
+  }
+}
+async function pruneAssetCache() {
+  try {
+    const dir = path16.join(dataDir(), "assets");
+    const entries = await fs16.promises.readdir(dir, { withFileTypes: true });
+    const files = entries.filter((e2) => e2.isFile() && e2.name.endsWith(".json"));
+    if (files.length <= ASSET_CACHE_MAX_FILES)
+      return;
+    const withTime = await Promise.all(files.map(async (e2) => {
+      const full = path16.join(dir, e2.name);
+      const st = await fs16.promises.stat(full).catch(() => void 0);
+      return { full, at: st?.mtimeMs ?? 0 };
+    }));
+    withTime.sort((a2, b) => a2.at - b.at);
+    for (const f2 of withTime.slice(0, withTime.length - ASSET_CACHE_MAX_FILES)) {
+      await fs16.promises.rm(f2.full, { force: true }).catch(() => {
+      });
+    }
+  } catch {
   }
 }
 async function ffmpegPath() {
@@ -120634,21 +121840,21 @@ async function ffmpegPath() {
   return ffmpegPathCache || void 0;
 }
 function thumbDir() {
-  return path15.join(dataDir(), "thumbs");
+  return path16.join(dataDir(), "thumbs");
 }
 async function themeThumbFor(source) {
   if (!isInsideDataDir(source))
     return source;
-  const thumb = path15.join(thumbDir(), path15.basename(source) + ".jpg");
+  const thumb = path16.join(thumbDir(), path16.basename(source) + ".jpg");
   try {
-    if (!fs15.existsSync(thumb)) {
+    if (!fs16.existsSync(thumb)) {
       const exe = await ffmpegPath();
       if (!exe)
         return source;
-      fs15.mkdirSync(thumbDir(), { recursive: true });
+      fs16.mkdirSync(thumbDir(), { recursive: true });
       await execFileP(exe, ["-y", "-hide_banner", "-loglevel", "error", "-i", source, "-vf", "scale=160:-2", "-frames:v", "1", "-q:v", "4", thumb], { timeout: 2e4 });
     }
-    return fs15.existsSync(thumb) ? thumb : source;
+    return fs16.existsSync(thumb) ? thumb : source;
   } catch {
     return source;
   }
@@ -120664,21 +121870,28 @@ function withPinnedTheme(assets, config) {
 }
 async function getAssets(config) {
   const wallpaperPath = config.wallpaperPath;
-  if (!wallpaperPath || !fs15.existsSync(wallpaperPath))
+  if (!wallpaperPath || !fs16.existsSync(wallpaperPath))
     return void 0;
-  const sourcePath = config.mediaType === "video" ? path15.join(path15.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
-  if (!fs15.existsSync(sourcePath))
-    return void 0;
-  const mtimeMs = fs15.statSync(sourcePath).mtimeMs;
-  const cached = assetsCache.get(sourcePath);
+  const wallpaperStat = fs16.statSync(wallpaperPath);
+  const mtimeMs = wallpaperStat.mtimeMs;
+  const cached = assetsCache.get(wallpaperPath);
   if (cached?.mtimeMs === mtimeMs) {
-    assetsCache.delete(sourcePath);
-    assetsCache.set(sourcePath, cached);
+    assetsCache.delete(wallpaperPath);
+    assetsCache.set(wallpaperPath, cached);
     return withPinnedTheme(cached.assets, config);
   }
+  const disk = readAssetCache(wallpaperPath, mtimeMs, wallpaperStat.size);
+  if (disk) {
+    rememberAssets(wallpaperPath, mtimeMs, disk);
+    return withPinnedTheme(disk, config);
+  }
+  const sourcePath = config.mediaType === "video" ? path16.join(path16.dirname(wallpaperPath), "poster.jpg") : await themeThumbFor(wallpaperPath);
+  if (!fs16.existsSync(sourcePath))
+    return void 0;
   try {
     const assets = await loadWallpaper(sourcePath);
-    rememberAssets(sourcePath, mtimeMs, assets);
+    rememberAssets(wallpaperPath, mtimeMs, assets);
+    writeAssetCache(wallpaperPath, mtimeMs, wallpaperStat.size, assets);
     return withPinnedTheme(assets, config);
   } catch {
     return void 0;
@@ -120688,33 +121901,33 @@ function currentConfig() {
   return { ...DEFAULT_CONFIG, ...loadConfig() };
 }
 function backupFile() {
-  return path15.join(dataDir(), "config.backup.json");
+  return path16.join(dataDir(), "config.backup.json");
 }
 function hasBackup() {
-  return fs15.existsSync(backupFile());
+  return fs16.existsSync(backupFile());
 }
 function weImportsFile() {
-  return path15.join(dataDir(), "we-imports.json");
+  return path16.join(dataDir(), "we-imports.json");
 }
 function loadWeImports() {
   try {
-    return JSON.parse(fs15.readFileSync(weImportsFile(), "utf8"));
+    return JSON.parse(fs16.readFileSync(weImportsFile(), "utf8"));
   } catch {
     return {};
   }
 }
 function saveWeImports(map) {
   try {
-    fs15.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
+    fs16.writeFileSync(weImportsFile(), JSON.stringify(map, null, 1));
   } catch {
   }
 }
 function cachedSceneNames() {
   const names3 = /* @__PURE__ */ new Map();
   try {
-    for (const d of fs15.readdirSync(scenesCacheRoot())) {
+    for (const d of fs16.readdirSync(scenesCacheRoot())) {
       try {
-        const name = JSON.parse(fs15.readFileSync(path15.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+        const name = JSON.parse(fs16.readFileSync(path16.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
         if (name && !/^[0-9a-f]{8}$/.test(name)) {
           names3.set(name, [...names3.get(name) ?? [], d]);
         }
@@ -120734,7 +121947,7 @@ function goalSessionsKey() {
   const parts = [];
   for (const file of [db, `${db}-wal`]) {
     try {
-      const st = fs15.statSync(file);
+      const st = fs16.statSync(file);
       parts.push(`${st.mtimeMs}:${st.size}`);
     } catch {
       parts.push("-");
@@ -120774,10 +121987,10 @@ function readChangelog() {
     return changelogCache;
   let markdown = null;
   try {
-    const here = path15.dirname(fileURLToPath(import.meta.url));
-    for (const dir of [path15.resolve(here, ".."), path15.resolve(here, "..", ".."), process.cwd()]) {
+    const here = path16.dirname(fileURLToPath(import.meta.url));
+    for (const dir of [path16.resolve(here, ".."), path16.resolve(here, "..", ".."), process.cwd()]) {
       try {
-        markdown = fs15.readFileSync(path15.join(dir, "CHANGES.md"), "utf8");
+        markdown = fs16.readFileSync(path16.join(dir, "CHANGES.md"), "utf8");
         break;
       } catch {
       }
@@ -120837,7 +122050,7 @@ function publicConfig(config) {
     showOnUpdater: config.showOnUpdater === true,
     importRes: config.importRes ?? { mode: "auto" },
     fit: config.fit,
-    wallpaperSet: Boolean(config.wallpaperPath && fs15.existsSync(config.wallpaperPath)),
+    wallpaperSet: Boolean(config.wallpaperPath && fs16.existsSync(config.wallpaperPath)),
     hasBackup: hasBackup(),
     cdpPort: config.port,
     mediaType: config.mediaType ?? "image",
@@ -120985,13 +122198,15 @@ async function holdSession(target2, config, apiPort, opts = {}) {
   if (!target2.webSocketDebuggerUrl)
     return;
   const conn = await CdpConnection.connect(target2.webSocketDebuggerUrl);
-  await conn.send("Page.enable");
+  await boundedSend(conn.send("Page.enable"), 4e3);
   await boundedSend(conn.send("Runtime.evaluate", {
     expression: `try { localStorage.removeItem('zcode-beautify:disabled'); } catch (e) {}`
   })).catch(() => {
   });
   const session = { conn };
+  const injectAt = Date.now();
   const assets = await getAssets(config);
+  const assetsMs = Date.now() - injectAt;
   const payload = buildPayload(lookConfigFor(config), assets, mediaToken);
   const bootstrap = buildBootstrapScript({
     css: payload.css,
@@ -121030,10 +122245,20 @@ async function holdSession(target2, config, apiPort, opts = {}) {
     chatUi: app.supportsChatUi,
     hasUpdater: app.updaterUrlIncludes.length > 0
   });
-  await conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript });
+  await boundedSend(conn.send("Page.addScriptToEvaluateOnNewDocument", { source: panelScript }), 8e3);
   const panelEval = await boundedSend(conn.send("Runtime.evaluate", { expression: panelScript, returnByValue: true }));
   if (panelEval?.exceptionDetails) {
     console.error(`serve: panel script threw \u2014 ${JSON.stringify(panelEval.exceptionDetails).slice(0, 400)}`);
+  }
+  if (process.env.BEAUTIFY_TIMING === "1") {
+    console.error(`serve: inject timing ${JSON.stringify({
+      target: target2.id,
+      totalMs: Date.now() - injectAt,
+      assetsMs,
+      assetCache: assets ? "loaded" : "none",
+      bootstrapChars: bootstrap.length,
+      panelChars: panelScript.length
+    })}`);
   }
   held.set(target2.id, session);
 }
@@ -121093,7 +122318,7 @@ async function pushConfigToSessions(config) {
 }
 async function poll(config, apiPort) {
   if (shuttingDown)
-    return false;
+    return { reachable: false, rendererTargets: 0, held: held.size, settled: false };
   try {
     const targets = pickRendererTargets(await listTargets(config.port));
     const current = new Set(targets.map((t2) => t2.id));
@@ -121142,7 +122367,10 @@ async function poll(config, apiPort) {
         try {
           await holdSession(t2, config, apiPort);
           console.log(`serve: panel + theme injected into "${t2.title}" (${t2.id})`);
-        } catch {
+        } catch (err) {
+          if (process.env.BEAUTIFY_TIMING === "1") {
+            console.error(`serve: inject retry "${t2.title}" \u2014 ${err.message}`);
+          }
         }
       }
     }
@@ -121152,9 +122380,9 @@ async function poll(config, apiPort) {
         held.delete(id);
       }
     }
-    return targets.length > 0;
+    return { reachable: true, rendererTargets: targets.length, held: held.size, settled: targets.length > 0 && held.size >= targets.length };
   } catch {
-    return false;
+    return { reachable: false, rendererTargets: 0, held: held.size, settled: false };
   }
 }
 function sendJson(res, code, body) {
@@ -121199,24 +122427,24 @@ function readBody(req) {
 }
 function migrateLegacySpinnerFiles() {
   try {
-    fs15.mkdirSync(spinnerDir(), { recursive: true });
+    fs16.mkdirSync(spinnerDir(), { recursive: true });
     let moved = false;
     for (const ext of [".gif", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".svg"]) {
-      const legacy = path15.join(dataDir(), "spinner" + ext);
-      if (!fs15.existsSync(legacy))
+      const legacy = path16.join(dataDir(), "spinner" + ext);
+      if (!fs16.existsSync(legacy))
         continue;
-      const dest = path15.join(spinnerDir(), "spinner" + ext);
-      fs15.rmSync(dest, { force: true });
-      fs15.renameSync(legacy, dest);
+      const dest = path16.join(spinnerDir(), "spinner" + ext);
+      fs16.rmSync(dest, { force: true });
+      fs16.renameSync(legacy, dest);
       moved = true;
-      console.log(`serve: migrated spinner icon ${path15.basename(legacy)} \u2192 spinner/`);
+      console.log(`serve: migrated spinner icon ${path16.basename(legacy)} \u2192 spinner/`);
     }
     if (!moved)
       return;
     const stored = loadConfig();
     const img = stored.taskSpinnerLook?.image;
-    if (typeof img === "string" && SPINNER_FILE_RE.test(path15.basename(img)) && path15.dirname(path15.resolve(img)).toLowerCase() === path15.resolve(dataDir()).toLowerCase()) {
-      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path15.join(spinnerDir(), path15.basename(img)) };
+    if (typeof img === "string" && SPINNER_FILE_RE.test(path16.basename(img)) && path16.dirname(path16.resolve(img)).toLowerCase() === path16.resolve(dataDir()).toLowerCase()) {
+      stored.taskSpinnerLook = { ...stored.taskSpinnerLook, image: path16.join(spinnerDir(), path16.basename(img)) };
       saveConfig(stored);
     }
   } catch (err) {
@@ -121247,21 +122475,21 @@ async function startServe(opts) {
   const apiPort = opts.apiPort;
   let cdpPort = requestedCdpPort;
   const startedAt = Date.now();
+  const timing = {};
+  const mark = (name) => {
+    timing[name] = Date.now() - startedAt;
+  };
   if (hostPluginDisabled()) {
     console.log(`serve: plugin disabled in ${target().appName}'s plugin manager \u2014 nothing started`);
     return;
   }
   const preferredCdpPort = requestedCdpPort;
-  cdpPort = await resolveCdpPort(preferredCdpPort);
-  if (cdpPort !== preferredCdpPort) {
-    console.log(`serve: CDP port ${preferredCdpPort} unavailable \u2014 using ${target().appName}'s built-in debugging port ${cdpPort}`);
-  }
   mediaToken = crypto2.randomBytes(24).toString("hex");
   migrateLegacySpinnerFiles();
-  const historyFile = () => path15.join(dataDir(), "history.json");
+  const historyFile = () => path16.join(dataDir(), "history.json");
   function readHistory() {
     try {
-      return JSON.parse(fs15.readFileSync(historyFile(), "utf8"));
+      return JSON.parse(fs16.readFileSync(historyFile(), "utf8"));
     } catch {
       return [];
     }
@@ -121270,7 +122498,7 @@ async function startServe(opts) {
     try {
       const list = readHistory().filter((e2) => e2.hash !== entry.hash || e2.path !== entry.path);
       list.unshift({ at: Date.now(), ...entry });
-      fs15.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
+      fs16.writeFileSync(historyFile(), JSON.stringify(list.slice(0, 20), null, 2));
     } catch {
     }
   }
@@ -121282,12 +122510,12 @@ async function startServe(opts) {
   const applyRef = async (ref) => {
     const config = runtimeConfig();
     if (typeof ref.hash === "string") {
-      const loopPath = path15.join(scenesCacheRoot(), ref.hash, "loop.mp4");
-      if (!fs15.existsSync(loopPath))
+      const loopPath = path16.join(scenesCacheRoot(), ref.hash, "loop.mp4");
+      if (!fs16.existsSync(loopPath))
         throw new Error("unknown scene hash");
       let label = ref.hash.slice(0, 8);
       try {
-        label = JSON.parse(fs15.readFileSync(path15.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
+        label = JSON.parse(fs16.readFileSync(path16.join(scenesCacheRoot(), ref.hash, "name.json"), "utf8")).name || label;
       } catch {
       }
       const next = {
@@ -121302,7 +122530,7 @@ async function startServe(opts) {
       recordHistory({ label, kind: "video", hash: ref.hash, thumbUrl: `http://127.0.0.1:${apiPort}/media/poster/${ref.hash}.jpg` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
-    if (typeof ref.path === "string" && fs15.existsSync(ref.path)) {
+    if (typeof ref.path === "string" && fs16.existsSync(ref.path)) {
       const next = {
         ...config,
         wallpaperPath: ref.path,
@@ -121311,18 +122539,20 @@ async function startServe(opts) {
         sceneVideoUrl: void 0
       };
       saveConfig(persisted(next));
-      recordHistory({ label: path15.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path15.basename(ref.path))}` });
+      recordHistory({ label: path16.basename(ref.path), kind: "image", path: ref.path, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path16.basename(ref.path))}` });
       return { windows: await pushConfigToSessions(next).catch(() => 0) };
     }
     throw new Error("provide hash or existing path");
   };
+  const duplicateProbeAt = Date.now();
   const already = await existingServePid(apiPort);
+  timing.duplicateCheckMs = Date.now() - duplicateProbeAt;
   if (already !== void 0) {
     throw new Error(`a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) \u2014 open its panel, or stop that process first`);
   }
   try {
-    fs15.mkdirSync(dataDir(), { recursive: true });
-    fs15.writeFileSync(path15.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
+    fs16.mkdirSync(dataDir(), { recursive: true });
+    fs16.writeFileSync(path16.join(dataDir(), "serve.token"), mediaToken, { encoding: "utf8" });
   } catch {
   }
   const server = http.createServer((req, res) => {
@@ -121396,16 +122626,19 @@ async function startServe(opts) {
           throw new Error(`image too large (max ${MAX_WALLPAPER_BYTES / 1024 / 1024} MB)`);
         }
         const config = runtimeConfig();
-        fs15.mkdirSync(dataDir(), { recursive: true });
+        fs16.mkdirSync(dataDir(), { recursive: true });
         const ext = IMAGE_EXT[m[1]];
-        const safeBase = (typeof body?.name === "string" ? path15.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
-        let dest = path15.join(dataDir(), safeBase + ext);
-        for (let i2 = 2; fs15.existsSync(dest); i2++) {
-          dest = path15.join(dataDir(), `${safeBase}(${i2})${ext}`);
+        const safeBase = (typeof body?.name === "string" ? path16.basename(body.name) : "wallpaper").replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\" + ext + "$", "i"), "").trim() || "wallpaper";
+        let dest = path16.join(dataDir(), safeBase + ext);
+        for (let i2 = 2; fs16.existsSync(dest); i2++) {
+          dest = path16.join(dataDir(), `${safeBase}(${i2})${ext}`);
         }
-        fs15.writeFileSync(dest, bytes);
+        fs16.writeFileSync(dest, bytes);
         const themeSrc = await themeThumbFor(dest);
-        rememberAssets(themeSrc, fs15.statSync(themeSrc).mtimeMs, await loadWallpaper(themeSrc));
+        const destStat = fs16.statSync(dest);
+        const uploadedAssets = await loadWallpaper(themeSrc);
+        rememberAssets(dest, destStat.mtimeMs, uploadedAssets);
+        writeAssetCache(dest, destStat.mtimeMs, destStat.size, uploadedAssets);
         const nextCfg = {
           ...config,
           wallpaperPath: dest,
@@ -121414,7 +122647,7 @@ async function startServe(opts) {
           sceneVideoUrl: void 0
         };
         saveConfig(persisted(nextCfg));
-        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path15.basename(dest))}` });
+        recordHistory({ label: safeBase + ext, kind: "image", path: dest, thumbUrl: `http://127.0.0.1:${apiPort}/media/lib/${encodeURIComponent(path16.basename(dest))}` });
         const windows = await pushConfigToSessions(nextCfg).catch(() => 0);
         sendJson(res, 200, { ok: true, windows, ...publicConfig(nextCfg) });
         return;
@@ -121432,16 +122665,16 @@ async function startServe(opts) {
         }
         const ext = m[1] === "image/svg+xml" ? ".svg" : IMAGE_EXT[m[1]];
         const base = slot === "running" ? "spinner" : slot === "fab" ? "fab" : "spinner-" + slot;
-        const dest = path15.join(spinnerDir(), base + ext);
-        fs15.mkdirSync(spinnerDir(), { recursive: true });
+        const dest = path16.join(spinnerDir(), base + ext);
+        fs16.mkdirSync(spinnerDir(), { recursive: true });
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
           if (old !== ext)
-            fs15.rmSync(path15.join(spinnerDir(), base + old), { force: true });
+            fs16.rmSync(path16.join(spinnerDir(), base + old), { force: true });
         }
         for (const old of [...Object.values(IMAGE_EXT), ".svg", ".jpeg"]) {
-          fs15.rmSync(path15.join(dataDir(), base + old), { force: true });
+          fs16.rmSync(path16.join(dataDir(), base + old), { force: true });
         }
-        fs15.writeFileSync(dest, bytes);
+        fs16.writeFileSync(dest, bytes);
         const config = runtimeConfig();
         if (slot === "fab") {
           const look2 = normalizeFabLook(config.fabLook);
@@ -121480,9 +122713,9 @@ async function startServe(opts) {
       }
       if (req.method === "POST" && url.pathname === "/api/reset") {
         const stored = loadConfig();
-        if (stored.wallpaperPath && fs15.existsSync(stored.wallpaperPath)) {
-          fs15.mkdirSync(dataDir(), { recursive: true });
-          fs15.writeFileSync(backupFile(), JSON.stringify(stored));
+        if (stored.wallpaperPath && fs16.existsSync(stored.wallpaperPath)) {
+          fs16.mkdirSync(dataDir(), { recursive: true });
+          fs16.writeFileSync(backupFile(), JSON.stringify(stored));
         }
         for (const [id, session] of held) {
           try {
@@ -121516,7 +122749,7 @@ async function startServe(opts) {
       if (req.method === "POST" && url.pathname === "/api/restore") {
         let saved;
         try {
-          saved = JSON.parse(fs15.readFileSync(backupFile(), "utf8"));
+          saved = JSON.parse(fs16.readFileSync(backupFile(), "utf8"));
         } catch {
           throw new Error("no wallpaper backup available");
         }
@@ -121539,7 +122772,8 @@ async function startServe(opts) {
           uptimeMs: Date.now() - startedAt,
           cdpPort,
           apiPort,
-          experimental: { enabled: exp?.enabled === true, migrated: exp?.migrated === true }
+          experimental: { enabled: exp?.enabled === true, migrated: exp?.migrated === true },
+          timings: timing
         });
         return;
       }
@@ -121636,12 +122870,12 @@ async function startServe(opts) {
           } else {
             const dir = (() => {
               try {
-                return fs15.statSync(scenePath).isDirectory() ? scenePath : path15.dirname(scenePath);
+                return fs16.statSync(scenePath).isDirectory() ? scenePath : path16.dirname(scenePath);
               } catch {
                 return scenePath;
               }
             })();
-            const probe = JSON.parse(fs15.readFileSync(path15.join(dir, "project.json"), "utf8"));
+            const probe = JSON.parse(fs16.readFileSync(path16.join(dir, "project.json"), "utf8"));
             const w = Number(probe?.general?.properties?.width);
             const h = Number(probe?.general?.properties?.height);
             if (w >= 256 && w <= 3840)
@@ -121678,16 +122912,16 @@ async function startServe(opts) {
           let label = result.hash.slice(0, 8);
           let named = false;
           try {
-            label = JSON.parse(fs15.readFileSync(path15.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
+            label = JSON.parse(fs16.readFileSync(path16.join(scenesCacheRoot(), result.hash, "name.json"), "utf8")).name || label;
             named = true;
           } catch {
           }
           if (!named) {
-            const fallback = weTitleForPath(scenePath) ?? (path15.extname(scenePath) ? path15.basename(scenePath).replace(/\.[^.]+$/, "") : void 0);
+            const fallback = weTitleForPath(scenePath) ?? (path16.extname(scenePath) ? path16.basename(scenePath).replace(/\.[^.]+$/, "") : void 0);
             if (fallback) {
               label = fallback;
               try {
-                fs15.writeFileSync(path15.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
+                fs16.writeFileSync(path16.join(scenesCacheRoot(), result.hash, "name.json"), JSON.stringify({ name: fallback }));
               } catch {
               }
             }
@@ -121739,15 +122973,15 @@ async function startServe(opts) {
       if (req.method === "GET" && url.pathname === "/api/library") {
         let fav = { hashes: [], paths: [] };
         try {
-          fav = JSON.parse(fs15.readFileSync(path15.join(dataDir(), "favorites.json"), "utf8"));
+          fav = JSON.parse(fs16.readFileSync(path16.join(dataDir(), "favorites.json"), "utf8"));
         } catch {
         }
         const images = [];
-        for (const f2 of fs15.readdirSync(dataDir())) {
+        for (const f2 of fs16.readdirSync(dataDir())) {
           if (/\.(jpe?g|png|webp|bmp)$/i.test(f2)) {
             try {
-              const p2 = path15.join(dataDir(), f2);
-              images.push({ name: f2, path: p2, mtimeMs: fs15.statSync(p2).mtimeMs, favorite: fav.paths.includes(path15.resolve(p2)) });
+              const p2 = path16.join(dataDir(), f2);
+              images.push({ name: f2, path: p2, mtimeMs: fs16.statSync(p2).mtimeMs, favorite: fav.paths.includes(path16.resolve(p2)) });
             } catch {
             }
           }
@@ -121760,13 +122994,13 @@ async function startServe(opts) {
         }
         const scenes = [];
         try {
-          for (const d of fs15.readdirSync(scenesCacheRoot())) {
-            const loop = path15.join(scenesCacheRoot(), d, "loop.mp4");
+          for (const d of fs16.readdirSync(scenesCacheRoot())) {
+            const loop = path16.join(scenesCacheRoot(), d, "loop.mp4");
             try {
-              const st = fs15.statSync(loop);
+              const st = fs16.statSync(loop);
               let name;
               try {
-                name = JSON.parse(fs15.readFileSync(path15.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs16.readFileSync(path16.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               scenes.push({ hash: d, name, sizeBytes: st.size, mtimeMs: st.mtimeMs, favorite: fav.hashes.includes(d) });
@@ -121787,18 +123021,18 @@ async function startServe(opts) {
         if (name.includes("/") || name.includes("\\") || name.includes(".."))
           throw new Error("invalid name");
         if (body?.kind === "scene" && typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
-          const dir = path15.join(scenesCacheRoot(), body.hash);
-          if (!fs15.existsSync(dir))
+          const dir = path16.join(scenesCacheRoot(), body.hash);
+          if (!fs16.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs15.writeFileSync(path15.join(dir, "name.json"), JSON.stringify({ name }));
+          fs16.writeFileSync(path16.join(dir, "name.json"), JSON.stringify({ name }));
           sendJson(res, 200, { ok: true });
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
-          const oldPath = path15.resolve(body.path);
+          const oldPath = path16.resolve(body.path);
           const renamed = renameLibraryImage(oldPath, name);
           const cfg = runtimeConfig();
-          if (cfg.wallpaperPath && path15.resolve(cfg.wallpaperPath) === oldPath) {
+          if (cfg.wallpaperPath && path16.resolve(cfg.wallpaperPath) === oldPath) {
             saveConfig(persisted({ ...cfg, wallpaperPath: renamed }));
           }
           sendJson(res, 200, { ok: true, path: renamed });
@@ -121829,27 +123063,27 @@ async function startServe(opts) {
           if (config.sceneHash === body.hash) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
-          const dir = path15.join(scenesCacheRoot(), body.hash);
-          if (!fs15.existsSync(dir))
+          const dir = path16.join(scenesCacheRoot(), body.hash);
+          if (!fs16.existsSync(dir))
             throw new Error("unknown scene hash");
-          fs15.rmSync(dir, { recursive: true, force: true });
+          fs16.rmSync(dir, { recursive: true, force: true });
           dropFromPlans((e2) => e2.hash === body.hash);
           sendJson(res, 200, { ok: true });
           return;
         }
         if (body?.kind === "image" && typeof body?.path === "string") {
-          const target2 = path15.resolve(body.path);
-          if (config.wallpaperPath && path15.resolve(config.wallpaperPath) === target2) {
+          const target2 = path16.resolve(body.path);
+          if (config.wallpaperPath && path16.resolve(config.wallpaperPath) === target2) {
             throw new Error("\u8BE5\u58C1\u7EB8\u6B63\u5728\u4F7F\u7528\u4E2D \u2014 \u5148\u5207\u6362\u5230\u5176\u4ED6\u58C1\u7EB8\u518D\u5220\u9664");
           }
           if (!isInsideDataDir(target2) || !/\.(jpe?g|png|webp|bmp)$/i.test(target2)) {
             throw new Error("only plugin-managed wallpapers can be deleted here");
           }
-          fs15.rmSync(target2, { force: true });
-          const thumb = path15.join(thumbDir(), path15.basename(target2) + ".jpg");
+          fs16.rmSync(target2, { force: true });
+          const thumb = path16.join(thumbDir(), path16.basename(target2) + ".jpg");
           if (isInsideDataDir(thumb))
-            fs15.rmSync(thumb, { force: true });
-          dropFromPlans((e2) => Boolean(e2.path && path15.resolve(e2.path) === target2));
+            fs16.rmSync(thumb, { force: true });
+          dropFromPlans((e2) => Boolean(e2.path && path16.resolve(e2.path) === target2));
           sendJson(res, 200, { ok: true });
           return;
         }
@@ -121917,26 +123151,26 @@ async function startServe(opts) {
         let scenesBytes = 0;
         const entries = [];
         try {
-          for (const d of fs15.readdirSync(scenesCacheRoot())) {
+          for (const d of fs16.readdirSync(scenesCacheRoot())) {
             try {
               let size = 0;
               const walk = (dir) => {
-                for (const f2 of fs15.readdirSync(dir, { withFileTypes: true })) {
-                  const p2 = path15.join(dir, f2.name);
+                for (const f2 of fs16.readdirSync(dir, { withFileTypes: true })) {
+                  const p2 = path16.join(dir, f2.name);
                   if (f2.isDirectory())
                     walk(p2);
                   else {
                     try {
-                      size += fs15.statSync(p2).size;
+                      size += fs16.statSync(p2).size;
                     } catch {
                     }
                   }
                 }
               };
-              walk(path15.join(scenesCacheRoot(), d));
+              walk(path16.join(scenesCacheRoot(), d));
               let name;
               try {
-                name = JSON.parse(fs15.readFileSync(path15.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
+                name = JSON.parse(fs16.readFileSync(path16.join(scenesCacheRoot(), d, "name.json"), "utf8")).name;
               } catch {
               }
               entries.push({ hash: d, name, sizeBytes: size });
@@ -121948,9 +123182,9 @@ async function startServe(opts) {
         }
         let thumbsBytes = 0;
         try {
-          for (const f2 of fs15.readdirSync(thumbDir())) {
+          for (const f2 of fs16.readdirSync(thumbDir())) {
             try {
-              thumbsBytes += fs15.statSync(path15.join(thumbDir(), f2)).size;
+              thumbsBytes += fs16.statSync(path16.join(thumbDir(), f2)).size;
             } catch {
             }
           }
@@ -121968,16 +123202,16 @@ async function startServe(opts) {
         let skipped = 0;
         let savedBytes = 0;
         try {
-          for (const d of fs15.readdirSync(scenesCacheRoot())) {
-            const loop = path15.join(scenesCacheRoot(), d, "loop.mp4");
+          for (const d of fs16.readdirSync(scenesCacheRoot())) {
+            const loop = path16.join(scenesCacheRoot(), d, "loop.mp4");
             try {
-              if (!fs15.statSync(loop).isFile())
+              if (!fs16.statSync(loop).isFile())
                 continue;
               if (config.sceneHash === d) {
                 skipped++;
                 continue;
               }
-              const before = fs15.statSync(loop).size;
+              const before = fs16.statSync(loop).size;
               const tmp = `${loop}.cmp-${process.pid}.mp4`;
               await execFileP(ff, [
                 "-y",
@@ -122003,13 +123237,13 @@ async function startServe(opts) {
                 "-an",
                 tmp
               ], { timeout: 3e5 });
-              const after = fs15.statSync(tmp).size;
+              const after = fs16.statSync(tmp).size;
               if (after > 0 && after < before) {
-                fs15.renameSync(tmp, loop);
+                fs16.renameSync(tmp, loop);
                 done++;
                 savedBytes += before - after;
               } else {
-                fs15.rmSync(tmp, { force: true });
+                fs16.rmSync(tmp, { force: true });
               }
             } catch {
             }
@@ -122023,11 +123257,11 @@ async function startServe(opts) {
         const config = runtimeConfig();
         let removed = 0;
         try {
-          for (const d of fs15.readdirSync(scenesCacheRoot())) {
+          for (const d of fs16.readdirSync(scenesCacheRoot())) {
             if (config.sceneHash === d)
               continue;
             try {
-              fs15.rmSync(path15.join(scenesCacheRoot(), d), { recursive: true, force: true });
+              fs16.rmSync(path16.join(scenesCacheRoot(), d), { recursive: true, force: true });
               removed++;
             } catch {
             }
@@ -122037,7 +123271,7 @@ async function startServe(opts) {
         if (removed) {
           const rot = normalizeRotation(runtimeConfig().rotation);
           for (const plan of rot.plans)
-            plan.entries = plan.entries.filter((e2) => !e2.hash || fs15.existsSync(path15.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
+            plan.entries = plan.entries.filter((e2) => !e2.hash || fs16.existsSync(path16.join(scenesCacheRoot(), e2.hash, "loop.mp4")));
           saveConfig(persisted({ ...runtimeConfig(), rotation: rot }));
           if (rot.enabled)
             startRotation(true);
@@ -122074,11 +123308,11 @@ async function startServe(opts) {
         const incoming = body.config;
         const patch = sanitize(incoming);
         const withWp = { ...runtimeConfig(), ...patch };
-        if (typeof incoming.wallpaperPath === "string" && fs15.existsSync(incoming.wallpaperPath)) {
+        if (typeof incoming.wallpaperPath === "string" && fs16.existsSync(incoming.wallpaperPath)) {
           withWp.wallpaperPath = incoming.wallpaperPath;
           withWp.mediaType = incoming.mediaType === "video" ? "video" : "image";
           withWp.sceneHash = typeof incoming.sceneHash === "string" ? incoming.sceneHash : void 0;
-          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs15.existsSync(path15.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
+          if (withWp.sceneHash && (!/^[a-f0-9]{8,64}$/.test(withWp.sceneHash) || !fs16.existsSync(path16.join(scenesCacheRoot(), withWp.sceneHash, "loop.mp4")))) {
             withWp.sceneHash = void 0;
             withWp.mediaType = "image";
           }
@@ -122095,8 +123329,8 @@ async function startServe(opts) {
       if (req.method === "POST" && url.pathname === "/api/open-folder") {
         const body = JSON.parse(await readBody(req));
         const target2 = body?.target === "scenes" ? scenesCacheRoot() : body?.target === "thumbs" ? thumbDir() : dataDir();
-        fs15.mkdirSync(target2, { recursive: true });
-        spawn4("explorer", [target2], { detached: true, stdio: "ignore" }).unref();
+        fs16.mkdirSync(target2, { recursive: true });
+        spawn5("explorer", [target2], { detached: true, stdio: "ignore" }).unref();
         sendJson(res, 200, { ok: true, path: target2 });
         return;
       }
@@ -122120,10 +123354,10 @@ async function startServe(opts) {
         sendJson(res, 200, { items: top });
         return;
       }
-      const favoritesFile = () => path15.join(dataDir(), "favorites.json");
+      const favoritesFile = () => path16.join(dataDir(), "favorites.json");
       const readFavorites = () => {
         try {
-          return JSON.parse(fs15.readFileSync(favoritesFile(), "utf8"));
+          return JSON.parse(fs16.readFileSync(favoritesFile(), "utf8"));
         } catch {
           return { hashes: [], paths: [] };
         }
@@ -122141,19 +123375,19 @@ async function startServe(opts) {
         if (typeof body?.hash === "string" && /^[a-f0-9]{8,64}$/.test(body.hash)) {
           toggle(fav.hashes, body.hash, body.on === true);
         } else if (typeof body?.path === "string") {
-          toggle(fav.paths, path15.resolve(body.path), body.on === true);
+          toggle(fav.paths, path16.resolve(body.path), body.on === true);
         } else {
           throw new Error("hash or path required");
         }
-        fs15.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
+        fs16.writeFileSync(favoritesFile(), JSON.stringify(fav, null, 2));
         sendJson(res, 200, { ok: true });
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/palette") {
         const config = runtimeConfig();
-        const sourcePath = config.mediaType === "video" && config.sceneHash ? path15.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
+        const sourcePath = config.mediaType === "video" && config.sceneHash ? path16.join(scenesCacheRoot(), config.sceneHash, "poster.jpg") : config.wallpaperPath ? await themeThumbFor(config.wallpaperPath) : void 0;
         let colors = [];
-        if (sourcePath && fs15.existsSync(sourcePath)) {
+        if (sourcePath && fs16.existsSync(sourcePath)) {
           try {
             colors = await extractPalette(sourcePath);
           } catch {
@@ -122194,10 +123428,10 @@ async function startServe(opts) {
             type: it.type,
             dir: it.dir,
             importable: it.importable,
-            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs15.existsSync(path15.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
+            imported: Boolean(it.imported || map[it.dir.toLowerCase()] && fs16.existsSync(path16.join(scenesCacheRoot(), map[it.dir.toLowerCase()].hash, "loop.mp4"))),
             source: it.source,
             folder: it.folder ?? null,
-            videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path15.basename(it.videoFile))}` : null,
+            videoUrl: it.videoFile ? `/media/we-video?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(path16.basename(it.videoFile))}` : null,
             previewUrl: it.previewName ? `/media/we-preview?s=${it.source}&id=${encodeURIComponent(it.id)}&f=${encodeURIComponent(it.previewName)}` : null
           }))
         });
@@ -122223,7 +123457,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad scene media path" });
           return;
         }
-        const file = path15.join(scenesCacheRoot(), hash, "loop.mp4");
+        const file = path16.join(scenesCacheRoot(), hash, "loop.mp4");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "scene media not found" });
         }
@@ -122235,7 +123469,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad poster path" });
           return;
         }
-        const file = path15.join(scenesCacheRoot(), hash, "poster.jpg");
+        const file = path16.join(scenesCacheRoot(), hash, "poster.jpg");
         if (!sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "poster not found" });
         }
@@ -122247,7 +123481,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad library media path" });
           return;
         }
-        const file = path15.join(dataDir(), name);
+        const file = path16.join(dataDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "library media not found" });
         }
@@ -122259,7 +123493,7 @@ async function startServe(opts) {
           sendJson(res, 400, { error: "bad spinner media path" });
           return;
         }
-        const file = path15.join(spinnerDir(), name);
+        const file = path16.join(spinnerDir(), name);
         if (!isInsideDataDir(file) || !sendMediaFile(req, res, file)) {
           sendJson(res, 404, { error: "spinner media not found" });
         }
@@ -122274,11 +123508,23 @@ async function startServe(opts) {
     server.once("error", reject);
     server.listen(apiPort, "127.0.0.1", resolve);
   });
+  mark("listenMs");
   server.on("error", (err) => {
     console.error(`serve: http server error \u2014 ${err.message}`);
   });
   console.log(`serve: control API on http://127.0.0.1:${apiPort} \u2014 Ctrl+C to stop`);
   console.log(`serve: injecting into ${target().appName} renderers on CDP port ${cdpPort}`);
+  const startCdpResolution = () => {
+    void resolveCdpPort(preferredCdpPort).then((next) => {
+      if (next !== cdpPort) {
+        cdpPort = next;
+        console.log(`serve: CDP port ${preferredCdpPort} unavailable \u2014 using ${target().appName}'s built-in debugging port ${cdpPort}`);
+      }
+      timing.cdpResolveMs = Date.now() - startedAt;
+      return next;
+    }).catch(() => preferredCdpPort);
+  };
+  startCdpResolution();
   let rotationTimer;
   let rotationTick;
   let lastScheduleFire = "";
@@ -122538,20 +123784,33 @@ async function startServe(opts) {
   };
   if (await stopIfHostDisabled())
     return;
-  await poll(runtimeConfig(), apiPort);
+  let pollState = await poll(runtimeConfig(), apiPort);
+  mark("firstPollMs");
   startRotation();
+  if (process.env.BEAUTIFY_TIMING === "1") {
+    console.error(`serve timing ${JSON.stringify(timing)}`);
+  }
+  let fastUntil = Date.now() + POLL_BURST_MS;
+  let lastTargets = pollState.rendererTargets;
+  let lastResolveAt = Date.now();
+  let delay = pollState.settled ? POLL_MS : POLL_FAST_MS;
   for (; ; ) {
-    await new Promise((r2) => setTimeout(r2, POLL_MS));
+    await new Promise((r2) => setTimeout(r2, delay));
     if (await stopIfHostDisabled())
       return;
-    const polled = await poll(runtimeConfig(), apiPort);
-    if (!polled) {
-      const next = await resolveCdpPort(preferredCdpPort);
-      if (next !== cdpPort) {
-        cdpPort = next;
-        console.log(`serve: CDP port switched to ${cdpPort}`);
+    pollState = await poll(runtimeConfig(), apiPort);
+    if (!pollState.reachable) {
+      fastUntil = Date.now() + POLL_BURST_MS;
+      lastTargets = 0;
+      if (Date.now() - lastResolveAt > 5e3) {
+        lastResolveAt = Date.now();
+        startCdpResolution();
       }
+    } else if (pollState.rendererTargets !== lastTargets) {
+      lastTargets = pollState.rendererTargets;
+      fastUntil = Date.now() + POLL_BURST_MS;
     }
+    delay = pollState.settled ? POLL_MS : Date.now() < fastUntil ? POLL_FAST_MS : POLL_MS;
   }
 }
 function validPlanEntries(mode, raw) {
@@ -122563,7 +123822,7 @@ function validPlanEntries(mode, raw) {
     if (!e2 || typeof e2 !== "object")
       continue;
     const { seconds, time, hash, path: imgPath } = e2;
-    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs15.existsSync(path15.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs15.existsSync(imgPath) ? { path: imgPath } : void 0;
+    const ref = typeof hash === "string" && /^[a-f0-9]{8,64}$/.test(hash) && fs16.existsSync(path16.join(scenesCacheRoot(), hash, "loop.mp4")) ? { hash } : typeof imgPath === "string" && fs16.existsSync(imgPath) ? { path: imgPath } : void 0;
     if (!ref)
       continue;
     if (mode === "schedule") {
@@ -122645,31 +123904,31 @@ function renameLibraryImage(oldPath, name) {
   if (!isInsideDataDir(oldPath) || !/\.(jpe?g|png|webp|bmp)$/i.test(oldPath)) {
     throw new Error("only plugin-managed wallpapers can be renamed here");
   }
-  const ext = path15.extname(oldPath);
+  const ext = path16.extname(oldPath);
   const safe = name.replace(/[\/:*?"<>|]/g, "").trim() || "wallpaper";
-  let newPath = path15.join(path15.dirname(oldPath), safe + ext);
-  if (path15.resolve(newPath) !== path15.resolve(oldPath)) {
-    if (newPath.toLowerCase() !== path15.resolve(oldPath).toLowerCase()) {
-      for (let i2 = 2; fs15.existsSync(newPath); i2++) {
-        newPath = path15.join(path15.dirname(oldPath), `${safe}(${i2})${ext}`);
+  let newPath = path16.join(path16.dirname(oldPath), safe + ext);
+  if (path16.resolve(newPath) !== path16.resolve(oldPath)) {
+    if (newPath.toLowerCase() !== path16.resolve(oldPath).toLowerCase()) {
+      for (let i2 = 2; fs16.existsSync(newPath); i2++) {
+        newPath = path16.join(path16.dirname(oldPath), `${safe}(${i2})${ext}`);
       }
     }
-    fs15.renameSync(oldPath, newPath);
+    fs16.renameSync(oldPath, newPath);
   }
-  const oldThumb = path15.join(thumbDir(), path15.basename(oldPath) + ".jpg");
-  if (fs15.existsSync(oldThumb)) {
+  const oldThumb = path16.join(thumbDir(), path16.basename(oldPath) + ".jpg");
+  if (fs16.existsSync(oldThumb)) {
     try {
-      fs15.renameSync(oldThumb, path15.join(thumbDir(), path15.basename(newPath) + ".jpg"));
+      fs16.renameSync(oldThumb, path16.join(thumbDir(), path16.basename(newPath) + ".jpg"));
     } catch {
     }
   }
   return newPath;
 }
 function isInsideDataDir(target2) {
-  const rel = path15.relative(path15.resolve(dataDir()), path15.resolve(target2));
+  const rel = path16.relative(path16.resolve(dataDir()), path16.resolve(target2));
   return rel !== "" && !rel.startsWith("..");
 }
-var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, HOST_DISABLE_GRACE_MS, assetsCache, ffmpegPathCache, updateCheckCache, goalSessionsCache, changelogCache, importJob, held, shuttingDown, scrubbedUpdaters, mediaToken, IMAGE_EXT, spinnerDir, SPINNER_FILE_RE;
+var MAX_WALLPAPER_BYTES, MAX_BODY_BYTES, POLL_MS, POLL_FAST_MS, POLL_BURST_MS, HOST_DISABLE_GRACE_MS, assetsCache, ASSET_CACHE_SCHEMA, ASSET_CACHE_MAX_DATA_URI, ASSET_CACHE_MAX_FILES, ffmpegPathCache, updateCheckCache, goalSessionsCache, changelogCache, importJob, held, shuttingDown, scrubbedUpdaters, mediaToken, IMAGE_EXT, spinnerDir, SPINNER_FILE_RE;
 var init_server = __esm({
   "dist/core/server.js"() {
     "use strict";
@@ -122694,11 +123953,16 @@ var init_server = __esm({
     MAX_WALLPAPER_BYTES = 20 * 1024 * 1024;
     MAX_BODY_BYTES = MAX_WALLPAPER_BYTES + 1024 * 1024;
     POLL_MS = 1500;
+    POLL_FAST_MS = 150;
+    POLL_BURST_MS = 3e4;
     HOST_DISABLE_GRACE_MS = (() => {
       const raw = Number(process.env.ZCODE_BEAUTIFY_HOST_DISABLE_GRACE_MS);
       return Number.isFinite(raw) && raw >= 0 ? raw : 2 * 6e4;
     })();
     assetsCache = /* @__PURE__ */ new Map();
+    ASSET_CACHE_SCHEMA = 3;
+    ASSET_CACHE_MAX_DATA_URI = 12 * 1024 * 1024;
+    ASSET_CACHE_MAX_FILES = 12;
     updateCheckCache = null;
     goalSessionsCache = null;
     changelogCache = null;
@@ -122714,7 +123978,7 @@ var init_server = __esm({
       "image/gif": ".gif",
       "image/bmp": ".bmp"
     };
-    spinnerDir = () => path15.join(dataDir(), "spinner");
+    spinnerDir = () => path16.join(dataDir(), "spinner");
     SPINNER_FILE_RE = /^spinner\.(gif|png|webp|jpe?g|bmp|svg)$/i;
   }
 });
@@ -122724,8 +123988,8 @@ init_inject();
 init_launch();
 init_session();
 init_target();
-import fs16 from "node:fs";
-import path16 from "node:path";
+import fs17 from "node:fs";
+import path17 from "node:path";
 var USAGE = `zcode-beautify <command> [options]
 
 Global:
@@ -122770,6 +124034,20 @@ Commands:
                                  Add --remote-debugging-port to the app's launch
                                  entries (shortcuts, deep-link handler) missing it;
                                  --remove strips the flag from every entry instead
+  overlay install|remove|status|finalize
+                                 Startup overlay: patch app.asar so the loader
+                                 opens the CDP port and starts serve at every app
+                                 start, independent of plugin-manager settings
+                                 and launch-shortcut flags. install writes the
+                                 experimental gate consent unless --no-enable.
+                                 While ZCode runs the patched asar is staged and
+                                 applied automatically after a full quit.
+    --asar <path>                Override resources/app.asar (tests/custom dirs)
+    --plugin-root <dir>          Plugin folder carrying runtime/ and dist/
+    --no-enable                  Do not touch the experimental gate (auto-heal)
+    --keep-experimental          remove only strips the overlay, leaves the gate
+    --dry-run                    Report what would change; write nothing
+    --json                       Machine-readable status/result
 `;
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -122950,6 +124228,154 @@ then quit ${app.appName} completely and start it from one of the fixed shortcuts
         console.log(report.dryRun ? `${updated} of ${report.fixes.length} entry(ies) would be ${action === "remove" ? "cleaned" : "updated"}.` : action === "remove" ? `Removed --remote-debugging-port from ${updated} of ${report.fixes.length} entry(ies).` : `${updated} of ${report.fixes.length} entry(ies) updated.`);
         break;
       }
+      case "overlay": {
+        const sub = rest.find((a2) => !a2.startsWith("--")) ?? "status";
+        const { installOverlay: installOverlay2, removeOverlay: removeOverlay2, overlayStatus: overlayStatus2, finalizePending: finalizePending2, defaultPluginRoot: defaultPluginRoot2 } = await Promise.resolve().then(() => (init_overlay(), overlay_exports));
+        const json = has("--json");
+        if (sub === "install") {
+          let pluginRoot;
+          try {
+            pluginRoot = flag("--plugin-root") ?? defaultPluginRoot2();
+          } catch (err) {
+            console.error(`error: ${err.message}`);
+            process.exitCode = 1;
+            break;
+          }
+          const r2 = installOverlay2({
+            asarPath: flag("--asar"),
+            pluginRoot,
+            dryRun: has("--dry-run"),
+            auto: has("--auto")
+          });
+          if (json) {
+            console.log(JSON.stringify(r2, null, 2));
+            if (!r2.ok)
+              process.exitCode = 1;
+            break;
+          }
+          if (!r2.ok) {
+            console.error(`error: overlay install failed: ${r2.error}`);
+            process.exitCode = 1;
+            break;
+          }
+          if (!has("--no-enable") && !has("--auto") && !has("--dry-run")) {
+            try {
+              const { enableExperimental: enableExperimental2, spawnServeDetached: spawnServeDetached2 } = await Promise.resolve().then(() => (init_experimental(), experimental_exports));
+              const gate = await enableExperimental2();
+              const cliJs = process.argv[1] ?? "";
+              const requested2 = /\.(?:c|m)?js$/i.test(cliJs);
+              if (requested2)
+                spawnServeDetached2(gate.apiPort, cliJs);
+              console.log(`Experimental gate enabled (CDP port ${gate.port}); launch entries repaired` + (requested2 ? ", service start requested." : "."));
+            } catch (err) {
+              console.error(`warning: overlay installed but the experimental gate could not be enabled: ${err.message}`);
+            }
+          }
+          if (r2.alreadyInjected) {
+            console.log(`Overlay already installed for ${r2.asar}; runtime files refreshed.`);
+          } else if (r2.pending) {
+            console.log(`Overlay staged for ${r2.asar}.
+Fully quit ${app.appName} (including the tray icon). The patch is applied automatically after it exits,
+and the next start loads it \u2014 no shortcut flag is needed anymore.`);
+          } else {
+            console.log(`Overlay installed into ${r2.asar}.
+Fully quit and reopen ${app.appName}: the loader opens the CDP port and starts serve on every start.`);
+          }
+          if (r2.runtimeDir)
+            console.log(`Runtime: ${r2.runtimeDir}`);
+          if (r2.warning)
+            console.error(`warning: ${r2.warning}`);
+          break;
+        }
+        if (sub === "remove") {
+          const r2 = removeOverlay2({ asarPath: flag("--asar"), dryRun: has("--dry-run") });
+          if (json) {
+            console.log(JSON.stringify(r2, null, 2));
+            if (!r2.ok)
+              process.exitCode = 1;
+            break;
+          }
+          if (!r2.ok) {
+            console.error(`error: overlay remove failed: ${r2.error}`);
+            process.exitCode = 1;
+            break;
+          }
+          if (!has("--keep-experimental") && !has("--dry-run")) {
+            try {
+              const { disableExperimental: disableExperimental2 } = await Promise.resolve().then(() => (init_experimental(), experimental_exports));
+              const d = await disableExperimental2({ cleanLaunchers: true });
+              if (d.teardown.via === "service")
+                console.log("Service stopped; injected theme cleared.");
+              else if (d.teardown.via === "cdp")
+                console.log(`Injected theme cleared over CDP in ${d.teardown.windows} window(s).`);
+              else
+                console.log("No running client found \u2014 nothing injected to clear.");
+              console.log("Experimental gate disabled and the CDP flag stripped from launch entries.");
+            } catch (err) {
+              console.error(`warning: overlay removed but the experimental gate could not be disabled: ${err.message}`);
+            }
+          }
+          if (r2.pending) {
+            console.log(`Overlay removal staged. The opt-out marker is written, so the loader does nothing from now on.
+Fully quit ${app.appName}; the strip is applied automatically after it exits.`);
+          } else if (r2.alreadyClean) {
+            console.log(`Overlay was not present in ${r2.asar}; opt-out marker written.`);
+          } else {
+            console.log(`Overlay loader line stripped from ${r2.asar}. Fully quit and reopen ${app.appName} to finish.`);
+          }
+          if (r2.warning)
+            console.error(`warning: ${r2.warning}`);
+          break;
+        }
+        if (sub === "status") {
+          const s2 = overlayStatus2({ asarPath: flag("--asar") });
+          if (json) {
+            console.log(JSON.stringify(s2, null, 2));
+            break;
+          }
+          const line = s2.current ? "installed (loader line points at this install)" : s2.injected ? "installed, but the loader line points at an older runtime path \u2014 re-run `overlay install`" : "not installed";
+          console.log(`${s2.app} startup overlay: ${line}`);
+          console.log(`  asar:         ${s2.asar}${s2.asarExists ? "" : " (missing)"}${s2.error ? ` \u2014 ${s2.error}` : ""}`);
+          if (s2.entryPath)
+            console.log(`  entry:        ${s2.entryPath}`);
+          console.log(`  opt-out:      ${s2.optOut ? "yes (auto-install and loader are suppressed)" : "no"}`);
+          console.log(`  experimental: ${s2.experimentalEnabled ? "enabled" : "disabled"}`);
+          console.log(`  runtime:      ${s2.runtimeDir}`);
+          console.log(`  files:        loader=${s2.runtimeFiles.loader ? "ok" : "missing"}, cli=${s2.runtimeFiles.cli ? "ok" : "missing"}, monitor=${s2.runtimeFiles.monitor ? "ok" : "missing"}`);
+          if (s2.pending) {
+            console.log(`  pending:      ${s2.pending.mode} staged ${new Date(s2.pending.createdAt).toISOString()} \u2014 applies after ${s2.app} fully exits`);
+          } else {
+            console.log("  pending:      none");
+          }
+          if (s2.state)
+            console.log(`  state:        installed=${s2.state.installed} lastResult=${s2.state.lastResult ?? "?"}`);
+          break;
+        }
+        if (sub === "finalize") {
+          const r2 = finalizePending2();
+          if (json) {
+            console.log(JSON.stringify(r2, null, 2));
+            if (!r2.ok)
+              process.exitCode = 1;
+            break;
+          }
+          if (!r2.ok) {
+            console.error(`error: ${r2.error}`);
+            process.exitCode = 1;
+          } else if (r2.applied) {
+            console.log("Pending asar swap applied.");
+          } else if (r2.pending) {
+            console.log(`Pending ${r2.pending.mode} is still waiting: fully quit ${app.appName} and retry (the monitor also does this automatically).`);
+          } else {
+            console.log("No pending overlay swap.");
+          }
+          break;
+        }
+        console.error(`unknown overlay subcommand "${sub}" (expected install | remove | status | finalize)`);
+        console.log(USAGE);
+        process.exitCode = 1;
+        break;
+      }
       case "watch": {
         await watch(port);
         break;
@@ -122981,18 +124407,18 @@ then quit ${app.appName} completely and start it from one of the fixed shortcuts
   }
 }
 async function startServeDetached(cdpPort, apiPort) {
-  const { spawn: spawn5 } = await import("node:child_process");
+  const { spawn: spawn6 } = await import("node:child_process");
   const { existingServePid: existingServePid2 } = await Promise.resolve().then(() => (init_server(), server_exports));
   const already = await existingServePid2(apiPort);
   if (already !== void 0) {
     throw new Error(`a beautify service is already running on http://127.0.0.1:${apiPort} (pid ${already}) \u2014 open its panel, or stop that process first`);
   }
-  fs16.mkdirSync(dataDir(), { recursive: true });
-  const logFile = path16.join(dataDir(), "serve.log");
-  const out = fs16.openSync(logFile, "a");
-  const child = spawn5(process.execPath, [process.argv[1], "serve", "--port", String(cdpPort), "--api-port", String(apiPort)], { detached: true, stdio: ["ignore", out, out], windowsHide: true });
+  fs17.mkdirSync(dataDir(), { recursive: true });
+  const logFile = path17.join(dataDir(), "serve.log");
+  const out = fs17.openSync(logFile, "a");
+  const child = spawn6(process.execPath, [process.argv[1], "serve", "--port", String(cdpPort), "--api-port", String(apiPort)], { detached: true, stdio: ["ignore", out, out], windowsHide: true });
   child.unref();
-  fs16.closeSync(out);
+  fs17.closeSync(out);
   for (let i2 = 0; i2 < 20; i2++) {
     await new Promise((r2) => setTimeout(r2, 500));
     try {

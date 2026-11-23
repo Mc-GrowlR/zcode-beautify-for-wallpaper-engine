@@ -302,7 +302,7 @@ function killTree(child: ReturnType<typeof spawn>): void {
   check("D5: serve route strips launcher flags", serveSrc.includes("cleanupLaunchEntries(gate.port)"));
   check("D5b: disable route purges every live renderer with a fresh connection",
     serveSrc.includes("purgeLiveRenderers()") && serveSrc.includes("purged"));
-  check("D5c: shutdown flag blocks the poll loop from re-injecting", serveSrc.includes("if (shuttingDown) return false"));
+  check("D5c: shutdown flag blocks the poll loop from re-injecting", serveSrc.includes("if (shuttingDown) return { reachable: false"));
 
   const expSrc = fs.readFileSync(path.join(root, "src", "core", "experimental.ts"), "utf8");
   check("D6: disableExperimental marks the gate before teardown", /function disableExperimental[\s\S]{0,500}markExperimentalDisabled\(\)[\s\S]{0,500}teardownLive\(\)/.test(expSrc));

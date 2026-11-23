@@ -222,9 +222,37 @@ everything else.
 5. Verify: CDP reachable (`node <plugin-dir>/dist/cli.js status`), wallpaper
    visible, `/beautify` available in a new conversation.
 
+### Update-proof startup overlay (optional, 6.4.0+)
+
+If the user reports **"after a ZCode update the wallpaper/panel no longer
+start"**, or wants the look to survive updates and cleared plugin settings,
+offer the startup overlay. It patches ZCode's `resources/app.asar` main entry
+with one loader line; at every start the loader forces the CDP port on and
+starts serve in the Electron main process, independent of the plugin manager's
+enabledPlugins and of the shortcut's `--remote-debugging-port` flag. The
+plugin re-stages the patch automatically after an update once installed.
+
+- Only do this after explicit consent: it modifies the client's installation
+  files (the same technique as zcode-token-usage-statusbar), can trigger
+  antivirus heuristics, and keeps the unauthenticated loopback CDP port open.
+- Install: `/install-overlay` (agent: `node <plugin-dir>/dist/cli.js overlay
+  install`). While ZCode runs, the patch is staged and applied by a detached
+  monitor after the user **fully quits** ZCode (tray included); tell the user
+  that `staged` is expected, not a failure.
+- Verify: `node <plugin-dir>/dist/cli.js overlay status` →
+  `startup overlay: installed (loader line points at this install)`.
+- Remove: `/uninstall-overlay` (`overlay remove`). It strips only this plugin's
+  loader line, writes `.plugin-overlay-optout`, stops serve, clears the
+  injected look and disables the gate.
+
 ## Uninstall (if the user asks)
 
-- **Roll the launch entries back first** (the plugin — and versions before
+- **Remove the startup overlay first if it was installed**:
+  `node <plugin-dir>/dist/cli.js overlay remove` (or `/uninstall-overlay`)
+  strips the loader line from app.asar, writes the opt-out marker, stops the
+  service and clears the injected look. Have the user fully quit ZCode so the
+  staged asar swap can complete.
+- **Roll the launch entries back next** (the plugin — and versions before
   0.6.0 automatically — persisted `--remote-debugging-port=9222` into the
   user's shortcuts and HKCU handlers):
   `node <plugin-dir>/dist/cli.js disable` stops the service, clears the
@@ -234,6 +262,8 @@ everything else.
 - Then remove the `zcode-beautify` entry from `installed_plugins.json`, delete
   `cache/zcode-beautify/`, and (only if the user wants the marketplace gone)
   the `known_marketplaces.json` entry plus `marketplaces/zcode-beautify/`.
-- The plugin never modified ZCode's own installation files — but it DOES write
-  to launch entries while enabled, which is why the rollback step above is not
-  optional.
+- The plugin does not modify ZCode's installation files unless the user
+  explicitly installed the startup overlay; in that case `overlay remove` is a
+  required uninstall step (it strips only this plugin's line, never restoring
+  an old app.asar). It also writes to launch entries while enabled, which is
+  why the rollback step above is not optional.

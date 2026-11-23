@@ -64,6 +64,20 @@ Commands:
                                  Add --remote-debugging-port to the app's launch
                                  entries (shortcuts, deep-link handler) missing it;
                                  --remove strips the flag from every entry instead
+  overlay install|remove|status|finalize
+                                 Startup overlay: patch app.asar so the loader
+                                 opens the CDP port and starts serve at every app
+                                 start, independent of plugin-manager settings
+                                 and launch-shortcut flags. install writes the
+                                 experimental gate consent unless --no-enable.
+                                 While ZCode runs the patched asar is staged and
+                                 applied automatically after a full quit.
+    --asar <path>                Override resources/app.asar (tests/custom dirs)
+    --plugin-root <dir>          Plugin folder carrying runtime/ and dist/
+    --no-enable                  Do not touch the experimental gate (auto-heal)
+    --keep-experimental          remove only strips the overlay, leaves the gate
+    --dry-run                    Report what would change; write nothing
+    --json                       Machine-readable status/result
 `;
 
 async function main(): Promise<void> {
@@ -266,6 +280,166 @@ async function main(): Promise<void> {
               ? `Removed --remote-debugging-port from ${updated} of ${report.fixes.length} entry(ies).`
               : `${updated} of ${report.fixes.length} entry(ies) updated.`
         );
+        break;
+      }
+      case "overlay": {
+        const sub = rest.find((a) => !a.startsWith("--")) ?? "status";
+        const {
+          installOverlay, removeOverlay, overlayStatus, finalizePending, defaultPluginRoot,
+        } = await import("./core/overlay.js");
+        const json = has("--json");
+        if (sub === "install") {
+          let pluginRoot: string | undefined;
+          try {
+            pluginRoot = flag("--plugin-root") ?? defaultPluginRoot();
+          } catch (err) {
+            console.error(`error: ${(err as Error).message}`);
+            process.exitCode = 1;
+            break;
+          }
+          const r = installOverlay({
+            asarPath: flag("--asar"),
+            pluginRoot,
+            dryRun: has("--dry-run"),
+            auto: has("--auto"),
+          });
+          if (json) {
+            console.log(JSON.stringify(r, null, 2));
+            if (!r.ok) process.exitCode = 1;
+            break;
+          }
+          if (!r.ok) {
+            console.error(`error: overlay install failed: ${r.error}`);
+            process.exitCode = 1;
+            break;
+          }
+          // The overlay is explicit consent for the same CDP exposure as
+          // `enable`; record it and repair launch entries as a belt-and-braces
+          // path for clients that ignore the main-process switch.
+          if (!has("--no-enable") && !has("--auto") && !has("--dry-run")) {
+            try {
+              const { enableExperimental, spawnServeDetached } = await import("./core/experimental.js");
+              const gate = await enableExperimental();
+              const cliJs = process.argv[1] ?? "";
+              const requested = /\.(?:c|m)?js$/i.test(cliJs);
+              if (requested) spawnServeDetached(gate.apiPort, cliJs);
+              console.log(
+                `Experimental gate enabled (CDP port ${gate.port}); launch entries repaired` +
+                  (requested ? ", service start requested." : ".")
+              );
+            } catch (err) {
+              console.error(`warning: overlay installed but the experimental gate could not be enabled: ${(err as Error).message}`);
+            }
+          }
+          if (r.alreadyInjected) {
+            console.log(`Overlay already installed for ${r.asar}; runtime files refreshed.`);
+          } else if (r.pending) {
+            console.log(
+              `Overlay staged for ${r.asar}.\n` +
+                `Fully quit ${app.appName} (including the tray icon). The patch is applied automatically after it exits,\n` +
+                `and the next start loads it — no shortcut flag is needed anymore.`
+            );
+          } else {
+            console.log(
+              `Overlay installed into ${r.asar}.\n` +
+                `Fully quit and reopen ${app.appName}: the loader opens the CDP port and starts serve on every start.`
+            );
+          }
+          if (r.runtimeDir) console.log(`Runtime: ${r.runtimeDir}`);
+          if (r.warning) console.error(`warning: ${r.warning}`);
+          break;
+        }
+        if (sub === "remove") {
+          const r = removeOverlay({ asarPath: flag("--asar"), dryRun: has("--dry-run") });
+          if (json) {
+            console.log(JSON.stringify(r, null, 2));
+            if (!r.ok) process.exitCode = 1;
+            break;
+          }
+          if (!r.ok) {
+            console.error(`error: overlay remove failed: ${r.error}`);
+            process.exitCode = 1;
+            break;
+          }
+          if (!has("--keep-experimental") && !has("--dry-run")) {
+            try {
+              const { disableExperimental } = await import("./core/experimental.js");
+              const d = await disableExperimental({ cleanLaunchers: true });
+              if (d.teardown.via === "service") console.log("Service stopped; injected theme cleared.");
+              else if (d.teardown.via === "cdp") console.log(`Injected theme cleared over CDP in ${d.teardown.windows} window(s).`);
+              else console.log("No running client found — nothing injected to clear.");
+              console.log("Experimental gate disabled and the CDP flag stripped from launch entries.");
+            } catch (err) {
+              console.error(`warning: overlay removed but the experimental gate could not be disabled: ${(err as Error).message}`);
+            }
+          }
+          if (r.pending) {
+            console.log(
+              `Overlay removal staged. The opt-out marker is written, so the loader does nothing from now on.\n` +
+                `Fully quit ${app.appName}; the strip is applied automatically after it exits.`
+            );
+          } else if (r.alreadyClean) {
+            console.log(`Overlay was not present in ${r.asar}; opt-out marker written.`);
+          } else {
+            console.log(`Overlay loader line stripped from ${r.asar}. Fully quit and reopen ${app.appName} to finish.`);
+          }
+          if (r.warning) console.error(`warning: ${r.warning}`);
+          break;
+        }
+        if (sub === "status") {
+          const s = overlayStatus({ asarPath: flag("--asar") });
+          if (json) {
+            console.log(JSON.stringify(s, null, 2));
+            break;
+          }
+          const line = s.current
+            ? "installed (loader line points at this install)"
+            : s.injected
+              ? "installed, but the loader line points at an older runtime path — re-run `overlay install`"
+              : "not installed";
+          console.log(`${s.app} startup overlay: ${line}`);
+          console.log(`  asar:         ${s.asar}${s.asarExists ? "" : " (missing)"}${s.error ? ` — ${s.error}` : ""}`);
+          if (s.entryPath) console.log(`  entry:        ${s.entryPath}`);
+          console.log(`  opt-out:      ${s.optOut ? "yes (auto-install and loader are suppressed)" : "no"}`);
+          console.log(`  experimental: ${s.experimentalEnabled ? "enabled" : "disabled"}`);
+          console.log(`  runtime:      ${s.runtimeDir}`);
+          console.log(
+            `  files:        loader=${s.runtimeFiles.loader ? "ok" : "missing"}, ` +
+              `cli=${s.runtimeFiles.cli ? "ok" : "missing"}, monitor=${s.runtimeFiles.monitor ? "ok" : "missing"}`
+          );
+          if (s.pending) {
+            console.log(
+              `  pending:      ${s.pending.mode} staged ${new Date(s.pending.createdAt).toISOString()} — ` +
+                `applies after ${s.app} fully exits`
+            );
+          } else {
+            console.log("  pending:      none");
+          }
+          if (s.state) console.log(`  state:        installed=${s.state.installed} lastResult=${s.state.lastResult ?? "?"}`);
+          break;
+        }
+        if (sub === "finalize") {
+          const r = finalizePending();
+          if (json) {
+            console.log(JSON.stringify(r, null, 2));
+            if (!r.ok) process.exitCode = 1;
+            break;
+          }
+          if (!r.ok) {
+            console.error(`error: ${r.error}`);
+            process.exitCode = 1;
+          } else if (r.applied) {
+            console.log("Pending asar swap applied.");
+          } else if (r.pending) {
+            console.log(`Pending ${r.pending.mode} is still waiting: fully quit ${app.appName} and retry (the monitor also does this automatically).`);
+          } else {
+            console.log("No pending overlay swap.");
+          }
+          break;
+        }
+        console.error(`unknown overlay subcommand "${sub}" (expected install | remove | status | finalize)`);
+        console.log(USAGE);
+        process.exitCode = 1;
         break;
       }
       case "watch": {

@@ -11,6 +11,7 @@
 
 import { VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE } from "../version.js";
 import { bubbleRecipes, BUBBLE_SELECTOR_PREVIEW } from "../core/bubbleRecipes.js";
+import { startupProbeJs } from "../core/startupProbe.js";
 
 export const PANEL_ROOT_ID = "zcode-beautify-panel-root";
 
@@ -79,6 +80,10 @@ export function buildPanelScript(
   function mt(url) { return TOKEN ? url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + TOKEN : url; }
   var ROOT_ID = ${JSON.stringify(PANEL_ROOT_ID)};
   var runPanel = function() {
+  // Disable may land while the panel is parked behind the startup screen; the
+  // parked callback must not resurrect the FAB after teardown.
+  try { if (localStorage.getItem('zcode-beautify:disabled') === '1') return; } catch (e) {}
+  if (window.__zcodeBeautify && window.__zcodeBeautify.disabled) return;
   // Always rebuild: an older panel left in the DOM would otherwise shadow the
   // current script version forever (the old build skipped installation).
   var stale = document.getElementById(ROOT_ID);
@@ -4452,22 +4457,42 @@ export function buildPanelScript(
   })();
 
   $('zb-fab').addEventListener('click', function () {
+    var zbOpenT0 = (window.performance && performance.now) ? performance.now() : Date.now();
     var p = $('zb-panel');
     p.hidden = !p.hidden;
     if (!p.hidden) {
-      // A previously dragged panel can sit (partially) outside the viewport,
-      // which reads as "the panel did not open". Pull it back in.
-      var r = p.getBoundingClientRect();
-      if (r.width && (r.right < 40 || r.bottom < 40 || r.left > window.innerWidth - 40 || r.top > window.innerHeight - 40)) {
-        p.style.left = ''; p.style.top = ''; p.style.right = ''; p.style.bottom = '';
-      }
-      activateSavedTab();
-      beat(true);
-      if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
+      // Unhide FIRST and touch nothing else: activateSavedTab()/beat(true)
+      // (~90 ms) and even getBoundingClientRect() (forces a full layout of the
+      // panel's DOM, ~60-90 ms) used to run before the first paint. The panel
+      // is already built, so toggling hidden is the whole visible action; the
+      // refresh and the off-viewport rescue run after a frame.
+      var afterPaint = function(fn) {
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(function() { requestAnimationFrame(function() { fn(); }); });
+        } else setTimeout(fn, 32);
+      };
+      afterPaint(function() {
+        if (window.__zcodeBeautify && window.__zcodeBeautify.panelTiming) {
+          window.__zcodeBeautify.panelTiming.openPaintMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - zbOpenT0;
+        }
+        if (p.hidden) return; // closed again in the meantime
+        var r = p.getBoundingClientRect();
+        if (r.width && (r.right < 40 || r.bottom < 40 || r.left > window.innerWidth - 40 || r.top > window.innerHeight - 40)) {
+          p.style.left = ''; p.style.top = ''; p.style.right = ''; p.style.bottom = '';
+        }
+        activateSavedTab();
+        beat(true);
+        if (!rotStateTimer) { pollRotState(); rotStateTimer = zbEvery(pollRotState, 1000); }
+      });
     } else {
       hideHoverPreview(); // thumbnails vanish under the closed panel
       if (root.getAttribute('data-offline') !== '1') beat(false);
       if (rotStateTimer) { clearInterval(rotStateTimer); rotStateTimer = null; }
+    }
+    if (window.__zcodeBeautify) {
+      var pt = window.__zcodeBeautify.panelTiming || (window.__zcodeBeautify.panelTiming = {});
+      pt.openHandlerMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - zbOpenT0;
+      pt.openCount = (pt.openCount || 0) + 1;
     }
   });
 
@@ -4522,29 +4547,78 @@ export function buildPanelScript(
   // The registration replays at document creation where <body> does not exist
   // yet — document.body.appendChild would throw and the panel would never
   // come back after a reload. Wait for the parser (a few ms at most).
-  var zbStartupOn = function() {
-    if (!document.body) return false;
-    if (PROBE === 'workbuddy-skeleton') {
-      var sk = document.querySelector('#sk-overlay, #skeleton-root');
-      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
-      var root = document.querySelector('#root');
-      return !root || root.childElementCount === 0;
+  // Same 3.18 / 4.0 startup probe as the theme bootstrap (startupProbe.ts).
+${startupProbeJs(opts.appName === "WorkBuddy" ? "workbuddy-skeleton" : "zcode-body-class")}
+  var zbStartupOn = inStartupScreen;
+  var MAX_STARTUP_WAIT_MS = 15000;
+  var zbMount = function() {
+    var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+    runPanel();
+    if (window.__zcodeBeautify) {
+      var pt = window.__zcodeBeautify.panelTiming || (window.__zcodeBeautify.panelTiming = {});
+      pt.mountMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
     }
-    var cls = document.body.className || '';
-    return /zcode-startup/.test(cls) && !/ready/.test(cls);
   };
-  var zbMount = function() { runPanel(); };
+  var zbPanelDisabled = function() {
+    try { if (localStorage.getItem('zcode-beautify:disabled') === '1') return true; } catch (e) {}
+    return !!(window.__zcodeBeautify && window.__zcodeBeautify.disabled);
+  };
+  var zbPanelClearWait = function() {
+    if (window.__zcodeBeautify && window.__zcodeBeautify.panelMO) {
+      try { window.__zcodeBeautify.panelMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.panelMO = null;
+    }
+    if (window.__zcodeBeautify && window.__zcodeBeautify.panelTimer) {
+      clearTimeout(window.__zcodeBeautify.panelTimer);
+      window.__zcodeBeautify.panelTimer = null;
+    }
+    if (window.__zcodeBeautify && window.__zcodeBeautify.panelCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.panelCheckTimer);
+      window.__zcodeBeautify.panelCheckTimer = null;
+    }
+  };
+  var zbSchedulePanelCheck = function() {
+    if (window.__zcodeBeautify.panelCheckTimer) return;
+    window.__zcodeBeautify.panelCheckTimer = setTimeout(function() {
+      if (!window.__zcodeBeautify) return;
+      window.__zcodeBeautify.panelCheckTimer = null;
+      if (zbPanelDisabled()) return;
+      if (!zbStartupOn()) { zbPanelClearWait(); zbPanelMountPending(); }
+    }, 32);
+  };
+  var zbPanelMountPending = function() {
+    var fn = window.__zcodeBeautify && window.__zcodeBeautify.pendingPanel;
+    if (window.__zcodeBeautify) window.__zcodeBeautify.pendingPanel = null;
+    if (typeof fn === 'function' && !zbPanelDisabled()) fn();
+  };
   var zbPanelWait = function() {
+    if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+    if (zbPanelDisabled()) return;
     if (!document.body) { setTimeout(zbPanelWait, 20); return; }
     // The startup screen shows loading art — mounting the FAB/panel on top
     // of it looks broken; hold off until the app marks itself ready.
     if (STARTUP_CLEAN && zbStartupOn()) {
-      var mo = new MutationObserver(function() {
-        if (!zbStartupOn()) { mo.disconnect(); zbMount(); }
-      });
-      mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      // Newest generation wins; an older registration's parked closure must
+      // not keep the old panel after a serve restart.
+      window.__zcodeBeautify.pendingPanel = zbMount;
+      if (!window.__zcodeBeautify.panelMO) {
+        var mo = new MutationObserver(zbSchedulePanelCheck);
+        window.__zcodeBeautify.panelMO = mo;
+        mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      }
+      if (!window.__zcodeBeautify.panelTimer) {
+        window.__zcodeBeautify.panelTimer = setTimeout(function() {
+          window.__zcodeBeautify.panelTimer = null;
+          if (zbPanelDisabled()) return;
+          // Hard cap: mount even if the startup screen never clears.
+          zbPanelClearWait();
+          zbPanelMountPending();
+        }, MAX_STARTUP_WAIT_MS);
+      }
       return;
     }
+    zbPanelClearWait();
+    window.__zcodeBeautify.pendingPanel = null;
     zbMount();
   };
   zbPanelWait();

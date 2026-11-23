@@ -74,6 +74,14 @@ ZCode-only; under WorkBuddy the MCP/panel accept the parameters but skip them.
    ZCode completely and start it via `node <plugin-root>/dist/cli.js launch`,
    or via watch mode: `node <plugin-root>/dist/cli.js watch` (keeps
    re-injecting across restarts).
+   If this keeps happening **after a ZCode update** (the updater replaces
+   app.asar and rebuilds shortcuts without the flag) or the plugin settings
+   were cleared, offer the update-proof startup overlay —
+   `/install-overlay` / `node <plugin-root>/dist/cli.js overlay install`.
+   It patches app.asar (explicit consent; modifies client files) so the loader
+   forces CDP and starts serve on every launch. While ZCode runs the patch is
+   staged and applied after a **full quit**; `overlay status` verifies it.
+   Remove with `/uninstall-overlay` / `overlay remove`.
 4. **Fine-tune with `apply_options`** (blur / dim / monet / wallpaper_visible /
    fit) when the user wants adjustments — it does not need the image path
    again. `fit` picks the framing: `cover` fills and crops, `contain`

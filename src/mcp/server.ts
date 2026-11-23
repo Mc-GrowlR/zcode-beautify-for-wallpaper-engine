@@ -109,6 +109,7 @@ function releaseLauncherCheck(): void {
  * enables it, this process stays inert — no daemon, no launch-entry writes.
  */
 function bootstrapServe(): void {
+  const startedAt = performance.now();
   try {
     const cliJs = cliJsPath();
     if (!cliJs) return;
@@ -116,12 +117,16 @@ function bootstrapServe(): void {
     // start this MCP process when a workspace config overrides a global
     // disable, or right after the user toggles the plugin off — neither must
     // spawn the detached daemon or re-add the CDP flag.
+    const hostAt = performance.now();
     const host = hostPluginState();
+    const hostMs = performance.now() - hostAt;
     if (host.known && !host.enabled) {
       console.error(`beautify: plugin disabled in ${target().appName}'s plugin manager — nothing started`);
       return;
     }
+    const gateAt = performance.now();
     const cfg = ensureExperimentalGate();
+    const gateMs = performance.now() - gateAt;
     if (!cfg.experimental?.enabled) {
       console.error(
         "beautify: experimental CDP injection is disabled — nothing started " +
@@ -133,6 +138,12 @@ function bootstrapServe(): void {
     // whenever the configured port differs.
     const apiPort = cfg.apiPort ?? target().apiPort;
     spawnServeDetached(apiPort, cliJs);
+    // Startup-overlay self-heal: a client update replaces app.asar, which
+    // removes the loader line that `/install-overlay` wrote. If the user
+    // installed it before (and never opted out), stage a fresh patch. The
+    // heavy 380 MB rebuild runs in a detached CLI process and is applied by
+    // the monitor after the client exits — never on this MCP startup path.
+    import("../core/overlay.js").then((m) => m.autoHealOverlay()).catch(() => { /* best effort */ });
     // Self-heal launch entries: without the CDP flag a start-menu launch gets
     // no injection for the whole session — and ZCode's updater rebuilds the
     // Start Menu shortcut WITHOUT the flag, so this must run at every app
@@ -140,6 +151,9 @@ function bootstrapServe(): void {
     // 10 minutes across the session processes that start in that burst.
     // Fire-and-forget, fail-soft (stderr carries the plugin log; stdout is
     // the MCP protocol).
+    if (process.env.BEAUTIFY_TIMING === "1") {
+      console.error(`mcp: bootstrap timing ${JSON.stringify({ hostMs: Math.round(hostMs), gateMs: Math.round(gateMs), totalMs: Math.round(performance.now() - startedAt), uptimeMs: Math.round(process.uptime() * 1000) })}`);
+    }
     if (!claimLauncherCheck()) return;
     import("../core/launchers.js")
       .then((m) =>
@@ -161,7 +175,25 @@ function bootstrapServe(): void {
     /* best effort */
   }
 }
-bootstrapServe();
+// The settings-panel bootstrap is useful but never urgent: hand the MCP
+// transport its initialize response first (host spawn latency is measured by
+// the client) and only then run the host/gate checks, the detached-serve
+// health probe and the overlay/launcher self-heal. A 3s fallback covers hosts
+// that never send the initialized notification.
+let bootstrapStarted = false;
+function startBootstrapOnce(): void {
+  if (bootstrapStarted) return;
+  bootstrapStarted = true;
+  bootstrapServe();
+}
+let handshakeSeen = false;
+// A disabled gate is a pure refusal with no work to defer: log it at module
+// load so the host's log shows why nothing started even if the session never
+// completes a handshake. Enabled installs keep the expensive host/stamp/health
+// work off the handshake path below. loadConfig() is one small JSON read.
+try {
+  if (!experimentalEnabled(loadConfig())) startBootstrapOnce();
+} catch { /* gate check is best effort */ }
 
 /**
  * Host re-enable recovery: the plugin manager can switch the plugin off and
@@ -174,6 +206,9 @@ bootstrapServe();
 function watchHostReenable(): void {
   const timer = setInterval(() => {
     try {
+      // Before the handshake the one-shot starter owns the bootstrap; this
+      // watchdog is only for a later re-enable.
+      if (!handshakeSeen && !bootstrapStarted) return;
       const host = hostPluginState();
       if (host.known && !host.enabled) return;
       if (!experimentalEnabled(loadConfig())) return;
@@ -220,6 +255,19 @@ const server = new McpServer({
   name: "zcode-beautify",
   version: VERSION,
 });
+
+// Run the daemon bootstrap only after the protocol handshake. The old
+// module-load call put host-config reads, the launcher stamp and a health
+// probe in front of the initialize response (measured: +24 ms median).
+server.server.oninitialized = () => {
+  handshakeSeen = true;
+  if (process.env.BEAUTIFY_TIMING === "1") {
+    console.error(`mcp: initialized at ${Math.round(process.uptime() * 1000)}ms uptime`);
+  }
+  setImmediate(startBootstrapOnce);
+};
+const bootstrapFallback = setTimeout(startBootstrapOnce, 3000);
+bootstrapFallback.unref?.();
 
 /** Product name of the client this MCP instance beautifies. */
 const APP = target().appName;

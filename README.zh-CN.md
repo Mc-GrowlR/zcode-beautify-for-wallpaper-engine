@@ -4,7 +4,7 @@
 
 [Logocceai/zcode-beautify](https://github.com/Logocceai/zcode-beautify) 的 fork，由 [Mc-GrowlR](https://github.com/Mc-GrowlR) 持续维护——功能开发在本仓库进行（完整演进史见 [CHANGES.md](CHANGES.md)，0.3.0 → 6.1.x）。
 
-美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI；还能美化聊天区（消息气泡、对话列宽度与拖拽调宽、大会会话流畅模式、会话底部加载图标、输入框透明度）——并附带实时悬浮设置面板。在上游基础上，本 fork 新增：动态壁纸（WE 场景 / 视频导入与无缝循环）、本机 Wallpaper Engine 壁纸库浏览器、定时轮播方案、聊天区全套改样式、ZCode 3.18 适配，以及双客户端支持（ZCode + WorkBuddy）。
+美化 **ZCode 桌面客户端**：任意图片——或任意**视频 / Wallpaper Engine 场景壁纸**——一键设为背景壁纸，并用 Material Design 3（莫奈取色）动态配色适配整个 UI；还能美化聊天区（消息气泡、对话列宽度与拖拽调宽、大会会话流畅模式、会话底部加载图标、输入框透明度）——并附带实时悬浮设置面板。在上游基础上，本 fork 新增：动态壁纸（WE 场景 / 视频导入与无缝循环）、本机 Wallpaper Engine 壁纸库浏览器、定时轮播方案、聊天区全套改样式、ZCode 3.18 / 4.0 适配，以及双客户端支持（ZCode + WorkBuddy）。
 
 > 🧩 **0.5.0 起同时支持 WorkBuddy 桌面客户端**：加 `--target workbuddy`（或使用仓库内 `.codebuddy-plugin` 清单，已内置 `BEAUTIFY_TARGET=workbuddy`）即可把壁纸与莫奈配色注入 WorkBuddy。两个客户端的 CDP 端口（9222 / 9333）、控制 API 端口（9223 / 9334）、数据目录、启动项全部隔离，可同时开着互不干扰。WorkBuddy 使用其 `--wb-*` 设计变量族取色；气泡 / 消息流宽度 / 运行中图标这些聊天区增强仍为 ZCode 专属（绑定 ZCode 的 DOM），WorkBuddy 上面板会自动隐藏对应页签。
 
@@ -37,6 +37,7 @@
 - **实时设置面板**——ZCode 窗口内可拖拽的悬浮面板，三个标签页：**壁纸**（分组壁纸库、带进度与依赖引导的导入、当前外观）、**定时播放**（播放方案）、**设置**——blur/dim 滑块、取景模式、Monet 与壁纸透显开关、聊天界面遮罩（整体压暗 / 渐变蒙版 / 白纱）、昼夜护眼、录制分辨率、配置导出/导入、最近使用记录、一键还原。所有调整即时预览并自动保存。
 - **零操作服务**——MCP server 在 ZCode 启动时自动拉起后台 serve，面板无需手动启动，开箱即有。
 - **启动项自修复**——`serve` 运行期间，所有 ZCode 启动项（桌面 / 开始菜单 / 任务栏快捷方式——含 OneDrive 重定向目录——以及 `zcode://` 协议处理器、资源管理器右键菜单）自动保持携带 `--remote-debugging-port`，主题因此能在 ZCode 重启甚至更新器重建快捷方式后依然存活；`repair-launchers` 可随时按需扫描修复并输出结构化报告（机器级条目只报告不修改）。主题本身在渲染器刷新后自动恢复，上次外观还会缓存到 `localStorage` 作为兜底。
+- **启动 overlay（更新后也能自启）**——`/install-overlay` 把一行 loader 写入 ZCode 的 `resources/app.asar` 主入口：之后每次启动都在主进程里**强制打开 CDP 端口并拉起 serve**，不再依赖插件管理器的 enabledPlugins、也不依赖快捷方式里的 `--remote-debugging-port`。ZCode 更新会覆盖 app.asar 并清掉 loader 行，首次安装后插件会在 MCP 启动时自动补丁（后台暂存，完全退出 ZCode 后生效）；也可以随时重新执行 `/install-overlay`。`/uninstall-overlay` 剥离 loader、写 opt-out 标记并恢复默认外观。这会修改客户端文件（与 zusage 同类做法），仅在显式安装时发生。
 - **对话控制**——内置斜杠命令 `/beautify` 与 `/bubble`，加上 MCP 工具（`set_background`、`import_scene_wallpaper`、`apply_options`、`repair_launchers` 等），让 ZCode 智能体代你设壁纸、调主题，或用一句自然语言改气泡样式；改气泡还会在 ZCode 3.16+ 对话内打开气泡工坊交互画廊。
 
 ## 原理
@@ -179,6 +180,10 @@ set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbud
 | `serve [--detach] [--api-port M]` | 守护模式 + 设置面板 + 本地控制 API（默认 API 端口 9223）；`--detach` 使其脱离启动它的终端存活 |
 | `watch` | 无面板守护模式：ZCode 重启后自动重注入 |
 | `repair-launchers [--dry-run] [--remove]` | 扫描/修复所有启动项，确保 ZCode 总是带 CDP 端口启动；`--remove` 改为从所有启动项剥离该 flag（回滚用） |
+| `overlay install [--asar P] [--plugin-root D] [--no-enable] [--dry-run]` | 安装/修复启动 overlay：在 app.asar 主入口写入 loader，启动时强制 CDP 并拉起 serve。ZCode 运行中会暂存补丁，完全退出后自动替换；默认同时开启实验 gate |
+| `overlay remove [--keep-experimental]` | 剥离 overlay、写 opt-out 标记、停服务并恢复默认外观（`--keep-experimental` 保留实验 gate） |
+| `overlay status [--json]` | 查看 overlay 注入状态、运行目录、pending 与 opt-out |
+| `overlay finalize` | 手动应用等待中的 asar 替换（通常由后台 monitor 自动完成） |
 | `reset` | 移除壁纸与配色覆盖 |
 | `status` | 查看 CDP 可达性与渲染器目标 |
 
@@ -203,12 +208,13 @@ set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbud
 
 ```
 ├─ src/
-│  ├─ cli.ts                 # CLI 入口：launch / apply / apply-scene / colors / reset / status / watch / serve / repair-launchers
+│  ├─ cli.ts                 # CLI 入口：launch / apply / apply-scene / colors / reset / status / watch / serve / repair-launchers / overlay
 │  ├─ core/
 │  │  ├─ cdp.ts              # 精简 Chrome DevTools Protocol 客户端 + 注入脚本
 │  │  ├─ inject.ts           # 装配注入载荷（壁纸层 + token 覆盖 + 聊天区样式）
 │  │  ├─ launch.ts           # 配置持久化 + ZCode 启动器（感知单实例锁）
 │  │  ├─ launchers.ts        # 启动项修复：快捷方式 + 注册表处理器保持携带 CDP 端口
+│  │  ├─ overlay.ts          # 启动 overlay：app.asar 读写/注入/剥离 + 暂存替换 + 自动补丁
 │  │  ├─ monet.ts            # 图片解码、MD3 取色、智能适配（smart fit）分析
 │  │  ├─ tokens.ts           # MD3 调色板 → ZCode 的 Tailwind v4 --color-* 变量映射
 │  │  ├─ session.ts          # CLI 与 MCP 共用的应用/还原操作
@@ -227,6 +233,10 @@ set BEAUTIFY_TARGET=workbuddy        # PowerShell: $env:BEAUTIFY_TARGET="workbud
 │  └─ mcp/server.ts          # 向 ZCode 智能体暴露工具的 MCP 服务
 ├─ commands/beautify.md      # /beautify 斜杠命令
 ├─ commands/bubble.md        # /bubble 斜杠命令（按描述改气泡样式）
+├─ commands/install-overlay.md   # /install-overlay：写入启动 loader（修改 app.asar）
+├─ commands/uninstall-overlay.md # /uninstall-overlay：剥离 loader + opt-out
+├─ runtime/overlay-loader.cjs    # 主进程 loader：强制 CDP + 拉起 serve
+├─ runtime/overlay-monitor.cjs   # ZCode 完全退出后完成 asar 暂存替换
 ├─ skills/beautify/SKILL.md  # 面向智能体的工作流文档
 ├─ .zcode-plugin/plugin.json # ZCode 插件清单（命令、技能、MCP 服务）
 ├─ marketplace.json          # 市场索引，让仓库可在 ZCode 插件市场被发现
@@ -260,14 +270,17 @@ npm run bundle   # 预构建单文件产物（仓库随附）
 - 启动本地服务，并恢复"自愈"——在客户端更新重建快捷方式后自动补回 flag。
 - 在插件配置中记录同意（时间戳 + 插件版本）。0.6.0 之前的老安装自动沿用开启状态（标记为 migrated）；面板会显示该状态并提供一键停用。
 
+**启动 overlay（更新/设置被清除后仍能自启）。** 上面的启动项路线同时依赖「插件管理器拉起 MCP」与「ZCode 带 flag 启动」两件事。ZCode 更新会整体替换 `resources/app.asar`、重建不带 flag 的开始菜单快捷方式并自行重启 —— 于是更新后经常既没有服务、也没有调试端口。`/install-overlay`（或 `zcode-beautify overlay install`）在 app.asar 主入口尾部追加一行 loader：每次启动时它在 Electron 主进程 `app.ready` 之前强制打开 `--remote-debugging-port` 并拉起脱离的 serve，插件管理器设置是否被清、快捷方式参数是否丢失都不再影响。首次安装是显式动作；之后 ZCode 更新覆盖 app.asar 时，插件会自动重新暂存补丁（完全退出后替换生效）。loader 仍尊重插件管理器的显式停用与 `.plugin-overlay-optout` 豁免标记；宿主配置缺失/被清除按「未停用」处理——这正是本功能要覆盖的情况。该操作会修改客户端文件，可能触发杀软启发式；`/uninstall-overlay` 只剥离本插件自己的行（不恢复备份、不降级），同时写豁免标记、停 serve 并恢复默认外观。
+
 **会暴露什么：** CDP 端口只绑定 `127.0.0.1`（仅本机回环），但**无鉴权** —— 端口开着期间，本机以当前用户运行的任意进程都可以附加到渲染器。插件自己的控制 API 额外有随机 token 保护，但 CDP 端口本身是 Chromium 的行为，插件无法控制。本机存在不可信用户/软件时请不要开启。
 
 **恢复 / 卸载：**
 
 - `disable_experimental`（MCP）或 `zcode-beautify disable`：停止服务、清除注入外观（含渲染器本地缓存）、从启动项剥离 flag（`--keep-launchers` 保留）。之后请完全重启 ZCode。壁纸设置会保留，重新开启即可恢复。
 - `zcode-beautify repair-launchers --remove`：只剥离 flag，不动其它任何东西 —— 用于回滚 0.6.0 之前版本自动写入的启动项。
-- 卸载插件：先执行 `node <插件目录>/dist/cli.js disable`（或 `repair-launchers --remove`），再移除插件。
-- 升级注意：ZCode 更新器重建的开始菜单快捷方式不带 flag；开启状态下自愈会在下次启动 ZCode 时补回 —— 关闭状态下任何东西都不会再被写回。
+- 卸载启动 overlay：`/uninstall-overlay`（或 `node <插件目录>/dist/cli.js overlay remove`）——剥离 app.asar 里的 loader 行、写豁免标记、停服务并恢复默认外观；个人设置保留。
+- 卸载插件：先执行 `node <插件目录>/dist/cli.js overlay remove`，再执行 `disable`（或 `repair-launchers --remove`），最后移除插件。
+- 升级注意：ZCode 更新器会替换 app.asar 并重建不带 flag 的开始菜单快捷方式。开启启动 overlay 时，更新后会自动补丁（完全退出后生效）；只靠启动项自愈时，自愈会在下次启动 ZCode 时补回 —— 关闭状态下任何东西都不会再被写回。
 
 ## 风险与限制
 

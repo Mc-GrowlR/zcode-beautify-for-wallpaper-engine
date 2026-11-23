@@ -27,7 +27,36 @@
 > 6.3.4：收起按钮新增子选项「一次性收回」（默认是）——否时每点一次收起按「每次加载」的条数逐步收回，收到初始条数后按钮消失（面板「聊天 → 会话列表分页」，随收起开关显隐；MCP `list_collapse_all`）。
 > 6.3.5：修复下拉选项偶尔「点开就消失」（用户实测反馈）——「滚动即关闭」监听原本响应全页面任意滚动（ZCode 聊天区流式输出/悬停卡会自行滚动），现只响应面板内部滚动；设置里所有选项选择器（填充方式等）同受益。
 > 6.3.6：标题引用与 goal 标记（默认开）——侧栏会话标题自动取自首条消息，其中的 `[文件](./路径)` 原本原样露出 Markdown；现按气泡同款规则转成「扩展名图标 + 文件名」胶囊，目录 / 技能 / 会话 / 插件 / 命令引用同样转换；`/goal` 启动的会话即使生成标题丢掉了命令，也会在标题前补回 goal 胶囊（面板「聊天 → 标题引用与 goal 标记」+ MCP `chat_title_cites`）。同期修复插件停用后仍生效：插件管理器停用会停掉已脱离的 serve，面板「停用并清理启动项」现在真正落盘 gate 并剥离启动项。
+> 6.4.0：启动 overlay——`/install-overlay` / `/uninstall-overlay`。把一行 loader 写入 ZCode 的 app.asar 主入口：启动时强制打开 CDP 端口并拉起 serve，不再依赖插件管理器设置或快捷方式参数；ZCode 更新覆盖 app.asar 后会自动补丁（首次需显式安装）。
 > 6.2.0：气泡工坊（Bubble Studio）——ZCode 3.16+ 的 MCP Apps 交互页：改气泡样式后对话内直接展开画廊，预览/试穿/微调/保存配方；侧栏常驻入口 + 三个新 MCP 工具。会话概览悬停卡——鼠标停在侧边栏会话行约 0.3 秒即弹出该会话的全部提问列表（按用户参考图样式：无头部纯列表、右对齐、行尾短横线、最新一条白色加粗），开启期间替换官方的工作区悬停卡。
+
+## 6.4.0（续）— ZCode 4.0 适配与启动性能
+
+- **ZCode 4.0 启动屏探针（用户报告「启动时壁纸盖在加载画面上」）**：4.0 的 `<body>` 在启动阶段没有 `zcode-startup*` 类，只有全屏 `#loading`，React 就绪后才加 `zcode-startup-ready`；旧探针只认 3.18 的 body 类，于是 4.0 被误判为已就绪，壁纸/面板提前约 0.44–0.50 s 画在启动画面上。新增 `core/startupProbe.ts` 统一三套探针（3.18 body 类 / 4.0 `#loading` / WorkBuddy skeleton），bootstrap 与面板共用；等待期检查合并到 32 ms 一次，避免 React 挂载时的 mutation 风暴反复 `getComputedStyle`；启动屏 15 s 未清则兜底挂载；body 尚未创建时先 arm waiter 而不是抛错。
+- **startupMO 生命周期**：等待期间再次注入会替换 `pendingBootstrap`/`pendingPanel`（新代覆盖旧代，避免旧 serve 的闭包在 ready 后挂旧样式）；停用/重置脚本会断开 `startupMO`/`panelMO`、清 `pending*` 与检查定时器，并置 `window.__zcodeBeautify.disabled`，因此「等待就绪时停用」不会在 ready 后复活；重复 eval 保持 1 份壁纸/style/panel-root，`Page.reload` 重放仍恰好 1 份。
+- **聊天列宽 4.0**：4.0 把 4xl/6xl 两档合并为 `@min-[624px]/conversation:max-w-xl`。新增 624px 容器档，并把拖拽/查询改用版本无关的 `[class*="conversation:max-w-"]`；3.18 的 864/1280 档保留。
+- **serve 健康接口不再等 CDP**：原实现先 `await resolveCdpPort()` 再 `listen`，CDP 端口「接受连接但不响应」时 `/api/health` 要等满 3 s 探测超时（实测 3243 ms）。现在先 bind API，再后台解析内置 9229 回退；实测 236 ms。
+- **自适应注入轮询**：固定 `POLL_MS=1500` 使窗口出现后最多等 1.5 s 才注入（late 场景实测 p90 1794 ms）。改为 150 ms 快轮询，所有 renderer 已持有 session 后回落 1500 ms；无目标 30 s 后回落避免空转。`Page.enable` 与 panel registration 加 4/8 s 超时，快轮询撞到尚未响应的 page target 不会卡死 poll。
+- **壁纸 Monet 磁盘缓存**：每个 serve 进程原本都要 jimp 解码壁纸再提色（89 KB PNG 实测约 235–378 ms，4K 更久）。新增 `assets/<sha1>.json`（按壁纸路径 + mtime + size 失效，Theme 用缓存的 source ARGB 重建，避免 JSON 丢掉 `TonalPalette.tone()`），异步写入、LRU 12 份；缓存命中 `assetsMs` 378 → **14–16 ms**，late 注入 374 → **54 ms**。
+- **设置面板首开**：FAB 点击原本同步执行 `activateSavedTab()` + `beat(true)` + `getBoundingClientRect()`（强制整面板布局），实测 90 ms。现在先切 `hidden`，双 rAF 后刷新/救回越界面板；首开 warm 311 → **96 ms**，同步 handler 0 ms，首帧绘制 89 ms（面板 `backdrop-filter` 保持原视觉）。
+- **MCP 握手**：`bootstrapServe()` 从 module load 移到 `initialized` 之后（gate-off 仍在 module load 快速记日志拒绝）；host/gate/launcher/overlay 自愈不再挡 initialize。gate-on 握手 255 → **222 ms**（p90 360 → 238）。
+- **4.0 兼容性核对**：CDP 主窗口 URL（`restoreSession=true`）、更新窗口排除、plugin-sandbox/resource-manager 排除；主题 `--color-*` 令牌实测生效；manifest `ui.surfaces` schema、`${CLAUDE_PLUGIN_ROOT}`/`${ZCODE_PLUGIN_DATA}`、MCP 协议 2025-11-25、Bubble Studio `ui://…` 资源；任务行/标题副本/输入框/侧栏锚点、会话分页、会话概览悬停卡、goal 标记；4.0 session/message/part（sequence）/session_target（summary_title）只读结构。
+- **overlay 修复**：`overlay status --asar <path>` 之前忽略该参数（总是看真实 app.asar），现在真正使用指定路径；t37 增加「模拟客户端更新覆盖 asar → auto-heal 重新补丁 → remove 后 opt-out 阻止再次补丁」与 status --asar 断言。
+- **测试**：新增 t38（4.0 启动探针/等待停用/重放幂等/列宽/manifest+surfaces/目标识别/session DB）；扩展 t37；全套 `npm test` 通过。性能数据与复现命令见 `reports/zcode4-startup-2026-11-23.md`。
+
+## 6.4.0 — 启动 overlay：ZCode 更新 / 插件设置被清除后仍能自启
+
+- **问题（用户实测反馈「更新之后插件不会启动」）**：ZCode 更新器会整体替换 `resources/app.asar` 并重建开始菜单快捷方式，重建后的快捷方式不再带 `--remote-debugging-port`；更新器又以 `--updated` 自行重启，正式打包版不会打开调试端口。beautify 原有的自启链依赖 ① 插件管理器 enabledPlugins 拉起 MCP → ② MCP bootstrap 在实验性 gate 开启时拉起 serve → ③ 客户端带 CDP 端口。更新/设置被清除时链上任意一环断掉，serve 就不存在，壁纸和面板都不出现；launchers 自愈只能修下一次从快捷方式启动的入口，救不了已经运行、没有调试端口的实例。本机实测：更新后桌面/开始菜单快捷方式参数为空、`experimental.enabled=false`、9223 无服务；当前进程的 9229 端口来自另一个已装 overlay 的插件（zusage）。
+- **两个新命令**：
+  - `/install-overlay` → `node <plugin-root>/dist/cli.js overlay install`
+  - `/uninstall-overlay` → `node <plugin-root>/dist/cli.js overlay remove`
+  - 另有 `overlay status` / `overlay finalize` 供诊断与手动收尾。
+- **实现（参考 zcode-token-usage-statusbar）**：在 app.asar 的 `out/main/index.js` 尾部追加一行 `import("file:///…/overlay/overlay-loader.cjs")`（入口是 ESM，动态 import 兼容）。loader 在主进程 `app.ready` 之前运行：若启动命令没有 `--remote-debugging-port` 就补上（默认 9222），并探测/拉起 serve；随后完全复用现有 CDP 注入管线。loader 还读插件管理器开关（显式 false 不启动）与 `.plugin-overlay-optout`（卸载后静默），配置被清除/缺失时按未禁用处理——这正是本功能要覆盖的场景。
+- **Windows 运行中替换**：命令本身在 ZCode 会话里运行，app.asar 被占用，无法原地替换。安装器把重建后的 asar 暂存为 `app.asar.beautify.tmp`，写 `overlay-pending.json` 并拉起脱离的 monitor；ZCode 完全退出（含托盘）后 monitor 原子 rename 放入。源 asar 的 size/mtime 在替换前复核，更新期间产生的过期暂存包会被丢弃。卸载同理；opt-out 标记立即生效，即使替换尚未完成，下次启动 loader 也不会动作。
+- **更新后自动补丁**：首次显式安装会写 `overlay.json`（installed=true）。之后 ZCode 更新覆盖 app.asar、loader 行消失时，MCP bootstrap 检测到并拉起脱离的 `overlay install --auto --no-enable`，重新暂存补丁（按插件版本 + asar size/mtime 限频 10 分钟，避免多会话并发）。即使插件设置被清除、快捷方式参数丢失，只要插件文件仍在且宿主没有显式停用，下一次启动即可恢复。
+- **安全与回滚**：overlay 只在显式执行 `/install-overlay`（或之前安装过）时写入；会修改客户端 `app.asar`（与 zusage 同类做法，可能触发杀软误报），并打开 127.0.0.1 上无鉴权的 CDP 端口。`/uninstall-overlay` 只剥离本插件自己的 loader 行（不恢复备份、不会把客户端降级到旧版本），同时写 opt-out、停 serve、清注入、关闭实验 gate 并剥离启动项 flag；壁纸等个人设置保留。
+- **CLI**：`overlay install [--asar <path>] [--plugin-root <dir>] [--no-enable] [--dry-run] [--json]`、`overlay remove [--keep-experimental]`、`overlay status [--json]`、`overlay finalize`。安装器默认同时做 `enableExperimental()`（记录同意 + 修启动项 + 请求拉起 serve），`--no-enable` 供自动补丁路径使用。
+- **测试**：新增 t37——合成 asar 的解析/重建（entry 注入、去重、剥离、其它文件字节与 package.json 保留、entry integrity 重算、旧路径行替换、非 asar 拒绝）、稳定运行目录同步（loader/monitor/CLI 副本、loader 的 opt-out/宿主 gate/Electron-as-Node 回退）、真实 install→idempotent→dry-run→remove→reinstall 状态机、命令文档与 MCP autoHeal 接线；全套 npm test 通过。
 
 ## 6.3.6 — 标题文件引用（标题不再露出 Markdown 原文）
 

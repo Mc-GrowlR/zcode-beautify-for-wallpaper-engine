@@ -3276,8 +3276,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path15) {
-      let input2 = path15;
+    function removeDotSegments(path16) {
+      let input2 = path16;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3686,8 +3686,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path15 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path15 && path15 !== "/" ? path15 : void 0;
+        const path16 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path16 && path16 !== "/" ? path16 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7199,12 +7199,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs14, exportName) {
+    function addFormats(ajv, list, fs15, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs14[f2]);
+        ajv.addFormat(f2, fs15[f2]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -7526,7 +7526,7 @@ var VERSION;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.3.6";
+    VERSION = "6.4.0";
   }
 });
 
@@ -7870,6 +7870,37 @@ var init_bubbleRecipes = __esm({
   }
 });
 
+// dist/core/startupProbe.js
+function startupProbeJs(probe) {
+  return `var inStartupScreen = function() {
+    if (!document.body) return true;
+    if (${JSON.stringify(probe)} === 'workbuddy-skeleton') {
+      var sk = document.querySelector('#sk-overlay, #skeleton-root');
+      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
+      var wbRoot = document.querySelector('#root');
+      return !wbRoot || wbRoot.childElementCount === 0;
+    }
+    var cls = document.body.className || '';
+    if (/zcode-startup/.test(cls)) return !/ready/.test(cls);
+    // ZCode 4.0: no startup class while loading \u2014 the full-screen overlay is
+    // the only signal. Check that it is actually visible: a stale hidden node
+    // must not block the mount after the app marked itself ready.
+    var load = document.getElementById('loading');
+    if (load) {
+      try {
+        var lcs = getComputedStyle(load);
+        if (lcs.display !== 'none' && lcs.visibility !== 'hidden' && Number(lcs.opacity || '1') > 0.05) return true;
+      } catch (e) {}
+    }
+    return false;
+  };`;
+}
+var init_startupProbe = __esm({
+  "dist/core/startupProbe.js"() {
+    "use strict";
+  }
+});
+
 // dist/core/cdp.js
 async function listTargets(port, host = "127.0.0.1") {
   let res;
@@ -7925,6 +7956,7 @@ function buildBootstrapScript(payload) {
   const videoSrc = payload.videoSrc ?? "";
   return `(function(){
   var MARKER = ${JSON.stringify(marker)};
+  var ZB_NAV_T0 = (window.performance && performance.now) ? performance.now() : Date.now();
   // Disable teardown marker: old Page.addScriptToEvaluateOnNewDocument
   // registrations replay on every reload, so a disabled plugin would otherwise
   // repaint the wallpaper/theme from a previous generation's baked payload.
@@ -7933,22 +7965,15 @@ function buildBootstrapScript(payload) {
   var STARTUP_CLEAN = ${JSON.stringify(payload.startupClean !== false)};
   var CHAT_UI = ${JSON.stringify(payload.chatUi !== false)};
   var PROBE = ${JSON.stringify(payload.startupProbe ?? "zcode-body-class")};
-  // The startup screen phase (body carries zcode-startup-* but not yet
-  // -ready, or WorkBuddy still shows its skeleton overlay) covers the window
-  // with loading art \u2014 a wallpaper layer and the panel FAB on top of it look
-  // broken. With startupClean the whole bootstrap (and the panel) waits for
-  // the app shell; without it everything mounts at once.
-  var inStartupScreen = function() {
-    if (!document.body) return true;
-    if (PROBE === 'workbuddy-skeleton') {
-      var sk = document.querySelector('#sk-overlay, #skeleton-root');
-      if (sk && sk.offsetParent !== null && (sk.textContent || '').length > 0) return true;
-      var root = document.querySelector('#root');
-      return !root || root.childElementCount === 0;
-    }
-    var cls = document.body.className || '';
-    return /zcode-startup/.test(cls) && !/ready/.test(cls);
-  };
+  // The startup screen phase covers the window with loading art \u2014 a wallpaper
+  // layer and the panel FAB on top of it look broken. With startupClean the
+  // whole bootstrap (and the panel) waits for the app shell; without it
+  // everything mounts at once. The probe handles both ZCode 3.18 (body class)
+  // and 4.0 (class-less body + #loading overlay) \u2014 see startupProbe.ts.
+${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
+  // A startup screen that never clears must not suppress the look forever:
+  // after this cap the bootstrap mounts anyway (better late than never).
+  var MAX_STARTUP_WAIT_MS = 15000;
   var runBootstrapBody = function() {
   if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
   var VIDEO_SRC = ${JSON.stringify(videoSrc)};
@@ -8654,6 +8679,12 @@ function buildBootstrapScript(payload) {
           + '@container conversation (min-width:864px){'
           + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
           + '}'
+          // ZCode 4.0 collapsed those two tiers into one max-w-xl holder
+          // (class "@min-[624px]/conversation:max-w-xl"). Give it its own
+          // breakpoint so the width cap lands where the column appears.
+          + '@container conversation (min-width:624px){'
+          + '[class*="/conversation:max-w-xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
+          + '}'
         : '')
       + (dragOn
         // \u4E24\u4FA7\u62D6\u62FD\u8C03\u5BBD width tiers: two px vars read by BOTH classes so the
@@ -8676,6 +8707,10 @@ function buildBootstrapScript(payload) {
           + '[class*="conversation:max-w-6xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 72) + 'rem)!important;'
           + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? inset : 24) + 'rem))!important}'
           + '}'
+          + '@container conversation (min-width:624px){'
+          + '[class*="/conversation:max-w-xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 36) + 'rem)!important;'
+          + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? Math.max(inset, 6) : 6) + 'rem))!important}'
+          + '}'
           // The strips: fixed 9px hit zones hugging the column edges,
           // invisible until hover (a 3px accent line), col-resize cursor.
           // z-index 40 stays under Tailwind's z-50 dropdown/modals.
@@ -8690,12 +8725,12 @@ function buildBootstrapScript(payload) {
           // relayouts on top of the virtualizer's re-measure). While a drag
           // is active the transition is cut and the width updates in
           // quantized 16px steps (see GRIP_STEP) instead of every pointermove.
-          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{transition:none!important}'
+          + 'html.zb-grip-active [class*="conversation:max-w-"]{transition:none!important}'
           // Composer floor (\u5B9E\u6D4B: if a width var ever goes invalid the calc
           // becomes unset \u2192 the composer holder, a flex-row child, collapses
           // to min-content (~40px strip) while block-parented message holders
           // just fill. A literal floor can never go invalid).
-          + 'html.zb-grip-active [class*="conversation:max-w-6xl"],html.zb-grip-active [class*="conversation:max-w-4xl"]{min-width:460px!important}'
+          + 'html.zb-grip-active [class*="conversation:max-w-"]{min-width:460px!important}'
         : '')
       // \u6807\u9898\u6587\u4EF6\u5F15\u7528 chips: the sidebar title is plain text, so the converted
       // parts render through these rules. Colors ride the same
@@ -10060,8 +10095,8 @@ function buildBootstrapScript(payload) {
         } catch (e2) {}
       }
     }
-    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]') : null;
-    if (!holder) holder = document.querySelector('[class*="conversation:max-w-6xl"],[class*="conversation:max-w-4xl"]');
+    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-"]') : null;
+    if (!holder) holder = document.querySelector('[class*="conversation:max-w-"]');
     window.__zcodeBeautify.gripHolder = holder;
     // Content width the holder's percentage width resolves against (parent
     // content box) \u2014 the inset var derives from it. Cached for pointermove's
@@ -10768,18 +10803,76 @@ function buildBootstrapScript(payload) {
     localStorage.setItem(MARKER + ':wallpaper', ${JSON.stringify(payload.wallpaperDataUri ?? "")});
   } catch (e) {}
   };
+  var zbDisabled = function() {
+    try { if (localStorage.getItem(MARKER + ':disabled') === '1') return true; } catch (e) {}
+    return !!(window.__zcodeBeautify && window.__zcodeBeautify.disabled);
+  };
+  var zbRunBody = function() {
+    var bodyAt = (window.performance && performance.now) ? performance.now() : Date.now();
+    runBootstrapBody();
+    if (window.__zcodeBeautify) {
+      var t = window.__zcodeBeautify.timing || (window.__zcodeBeautify.timing = {});
+      t.navStartMs = bodyAt - ZB_NAV_T0;
+      t.bootstrapMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - bodyAt;
+    }
+  };
+  var zbMountPending = function() {
+    var fn = window.__zcodeBeautify && window.__zcodeBeautify.pendingBootstrap;
+    window.__zcodeBeautify.pendingBootstrap = null;
+    if (typeof fn === 'function' && !zbDisabled()) fn();
+  };
+  var zbClearStartupWait = function() {
+    if (window.__zcodeBeautify.startupMO) {
+      try { window.__zcodeBeautify.startupMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.startupMO = null;
+    }
+    if (window.__zcodeBeautify.startupTimer) {
+      clearTimeout(window.__zcodeBeautify.startupTimer);
+      window.__zcodeBeautify.startupTimer = null;
+    }
+    if (window.__zcodeBeautify.startupCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.startupCheckTimer);
+      window.__zcodeBeautify.startupCheckTimer = null;
+    }
+  };
+  // Coalesce the startup-screen probe to at most once per 32 ms: the observer
+  // sees every class/child mutation while React mounts, and an unthrottled
+  // getComputedStyle per record is a needless main-thread tax during boot.
+  var zbScheduleStartupCheck = function() {
+    if (window.__zcodeBeautify.startupCheckTimer) return;
+    window.__zcodeBeautify.startupCheckTimer = setTimeout(function() {
+      window.__zcodeBeautify.startupCheckTimer = null;
+      if (!window.__zcodeBeautify || zbDisabled()) return;
+      if (!inStartupScreen()) { zbClearStartupWait(); zbMountPending(); }
+    }, 32);
+  };
   var runBootstrap = function() {
-    if (!STARTUP_CLEAN || !inStartupScreen()) { runBootstrapBody(); return; }
-    if (window.__zcodeBeautify.startupMO) return; // a waiter is already armed
-    var mo = new MutationObserver(function() {
-      if (!inStartupScreen()) {
-        mo.disconnect();
-        window.__zcodeBeautify.startupMO = null;
-        runBootstrapBody();
-      }
-    });
-    window.__zcodeBeautify.startupMO = mo;
-    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+    if (zbDisabled()) return;
+    if (!STARTUP_CLEAN || !inStartupScreen()) {
+      zbClearStartupWait();
+      window.__zcodeBeautify.pendingBootstrap = null;
+      zbRunBody();
+      return;
+    }
+    // Every eval replaces the pending body, so a newer serve generation wins
+    // over the closure an older registration armed. Idempotent: one MO only.
+    window.__zcodeBeautify.pendingBootstrap = zbRunBody;
+    if (!window.__zcodeBeautify.startupMO) {
+      var mo = new MutationObserver(zbScheduleStartupCheck);
+      window.__zcodeBeautify.startupMO = mo;
+      mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    }
+    if (!window.__zcodeBeautify.startupTimer) {
+      window.__zcodeBeautify.startupTimer = setTimeout(function() {
+        window.__zcodeBeautify.startupTimer = null;
+        if (zbDisabled()) return;
+        // Hard cap: a startup screen that never clears must not suppress the
+        // look forever. Mount even if the probe still says "startup".
+        zbClearStartupWait();
+        zbMountPending();
+      }, MAX_STARTUP_WAIT_MS);
+    }
   };
   // The addScriptToEvaluateOnNewDocument registration replays at document
   // creation, where documentElement is still null \u2014 appending the style or
@@ -10788,6 +10881,8 @@ function buildBootstrapScript(payload) {
   if (document.documentElement) runBootstrap();
   else {
     var zbWaitMount = function() {
+      if (!window.__zcodeBeautify) window.__zcodeBeautify = {};
+      if (zbDisabled()) return;
       if (document.documentElement) runBootstrap();
       else setTimeout(zbWaitMount, 10);
     };
@@ -10872,6 +10967,36 @@ function buildResetScript(marker = "zcode-beautify", opts = {}) {
       window.__zcodeBeautify.tcGoalTimer = null;
     }
     window.__zcodeBeautify.tcObsStamp = null;
+    // A startup waiter armed by a previous injection must die with this
+    // generation: without this, disabling the plugin while the client is
+    // still on its startup screen lets the parked bootstrap fire when the
+    // screen clears and repaint the look after the teardown.
+    if (window.__zcodeBeautify.startupMO) {
+      try { window.__zcodeBeautify.startupMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.startupMO = null;
+    }
+    if (window.__zcodeBeautify.startupTimer) {
+      clearTimeout(window.__zcodeBeautify.startupTimer);
+      window.__zcodeBeautify.startupTimer = null;
+    }
+    if (window.__zcodeBeautify.startupCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.startupCheckTimer);
+      window.__zcodeBeautify.startupCheckTimer = null;
+    }
+    window.__zcodeBeautify.pendingBootstrap = null;
+    if (window.__zcodeBeautify.panelMO) {
+      try { window.__zcodeBeautify.panelMO.disconnect(); } catch (e) {}
+      window.__zcodeBeautify.panelMO = null;
+    }
+    if (window.__zcodeBeautify.panelTimer) {
+      clearTimeout(window.__zcodeBeautify.panelTimer);
+      window.__zcodeBeautify.panelTimer = null;
+    }
+    if (window.__zcodeBeautify.panelCheckTimer) {
+      clearTimeout(window.__zcodeBeautify.panelCheckTimer);
+      window.__zcodeBeautify.panelCheckTimer = null;
+    }
+    window.__zcodeBeautify.pendingPanel = null;
   }
 ${opts.disable ? `  // \u505C\u7528\uFF08\u4E0E\u300C\u8FD8\u539F\u5916\u89C2\u300D\u4E0D\u540C\uFF09\uFF1A\u7559\u4E0B\u6301\u4E45\u7981\u7528\u6807\u8BB0\uFF0C\u65E7\u4EE3
   // addScriptToEvaluateOnNewDocument \u5728\u4E0B\u6B21 reload \u65F6\u81EA\u68C0\u9000\u51FA\uFF1B\u540C\u65F6\u628A\u9762\u677F
@@ -10889,6 +11014,7 @@ var init_cdp = __esm({
     "use strict";
     init_bubbleRecipes();
     init_target();
+    init_startupProbe();
     CdpError = class extends Error {
     };
     CdpConnection = class _CdpConnection {
@@ -16878,7 +17004,7 @@ var require_gifframe = __commonJS({
 var require_gifutil = __commonJS({
   "node_modules/gifwrap/src/gifutil.js"(exports) {
     "use strict";
-    var fs14 = __require("fs");
+    var fs15 = __require("fs");
     var ImageQ = require_image_q();
     var BitmapImage2 = require_bitmapimage();
     var { GifFrame: GifFrame2 } = require_gifframe();
@@ -16993,14 +17119,14 @@ var require_gifutil = __commonJS({
       jimpImage.bitmap.data = bitmapImageToShare.bitmap.data;
       return jimpImage;
     };
-    exports.write = function(path15, frames, spec, encoder) {
+    exports.write = function(path16, frames, spec, encoder) {
       encoder = encoder || defaultCodec;
-      const matches = path15.match(/\.[a-zA-Z]+$/);
+      const matches = path16.match(/\.[a-zA-Z]+$/);
       if (matches !== null && INVALID_SUFFIXES.includes(matches[0].toLowerCase())) {
-        throw new Error(`GIF '${path15}' has an unexpected suffix`);
+        throw new Error(`GIF '${path16}' has an unexpected suffix`);
       }
       return encoder.encodeGif(frames, spec).then((gif2) => {
-        return _writeBinary(path15, gif2.buffer).then(() => {
+        return _writeBinary(path16, gif2.buffer).then(() => {
           return gif2;
         });
       });
@@ -17072,9 +17198,9 @@ var require_gifutil = __commonJS({
         }
       }
     }
-    function _readBinary(path15) {
+    function _readBinary(path16) {
       return new Promise((resolve, reject) => {
-        fs14.readFile(path15, (err, buffer) => {
+        fs15.readFile(path16, (err, buffer) => {
           if (err) {
             return reject(err);
           }
@@ -17082,9 +17208,9 @@ var require_gifutil = __commonJS({
         });
       });
     }
-    function _writeBinary(path15, buffer) {
+    function _writeBinary(path16, buffer) {
       return new Promise((resolve, reject) => {
-        fs14.writeFile(path15, buffer, (err) => {
+        fs15.writeFile(path16, buffer, (err) => {
           if (err) {
             return reject(err);
           }
@@ -19095,9 +19221,9 @@ var require_decoder = __commonJS({
         return a2 < 0 ? 0 : a2 > 255 ? 255 : a2;
       }
       constructor.prototype = {
-        load: function load(path15) {
+        load: function load(path16) {
           var xhr = new XMLHttpRequest();
-          xhr.open("GET", path15, true);
+          xhr.open("GET", path16, true);
           xhr.responseType = "arraybuffer";
           xhr.onload = (function() {
             var data = new Uint8Array(xhr.response || xhr.mozResponseArrayBuffer);
@@ -30000,8 +30126,8 @@ var init_parseUtil = __esm({
     init_errors();
     init_en();
     makeIssue2 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -30309,11 +30435,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util();
     ParseInputLazyPath2 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -34126,8 +34252,8 @@ var init_parseUtil2 = __esm({
     init_errors2();
     init_en2();
     makeIssue3 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -34435,11 +34561,11 @@ var init_types3 = __esm({
     init_parseUtil2();
     init_util2();
     ParseInputLazyPath3 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -39037,8 +39163,8 @@ var init_parseUtil3 = __esm({
     init_errors3();
     init_en3();
     makeIssue4 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -39346,11 +39472,11 @@ var init_types4 = __esm({
     init_parseUtil3();
     init_util3();
     ParseInputLazyPath4 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -43191,8 +43317,8 @@ var init_parseUtil4 = __esm({
     init_errors4();
     init_en4();
     makeIssue5 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -43500,11 +43626,11 @@ var init_types5 = __esm({
     init_parseUtil4();
     init_util4();
     ParseInputLazyPath5 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -47627,11 +47753,11 @@ var require_Mime = __commonJS({
         }
       }
     };
-    Mime.prototype.getType = function(path15) {
-      path15 = String(path15);
-      let last = path15.replace(/^.*[/\\]/, "").toLowerCase();
+    Mime.prototype.getType = function(path16) {
+      path16 = String(path16);
+      let last = path16.replace(/^.*[/\\]/, "").toLowerCase();
       let ext = last.replace(/^.*\./, "").toLowerCase();
-      let hasPath = last.length < path15.length;
+      let hasPath = last.length < path16.length;
       let hasDot = ext.length < last.length - 1;
       return (hasDot || !hasPath) && this._types[ext] || null;
     };
@@ -54169,8 +54295,8 @@ function isTokenizerStreamBoundsError(error62) {
   }
   return /strtok3[/\\]lib[/\\]stream[/\\]/.test(error62.stack);
 }
-async function fileTypeFromFile(path15, options) {
-  return new FileTypeParser2(options).fromFile(path15, options);
+async function fileTypeFromFile(path16, options) {
+  return new FileTypeParser2(options).fromFile(path16, options);
 }
 async function fileTypeFromStream(stream, options) {
   return new FileTypeParser2(options).fromStream(stream);
@@ -54201,9 +54327,9 @@ var init_file_type = __esm({
           }
         }
       }
-      async fromFile(path15) {
+      async fromFile(path16) {
         this.options.signal?.throwIfAborted();
-        const fileHandle = await fs5.open(path15, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
+        const fileHandle = await fs5.open(path16, fileSystemConstants.O_RDONLY | fileSystemConstants.O_NONBLOCK);
         const fileStat = await fileHandle.stat();
         if (!fileStat.isFile()) {
           await fileHandle.close();
@@ -54212,7 +54338,7 @@ var init_file_type = __esm({
         const tokenizer = new FileTokenizer(fileHandle, {
           ...this.getTokenizerOptions(),
           fileInfo: {
-            path: path15,
+            path: path16,
             size: fileStat.size
           }
         });
@@ -54547,9 +54673,9 @@ function createJimp({ plugins: pluginsArg, formats: formatsArg } = {}) {
      * await image.write("test/output.png");
      * ```
      */
-    async write(path15, options) {
-      const mimeType = import_lite.default.getType(path15);
-      await writeFile(path15, await this.getBuffer(mimeType, options));
+    async write(path16, options) {
+      const mimeType = import_lite.default.getType(path16);
+      await writeFile(path16, await this.getBuffer(mimeType, options));
     }
     /**
      * Clone the image into a new Jimp instance.
@@ -55198,8 +55324,8 @@ var init_parseUtil5 = __esm({
     init_errors5();
     init_en5();
     makeIssue6 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -55507,11 +55633,11 @@ var init_types6 = __esm({
     init_parseUtil5();
     init_util6();
     ParseInputLazyPath6 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -59956,8 +60082,8 @@ var init_parseUtil6 = __esm({
     init_errors6();
     init_en6();
     makeIssue7 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -60265,11 +60391,11 @@ var init_types7 = __esm({
     init_parseUtil6();
     init_util7();
     ParseInputLazyPath7 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -64123,8 +64249,8 @@ var init_parseUtil7 = __esm({
     init_errors7();
     init_en7();
     makeIssue8 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -64432,11 +64558,11 @@ var init_types8 = __esm({
     init_parseUtil7();
     init_util8();
     ParseInputLazyPath8 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -68417,8 +68543,8 @@ var init_parseUtil8 = __esm({
     init_errors8();
     init_en8();
     makeIssue9 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -68726,11 +68852,11 @@ var init_types9 = __esm({
     init_parseUtil8();
     init_util9();
     ParseInputLazyPath9 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -72579,8 +72705,8 @@ var init_parseUtil9 = __esm({
     init_errors9();
     init_en9();
     makeIssue10 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -72888,11 +73014,11 @@ var init_types10 = __esm({
     init_parseUtil9();
     init_util10();
     ParseInputLazyPath10 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -76778,8 +76904,8 @@ var init_parseUtil10 = __esm({
     init_errors10();
     init_en10();
     makeIssue11 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -77087,11 +77213,11 @@ var init_types11 = __esm({
     init_parseUtil10();
     init_util11();
     ParseInputLazyPath11 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -80929,8 +81055,8 @@ var init_parseUtil11 = __esm({
     init_errors11();
     init_en11();
     makeIssue12 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -81238,11 +81364,11 @@ var init_types12 = __esm({
     init_parseUtil11();
     init_util12();
     ParseInputLazyPath12 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -85315,8 +85441,8 @@ var init_parseUtil12 = __esm({
     init_errors12();
     init_en12();
     makeIssue13 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -85624,11 +85750,11 @@ var init_types13 = __esm({
     init_parseUtil12();
     init_util13();
     ParseInputLazyPath13 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -89485,8 +89611,8 @@ var init_parseUtil13 = __esm({
     init_errors13();
     init_en13();
     makeIssue14 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -89794,11 +89920,11 @@ var init_types14 = __esm({
     init_parseUtil13();
     init_util14();
     ParseInputLazyPath14 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -93812,8 +93938,8 @@ var init_parseUtil14 = __esm({
     init_errors14();
     init_en14();
     makeIssue15 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -94121,11 +94247,11 @@ var init_types16 = __esm({
     init_parseUtil14();
     init_util15();
     ParseInputLazyPath15 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -98089,8 +98215,8 @@ var init_parseUtil15 = __esm({
     init_errors15();
     init_en15();
     makeIssue16 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -98398,11 +98524,11 @@ var init_types17 = __esm({
     init_parseUtil15();
     init_util16();
     ParseInputLazyPath16 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -105139,8 +105265,8 @@ var init_parseUtil16 = __esm({
     init_errors16();
     init_en16();
     makeIssue17 = (params) => {
-      const { data, path: path15, errorMaps, issueData } = params;
-      const fullPath = [...path15, ...issueData.path || []];
+      const { data, path: path16, errorMaps, issueData } = params;
+      const fullPath = [...path16, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -105448,11 +105574,11 @@ var init_types18 = __esm({
     init_parseUtil16();
     init_util17();
     ParseInputLazyPath17 = class {
-      constructor(parent, value, path15, key) {
+      constructor(parent, value, path16, key) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path15;
+        this._path = path16;
         this._key = key;
       }
       get path() {
@@ -122560,9 +122686,950 @@ var init_session = __esm({
   }
 });
 
-// dist/mcp/server.js
-import fs13, { existsSync as existsSync3, statSync } from "node:fs";
+// dist/core/overlay.js
+var overlay_exports = {};
+__export(overlay_exports, {
+  OVERLAY_LINE_RE: () => OVERLAY_LINE_RE,
+  PENDING_DEADLINE_MS: () => PENDING_DEADLINE_MS,
+  autoHealOverlay: () => autoHealOverlay,
+  buildPatchedAsar: () => buildPatchedAsar,
+  defaultPluginRoot: () => defaultPluginRoot,
+  finalizePending: () => finalizePending,
+  findAppAsar: () => findAppAsar,
+  hasOverlayLine: () => hasOverlayLine,
+  inspectAsar: () => inspectAsar,
+  installOverlay: () => installOverlay,
+  isAppRunning: () => isAppRunning,
+  overlayDir: () => overlayDir,
+  overlayInjectionLine: () => overlayInjectionLine,
+  overlayPaths: () => overlayPaths,
+  overlayStatus: () => overlayStatus,
+  readAsarFile: () => readAsarFile,
+  readAsarLayout: () => readAsarLayout,
+  readOverlayState: () => readOverlayState,
+  readPending: () => readPending,
+  removeOverlay: () => removeOverlay,
+  stripOverlayLine: () => stripOverlayLine,
+  syncRuntime: () => syncRuntime
+});
+import { createHash } from "node:crypto";
+import { execFileSync as execFileSync3, spawn as spawn4 } from "node:child_process";
+import fs13 from "node:fs";
 import path14 from "node:path";
+import { pathToFileURL } from "node:url";
+function overlayDir() {
+  const override = process.env.ZCODE_BEAUTIFY_OVERLAY_DIR?.trim();
+  return override ? path14.resolve(override) : path14.join(dataDir(), "overlay");
+}
+function overlayPaths() {
+  const dir = overlayDir();
+  return {
+    dir,
+    loader: path14.join(dir, "overlay-loader.cjs"),
+    cli: path14.join(dir, "beautify-cli.mjs"),
+    monitor: path14.join(dir, "overlay-monitor.cjs"),
+    state: path14.join(dir, "overlay.json"),
+    pending: path14.join(dir, "overlay-pending.json"),
+    optOut: path14.join(dir, ".plugin-overlay-optout"),
+    log: path14.join(dir, "overlay.log"),
+    lock: path14.join(dir, "overlay-install.lock"),
+    autoHealStamp: path14.join(dir, "autoheal.stamp")
+  };
+}
+function findAppAsar(app = target()) {
+  const envName = app.id === "zcode" ? "ZCODE_BEAUTIFY_ASAR" : "WORKBUDDY_BEAUTIFY_ASAR";
+  const override = process.env[envName]?.trim();
+  if (override)
+    return path14.resolve(override);
+  const exe = findExecutable(app);
+  if (!exe) {
+    throw new Error(`${app.appName} executable not found; set ${app.exeEnvVars[0]} (or install the client) and retry \u2014 the overlay patches <install dir>/resources/app.asar`);
+  }
+  const exeDir = path14.dirname(exe);
+  if (process.platform === "darwin" && app.id === "zcode") {
+    return path14.resolve(exeDir, "..", "Resources", "app.asar");
+  }
+  return path14.join(exeDir, "resources", "app.asar");
+}
+function defaultPluginRoot() {
+  const env = process.env.ZCODE_BEAUTIFY_PLUGIN_ROOT?.trim();
+  if (env && fs13.existsSync(path14.join(env, "runtime", "overlay-loader.cjs")))
+    return path14.resolve(env);
+  const starts = [];
+  if (process.argv[1])
+    starts.push(path14.dirname(path14.resolve(process.argv[1])));
+  starts.push(process.cwd());
+  for (const start of starts) {
+    let dir = start;
+    for (let i2 = 0; i2 < 8; i2++) {
+      if (fs13.existsSync(path14.join(dir, "runtime", "overlay-loader.cjs")))
+        return dir;
+      const parent = path14.dirname(dir);
+      if (parent === dir)
+        break;
+      dir = parent;
+    }
+  }
+  throw new Error("cannot locate the zcode-beautify plugin root (runtime/overlay-loader.cjs missing); pass --plugin-root <dir>");
+}
+function readExact(fd, length, position) {
+  const buf = Buffer.alloc(length);
+  let done = 0;
+  while (done < length) {
+    const n2 = fs13.readSync(fd, buf, done, length - done, position + done);
+    if (n2 <= 0)
+      throw new Error(`unexpected end of file at byte ${position + done}`);
+    done += n2;
+  }
+  return buf;
+}
+function writeAll(fd, buf) {
+  let done = 0;
+  while (done < buf.length)
+    done += fs13.writeSync(fd, buf, done, buf.length - done);
+}
+function nodeAt(header, filePath) {
+  let cur = { files: header.files };
+  for (const segment of filePath.split("/").filter(Boolean)) {
+    cur = cur?.files?.[segment];
+    if (!cur)
+      return void 0;
+  }
+  return cur;
+}
+function flatten(node2, prefix = "") {
+  const out = [];
+  for (const [name, child] of Object.entries(node2.files ?? {})) {
+    const p2 = `${prefix}/${name}`;
+    if (child && typeof child === "object" && child.files)
+      out.push(...flatten(child, p2));
+    else
+      out.push({ path: p2, node: child });
+  }
+  return out;
+}
+function readInlineFile(fd, layout, node2) {
+  if (node2.unpacked)
+    throw new Error("file is unpacked; not inside app.asar");
+  const size = Number(node2.size);
+  const offset = Number(node2.offset);
+  if (!Number.isFinite(size) || !Number.isFinite(offset) || size < 0 || offset < 0) {
+    throw new Error(`invalid asar file entry (size=${String(node2.size)}, offset=${String(node2.offset)})`);
+  }
+  return readExact(fd, size, layout.dataStart + offset);
+}
+function readAsarLayout(fd) {
+  const head = readExact(fd, 16, 0);
+  const prefix = head.readUInt32LE(0);
+  const headerSize = head.readUInt32LE(4);
+  const stringSize = head.readUInt32LE(8);
+  const jsonSize = head.readUInt32LE(12);
+  if (prefix !== 4)
+    throw new Error(`not an Electron asar (pickle prefix ${prefix})`);
+  if (headerSize < 8 || jsonSize === 0 || jsonSize > MAX_HEADER || stringSize < jsonSize + 4) {
+    throw new Error(`unsupported asar header (header=${headerSize}, string=${stringSize}, json=${jsonSize})`);
+  }
+  if (headerSize !== stringSize + 4) {
+    throw new Error(`unsupported asar header layout (header=${headerSize}, string=${stringSize})`);
+  }
+  let header;
+  try {
+    header = JSON.parse(readExact(fd, jsonSize, 16).toString("utf8"));
+  } catch (err) {
+    throw new Error(`cannot parse app.asar header: ${err.message}`);
+  }
+  if (!header || typeof header !== "object" || !header.files)
+    throw new Error("app.asar header has no files map");
+  const packageNode = header.files["package.json"];
+  if (!packageNode || packageNode.unpacked || packageNode.link) {
+    throw new Error("app.asar root package.json is missing or unpacked");
+  }
+  let pkg;
+  try {
+    pkg = JSON.parse(readInlineFile(fd, { header, dataStart: 8 + headerSize, entryPath: "", entryNode: {} }, packageNode).toString("utf8"));
+  } catch (err) {
+    throw new Error(`cannot read app.asar package.json: ${err.message}`);
+  }
+  const main = typeof pkg.main === "string" ? pkg.main : "";
+  const entryPath = main.replace(/^[.][\\/]+/, "").replace(/^[\\/]+/, "").replace(/\\/g, "/");
+  if (!entryPath || entryPath.split("/").includes(".."))
+    throw new Error(`app.asar package.json has an invalid main entry: ${main || "(empty)"}`);
+  const entryNode = nodeAt(header, entryPath);
+  if (!entryNode || entryNode.unpacked || entryNode.link)
+    throw new Error(`app.asar main entry ${entryPath} is missing or unpacked`);
+  if (typeof entryNode.size !== "number")
+    throw new Error(`app.asar main entry ${entryPath} has no size`);
+  return { header, dataStart: 8 + headerSize, entryPath, entryNode };
+}
+function readAsarFile(asarPath, filePath) {
+  const fd = fs13.openSync(asarPath, "r");
+  try {
+    const layout = readAsarLayout(fd);
+    const node2 = nodeAt(layout.header, filePath.replace(/^\/+/, "").replace(/\\/g, "/"));
+    if (!node2)
+      throw new Error(`file not found in app.asar: ${filePath}`);
+    return readInlineFile(fd, layout, node2);
+  } finally {
+    try {
+      fs13.closeSync(fd);
+    } catch {
+    }
+  }
+}
+function overlayInjectionLine(loaderPath) {
+  const url2 = pathToFileURL(loaderPath).href;
+  return `
+;import(${JSON.stringify(url2)}).then(() => null, (e) => console.error("[zcode-beautify] overlay load failed", e));`;
+}
+function stripOverlayLine(entry) {
+  return entry.toString("utf8").replace(OVERLAY_LINE_RE, "");
+}
+function hasOverlayLine(entry) {
+  OVERLAY_LINE_RE.lastIndex = 0;
+  return OVERLAY_LINE_RE.test(entry.toString("utf8"));
+}
+function inspectAsar(asarPath, loaderPath = overlayPaths().loader) {
+  const result = { asar: asarPath, exists: false, injected: false, current: false, loaderUrls: [] };
+  let fd;
+  try {
+    fd = fs13.openSync(asarPath, "r");
+    result.exists = true;
+    const layout = readAsarLayout(fd);
+    result.entryPath = layout.entryPath;
+    result.fileCount = flatten(layout.header).length;
+    const entry = readInlineFile(fd, layout, layout.entryNode).toString("utf8");
+    result.injected = hasOverlayLine(entry);
+    result.loaderUrls = [...entry.matchAll(/import\("([^"]*overlay-loader\.cjs)"\)/g)].map((m) => m[1]);
+    const wanted = pathToFileURL(path14.resolve(loaderPath)).href;
+    result.current = result.injected && result.loaderUrls.length > 0 && result.loaderUrls.every((u2) => u2 === wanted);
+  } catch (err) {
+    result.error = err.message;
+  } finally {
+    if (fd !== void 0) {
+      try {
+        fs13.closeSync(fd);
+      } catch {
+      }
+    }
+  }
+  return result;
+}
+function integrityFor(data) {
+  const blocks = [];
+  for (let i2 = 0; i2 < data.length; i2 += BLOCK) {
+    blocks.push(createHash("sha256").update(data.subarray(i2, Math.min(i2 + BLOCK, data.length))).digest("hex"));
+  }
+  return {
+    algorithm: "SHA256",
+    hash: createHash("sha256").update(data).digest("hex"),
+    blockSize: BLOCK,
+    blocks
+  };
+}
+function fileStamp(file2) {
+  const st = fs13.statSync(file2);
+  return { size: st.size, mtimeMs: st.mtimeMs, ino: st.ino, dev: st.dev };
+}
+function sameStamp(a2, b) {
+  return a2.size === b.size && a2.mtimeMs === b.mtimeMs && a2.ino === b.ino && a2.dev === b.dev;
+}
+function copyRange(src, dst, start, length, buf) {
+  let done = 0;
+  while (done < length) {
+    const want = Math.min(buf.length, length - done);
+    const n2 = fs13.readSync(src, buf, 0, want, start + done);
+    if (n2 <= 0)
+      throw new Error(`unexpected end of source asar at byte ${start + done}`);
+    let written = 0;
+    while (written < n2)
+      written += fs13.writeSync(dst, buf, written, n2 - written);
+    done += n2;
+  }
+}
+function buildPatchedAsar(srcPath, dstPath, mode, loaderPath) {
+  const before = fileStamp(srcPath);
+  const src = fs13.openSync(srcPath, "r");
+  let dst;
+  try {
+    const layout = readAsarLayout(src);
+    const oldEntry = readInlineFile(src, layout, layout.entryNode);
+    const stripped = stripOverlayLine(oldEntry);
+    const newEntry = Buffer.from(mode === "install" ? stripped + overlayInjectionLine(loaderPath) : stripped, "utf8");
+    const header = JSON.parse(JSON.stringify(layout.header));
+    const entryNode = nodeAt(header, layout.entryPath);
+    if (!entryNode)
+      throw new Error(`main entry ${layout.entryPath} vanished from the cloned header`);
+    entryNode.size = newEntry.length;
+    entryNode.integrity = integrityFor(newEntry);
+    const files = flatten(header).filter((f2) => !f2.node.unpacked && !f2.node.link).sort((a2, b) => Number(a2.node.offset ?? 0) - Number(b.node.offset ?? 0));
+    if (files.length === 0)
+      throw new Error("app.asar has no inline files");
+    let offset = 0;
+    const plan = [];
+    for (const file2 of files) {
+      const isEntry = file2.path === `/${layout.entryPath}`;
+      const size = isEntry ? newEntry.length : Number(file2.node.size);
+      const srcOffset = Number(file2.node.offset ?? 0);
+      if (!Number.isFinite(size) || size < 0 || !Number.isFinite(srcOffset) || srcOffset < 0) {
+        throw new Error(`invalid asar file entry: ${file2.path}`);
+      }
+      file2.node.offset = String(offset);
+      plan.push({ path: file2.path, node: file2.node, srcOffset, size, replaced: isEntry ? newEntry : void 0 });
+      offset += size;
+    }
+    const headerJson = Buffer.from(JSON.stringify(header), "utf8");
+    const stringSize = Math.ceil((headerJson.length + 4) / ALIGN) * ALIGN;
+    const headerSize = stringSize + 4;
+    const dataStart = 8 + headerSize;
+    const totalBytes = dataStart + offset;
+    fs13.rmSync(dstPath, { force: true });
+    dst = fs13.openSync(dstPath, "w");
+    const prefix = Buffer.alloc(16);
+    prefix.writeUInt32LE(4, 0);
+    prefix.writeUInt32LE(headerSize, 4);
+    prefix.writeUInt32LE(stringSize, 8);
+    prefix.writeUInt32LE(headerJson.length, 12);
+    writeAll(dst, prefix);
+    writeAll(dst, headerJson);
+    const padding = stringSize - headerJson.length - 4;
+    if (padding > 0)
+      writeAll(dst, Buffer.alloc(padding));
+    if (fs13.fstatSync(dst).size !== dataStart)
+      throw new Error("internal error: asar header padding mismatch");
+    const chunk = Buffer.alloc(COPY_CHUNK);
+    for (const part of plan) {
+      if (part.replaced)
+        writeAll(dst, part.replaced);
+      else
+        copyRange(src, dst, layout.dataStart + part.srcOffset, part.size, chunk);
+    }
+    if (fs13.fstatSync(dst).size !== totalBytes) {
+      throw new Error(`internal error: asar length ${fs13.fstatSync(dst).size} != expected ${totalBytes}`);
+    }
+    fs13.fsyncSync(dst);
+    fs13.closeSync(dst);
+    dst = void 0;
+    const after = fileStamp(srcPath);
+    if (!sameStamp(before, after)) {
+      fs13.rmSync(dstPath, { force: true });
+      throw new Error("app.asar changed while it was being read (client update in progress?) \u2014 nothing was replaced");
+    }
+    const check2 = inspectAsar(dstPath, loaderPath);
+    if (!check2.exists || check2.error) {
+      fs13.rmSync(dstPath, { force: true });
+      throw new Error(`patched asar failed verification: ${check2.error ?? "unreadable"}`);
+    }
+    if (check2.entryPath !== layout.entryPath) {
+      fs13.rmSync(dstPath, { force: true });
+      throw new Error(`patched asar entry changed: ${check2.entryPath} != ${layout.entryPath}`);
+    }
+    if (mode === "install" && !check2.current) {
+      fs13.rmSync(dstPath, { force: true });
+      throw new Error("patched asar does not carry the expected loader line \u2014 nothing was replaced");
+    }
+    if (mode === "remove" && check2.injected) {
+      fs13.rmSync(dstPath, { force: true });
+      throw new Error("patched asar still carries a loader line \u2014 nothing was replaced");
+    }
+    return {
+      entryPath: layout.entryPath,
+      files: plan.length,
+      bytes: totalBytes,
+      entryBytes: newEntry.length,
+      injected: mode === "install",
+      source: { size: before.size, mtimeMs: before.mtimeMs }
+    };
+  } finally {
+    try {
+      fs13.closeSync(src);
+    } catch {
+    }
+    if (dst !== void 0) {
+      try {
+        fs13.closeSync(dst);
+      } catch {
+      }
+      try {
+        fs13.rmSync(dstPath, { force: true });
+      } catch {
+      }
+    }
+  }
+}
+function isAppRunning(app = target()) {
+  try {
+    if (process.platform === "win32") {
+      const out2 = execFileSync3("tasklist", ["/NH", "/FI", `IMAGENAME eq ${app.exeName}`], {
+        encoding: "utf8",
+        timeout: 1e4,
+        windowsHide: true
+      });
+      return out2.toLowerCase().includes(app.exeName.toLowerCase());
+    }
+    const out = execFileSync3("pgrep", ["-x", app.exeName.replace(/\.exe$/i, "")], {
+      encoding: "utf8",
+      timeout: 1e4
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+function readOverlayState() {
+  try {
+    const parsed = JSON.parse(fs13.readFileSync(overlayPaths().state, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function writeOverlayState(patch) {
+  const paths = overlayPaths();
+  fs13.mkdirSync(paths.dir, { recursive: true });
+  const previous = readOverlayState();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const next = {
+    schema: 1,
+    version: VERSION,
+    ...previous,
+    ...patch,
+    installedAt: previous?.installedAt ?? (patch.installed ? now : void 0),
+    updatedAt: now
+  };
+  const tmp = paths.state + ".tmp";
+  fs13.writeFileSync(tmp, JSON.stringify(next, null, 2));
+  fs13.renameSync(tmp, paths.state);
+  return next;
+}
+function readPending() {
+  try {
+    const parsed = JSON.parse(fs13.readFileSync(overlayPaths().pending, "utf8"));
+    return parsed && typeof parsed === "object" && parsed.tmp ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function writePending(info) {
+  const paths = overlayPaths();
+  fs13.mkdirSync(paths.dir, { recursive: true });
+  const tmp = paths.pending + ".tmp";
+  fs13.writeFileSync(tmp, JSON.stringify(info, null, 2));
+  fs13.renameSync(tmp, paths.pending);
+}
+function cancelPending() {
+  const paths = overlayPaths();
+  const pending = readPending();
+  if (pending) {
+    try {
+      fs13.rmSync(pending.tmp, { force: true });
+    } catch {
+    }
+  }
+  try {
+    fs13.rmSync(paths.pending, { force: true });
+  } catch {
+  }
+}
+function copyAtomic(src, dst) {
+  const tmp = `${dst}.tmp-${process.pid}`;
+  fs13.copyFileSync(src, tmp);
+  try {
+    fs13.renameSync(tmp, dst);
+  } catch (err) {
+    try {
+      fs13.rmSync(tmp, { force: true });
+    } catch {
+    }
+    throw err;
+  }
+}
+function syncRuntime(pluginRoot = defaultPluginRoot()) {
+  const paths = overlayPaths();
+  const sources = [
+    { src: path14.join(pluginRoot, "runtime", "overlay-loader.cjs"), dst: paths.loader, label: "overlay-loader.cjs" },
+    { src: path14.join(pluginRoot, "runtime", "overlay-monitor.cjs"), dst: paths.monitor, label: "overlay-monitor.cjs" },
+    { src: path14.join(pluginRoot, "dist", "cli.js"), dst: paths.cli, label: "dist/cli.js" }
+  ];
+  fs13.mkdirSync(paths.dir, { recursive: true });
+  const copied = [];
+  for (const file2 of sources) {
+    if (!fs13.existsSync(file2.src)) {
+      throw new Error(`overlay runtime file missing: ${file2.src} \u2014 the plugin package is incomplete (run \`npm run bundle\` before installing)`);
+    }
+    copyAtomic(file2.src, file2.dst);
+    copied.push(file2.label);
+  }
+  return { dir: paths.dir, loader: paths.loader, cli: paths.cli, monitor: paths.monitor, copied };
+}
+function sleep2(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+    }
+  }
+}
+function withLock(fn) {
+  const paths = overlayPaths();
+  fs13.mkdirSync(paths.dir, { recursive: true });
+  let fd = null;
+  const deadline = Date.now() + 2500;
+  for (; ; ) {
+    try {
+      fd = fs13.openSync(paths.lock, "wx");
+      break;
+    } catch {
+      try {
+        const age = Date.now() - fs13.statSync(paths.lock).mtimeMs;
+        if (age > LOCK_STALE_MS) {
+          fs13.rmSync(paths.lock, { force: true });
+          continue;
+        }
+      } catch {
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`another overlay install is already running (lock: ${paths.lock})`);
+      }
+      sleep2(100);
+    }
+  }
+  try {
+    fs13.writeFileSync(fd, String(process.pid));
+    return fn();
+  } finally {
+    try {
+      fs13.closeSync(fd);
+    } catch {
+    }
+    try {
+      fs13.rmSync(paths.lock, { force: true });
+    } catch {
+    }
+  }
+}
+function spawnMonitor() {
+  const paths = overlayPaths();
+  if (!fs13.existsSync(paths.monitor))
+    return false;
+  try {
+    const nodeExe = process.env.ZCODE_BEAUTIFY_NODE?.trim() || process.execPath;
+    const child = spawn4(nodeExe, [paths.monitor], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      cwd: paths.dir,
+      env: { ...process.env }
+    });
+    child.on("error", () => {
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+function applyBuiltAsar(asar, tmp, mode, entryPath, source) {
+  try {
+    fs13.renameSync(tmp, asar);
+    return { applied: true };
+  } catch (err) {
+    const message = err.message;
+    if (!isAppRunning())
+      return { applied: false, error: message };
+    const pending = {
+      schema: 1,
+      mode,
+      asar,
+      tmp,
+      source,
+      entryPath,
+      createdAt: Date.now(),
+      version: VERSION
+    };
+    writePending(pending);
+    const monitor = spawnMonitor();
+    return { applied: false, pending, error: monitor ? void 0 : "could not start the background swap monitor; after quitting the client run `overlay finalize`" };
+  }
+}
+function installOverlay(options = {}) {
+  const paths = overlayPaths();
+  if (target().id !== "zcode") {
+    return {
+      ok: false,
+      asar: options.asarPath ?? "",
+      alreadyInjected: false,
+      applied: false,
+      pending: false,
+      injected: false,
+      error: "the startup overlay is currently implemented for ZCode only (WorkBuddy uses the CDP launch path)"
+    };
+  }
+  if (options.dryRun) {
+    let asar;
+    try {
+      asar = options.asarPath ? path14.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", alreadyInjected: false, applied: false, pending: false, injected: false, error: err.message };
+    }
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error) {
+      return {
+        ok: false,
+        asar,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: `cannot read ${asar}: ${inspection.error ?? "file missing"}`
+      };
+    }
+    return {
+      ok: true,
+      asar,
+      entryPath: inspection.entryPath,
+      alreadyInjected: inspection.current,
+      applied: false,
+      pending: false,
+      injected: inspection.injected
+    };
+  }
+  fs13.mkdirSync(paths.dir, { recursive: true });
+  return withLock(() => {
+    let asar;
+    try {
+      asar = options.asarPath ? path14.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", alreadyInjected: false, applied: false, pending: false, injected: false, error: err.message };
+    }
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error) {
+      return {
+        ok: false,
+        asar,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: `cannot read ${asar}: ${inspection.error ?? "file missing"}`
+      };
+    }
+    const runtime = syncRuntime(options.pluginRoot);
+    try {
+      fs13.rmSync(paths.optOut, { force: true });
+    } catch {
+    }
+    if (inspection.current) {
+      writeOverlayState({
+        installed: true,
+        asarPath: asar,
+        pluginRoot: options.pluginRoot ?? readOverlayState()?.pluginRoot,
+        loaderPath: paths.loader,
+        lastResult: "already-injected"
+      });
+      return {
+        ok: true,
+        asar,
+        entryPath: inspection.entryPath,
+        runtimeDir: runtime.dir,
+        alreadyInjected: true,
+        applied: false,
+        pending: false,
+        injected: true
+      };
+    }
+    cancelPending();
+    const tmp = asar + TMP_SUFFIX;
+    let stats;
+    try {
+      stats = buildPatchedAsar(asar, tmp, "install", paths.loader);
+    } catch (err) {
+      return {
+        ok: false,
+        asar,
+        entryPath: inspection.entryPath,
+        runtimeDir: runtime?.dir,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: err.message
+      };
+    }
+    const swap = applyBuiltAsar(asar, tmp, "install", stats.entryPath, stats.source);
+    if (!swap.applied && !swap.pending) {
+      return {
+        ok: false,
+        asar,
+        entryPath: stats.entryPath,
+        runtimeDir: runtime?.dir,
+        alreadyInjected: false,
+        applied: false,
+        pending: false,
+        injected: false,
+        error: `cannot replace app.asar: ${swap.error ?? "unknown error"}`,
+        stats
+      };
+    }
+    writeOverlayState({
+      installed: true,
+      asarPath: asar,
+      pluginRoot: options.pluginRoot ?? readOverlayState()?.pluginRoot,
+      loaderPath: paths.loader,
+      lastResult: swap.applied ? "applied" : "pending"
+    });
+    return {
+      ok: true,
+      asar,
+      entryPath: stats.entryPath,
+      runtimeDir: runtime.dir,
+      alreadyInjected: false,
+      applied: swap.applied,
+      pending: Boolean(swap.pending),
+      injected: swap.applied,
+      stats,
+      warning: swap.pending && swap.error ? swap.error : void 0
+    };
+  });
+}
+function removeOverlay(options = {}) {
+  const paths = overlayPaths();
+  if (options.dryRun) {
+    let asar;
+    try {
+      asar = options.asarPath ? path14.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", injected: false, applied: false, pending: false, alreadyClean: true, optOut: fs13.existsSync(paths.optOut), error: err.message };
+    }
+    const inspection = inspectAsar(asar, paths.loader);
+    return {
+      ok: true,
+      asar,
+      entryPath: inspection.entryPath,
+      injected: inspection.injected,
+      applied: false,
+      pending: false,
+      alreadyClean: !inspection.injected,
+      optOut: fs13.existsSync(paths.optOut),
+      error: inspection.error
+    };
+  }
+  fs13.mkdirSync(paths.dir, { recursive: true });
+  fs13.writeFileSync(paths.optOut, `zcode-beautify overlay uninstalled ${(/* @__PURE__ */ new Date()).toISOString()}
+`);
+  return withLock(() => {
+    let asar;
+    try {
+      asar = options.asarPath ? path14.resolve(options.asarPath) : findAppAsar();
+    } catch (err) {
+      return { ok: false, asar: options.asarPath ?? "", injected: false, applied: false, pending: false, alreadyClean: true, optOut: true, error: err.message };
+    }
+    cancelPending();
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error) {
+      writeOverlayState({ installed: false, asarPath: asar, removedAt: (/* @__PURE__ */ new Date()).toISOString(), lastResult: "asar-unreadable" });
+      return {
+        ok: true,
+        asar,
+        injected: false,
+        applied: false,
+        pending: false,
+        alreadyClean: true,
+        optOut: true,
+        error: inspection.error
+      };
+    }
+    if (!inspection.injected) {
+      writeOverlayState({ installed: false, asarPath: asar, removedAt: (/* @__PURE__ */ new Date()).toISOString(), lastResult: "already-clean" });
+      return { ok: true, asar, entryPath: inspection.entryPath, injected: false, applied: false, pending: false, alreadyClean: true, optOut: true };
+    }
+    const tmp = asar + TMP_SUFFIX;
+    let stats;
+    try {
+      stats = buildPatchedAsar(asar, tmp, "remove", paths.loader);
+    } catch (err) {
+      return {
+        ok: false,
+        asar,
+        entryPath: inspection.entryPath,
+        injected: true,
+        applied: false,
+        pending: false,
+        alreadyClean: false,
+        optOut: true,
+        error: err.message
+      };
+    }
+    const swap = applyBuiltAsar(asar, tmp, "remove", stats.entryPath, stats.source);
+    if (!swap.applied && !swap.pending) {
+      writeOverlayState({ installed: true, asarPath: asar, lastResult: "remove-failed" });
+      return {
+        ok: false,
+        asar,
+        entryPath: stats.entryPath,
+        injected: true,
+        applied: false,
+        pending: false,
+        alreadyClean: false,
+        optOut: true,
+        error: `cannot replace app.asar: ${swap.error ?? "unknown error"}`
+      };
+    }
+    writeOverlayState({
+      installed: Boolean(swap.pending),
+      asarPath: asar,
+      removedAt: swap.applied ? (/* @__PURE__ */ new Date()).toISOString() : void 0,
+      lastResult: swap.applied ? "removed" : "remove-pending"
+    });
+    return {
+      ok: true,
+      asar,
+      entryPath: stats.entryPath,
+      injected: !swap.applied,
+      applied: swap.applied,
+      pending: Boolean(swap.pending),
+      alreadyClean: false,
+      optOut: true,
+      warning: swap.pending && swap.error ? swap.error : void 0
+    };
+  });
+}
+function finalizePending() {
+  const pending = readPending();
+  if (!pending)
+    return { ok: true, applied: false };
+  const paths = overlayPaths();
+  return withLock(() => {
+    const current = readPending();
+    if (!current)
+      return { ok: true, applied: false };
+    if (!fs13.existsSync(current.tmp)) {
+      fs13.rmSync(paths.pending, { force: true });
+      return { ok: false, applied: false, error: "pending package is missing" };
+    }
+    if (isAppRunning())
+      return { ok: true, applied: false, pending: current };
+    try {
+      const st = fs13.statSync(current.asar);
+      if (st.size !== current.source.size || Math.abs(st.mtimeMs - current.source.mtimeMs) > 1) {
+        fs13.rmSync(current.tmp, { force: true });
+        fs13.rmSync(paths.pending, { force: true });
+        return { ok: false, applied: false, error: "app.asar changed after the package was staged; discarded the stale pending package" };
+      }
+      fs13.renameSync(current.tmp, current.asar);
+      fs13.rmSync(paths.pending, { force: true });
+      writeOverlayState({
+        installed: current.mode === "install",
+        asarPath: current.asar,
+        lastResult: current.mode === "install" ? "applied" : "removed",
+        removedAt: current.mode === "remove" ? (/* @__PURE__ */ new Date()).toISOString() : void 0
+      });
+      return { ok: true, applied: true };
+    } catch (err) {
+      return { ok: false, applied: false, pending: current, error: err.message };
+    }
+  });
+}
+function overlayStatus(options = {}) {
+  const paths = overlayPaths();
+  let asar = "";
+  let inspection;
+  let asarError;
+  try {
+    asar = options.asarPath ? path14.resolve(options.asarPath) : findAppAsar();
+    inspection = inspectAsar(asar, paths.loader);
+    asarError = inspection.error;
+  } catch (err) {
+    asarError = err.message;
+  }
+  return {
+    app: target().appName,
+    version: VERSION,
+    asar,
+    asarExists: Boolean(inspection?.exists),
+    entryPath: inspection?.entryPath,
+    injected: Boolean(inspection?.injected),
+    current: Boolean(inspection?.current),
+    loaderUrls: inspection?.loaderUrls ?? [],
+    optOut: fs13.existsSync(paths.optOut),
+    experimentalEnabled: experimentalEnabled(loadConfig()),
+    runtimeDir: paths.dir,
+    runtimeFiles: {
+      loader: fs13.existsSync(paths.loader),
+      cli: fs13.existsSync(paths.cli),
+      monitor: fs13.existsSync(paths.monitor)
+    },
+    state: readOverlayState(),
+    pending: readPending(),
+    error: asarError
+  };
+}
+function autoHealOverlay() {
+  try {
+    const state = readOverlayState();
+    if (!state?.installed)
+      return;
+    const paths = overlayPaths();
+    if (fs13.existsSync(paths.optOut))
+      return;
+    if (!experimentalEnabled(loadConfig()))
+      return;
+    const pending = readPending();
+    if (pending)
+      return;
+    const asar = state.asarPath && fs13.existsSync(state.asarPath) ? state.asarPath : findAppAsar();
+    const inspection = inspectAsar(asar, paths.loader);
+    if (!inspection.exists || inspection.error || inspection.current)
+      return;
+    const st = fs13.statSync(asar);
+    const key = `${VERSION} ${st.size} ${Math.round(st.mtimeMs)}`;
+    try {
+      const previous = fs13.readFileSync(paths.autoHealStamp, "utf8").trim();
+      const age = Date.now() - fs13.statSync(paths.autoHealStamp).mtimeMs;
+      if (previous === key && age < 10 * 6e4)
+        return;
+    } catch {
+    }
+    fs13.mkdirSync(paths.dir, { recursive: true });
+    fs13.writeFileSync(paths.autoHealStamp, key);
+    const root = defaultPluginRoot();
+    const cli = path14.join(root, "dist", "cli.js");
+    if (!fs13.existsSync(cli))
+      return;
+    const child = spawn4(process.execPath, [cli, "overlay", "install", "--auto", "--no-enable", "--quiet"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...process.env }
+    });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
+var ALIGN, BLOCK, MAX_HEADER, COPY_CHUNK, TMP_SUFFIX, LOCK_STALE_MS, PENDING_MAX_AGE_MS, OVERLAY_LINE_RE, PENDING_DEADLINE_MS;
+var init_overlay = __esm({
+  "dist/core/overlay.js"() {
+    "use strict";
+    init_launch();
+    init_target();
+    init_version();
+    ALIGN = 4;
+    BLOCK = 4 * 1024 * 1024;
+    MAX_HEADER = 64 * 1024 * 1024;
+    COPY_CHUNK = 4 * 1024 * 1024;
+    TMP_SUFFIX = ".beautify.tmp";
+    LOCK_STALE_MS = 10 * 6e4;
+    PENDING_MAX_AGE_MS = 24 * 60 * 6e4;
+    OVERLAY_LINE_RE = /\n?;import\("[^"]*overlay-loader\.cjs"\)\.then\(\(\) => null, \(e\) => console\.error\("\[zcode-beautify\] overlay load failed", e\)\);?/g;
+    PENDING_DEADLINE_MS = PENDING_MAX_AGE_MS;
+  }
+});
+
+// dist/mcp/server.js
+import fs14, { existsSync as existsSync3, statSync } from "node:fs";
+import path15 from "node:path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -122938,8 +124005,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path15, errorMaps, issueData } = params;
-  const fullPath = [...path15, ...issueData.path || []];
+  const { data, path: path16, errorMaps, issueData } = params;
+  const fullPath = [...path16, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -123054,11 +124121,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path15, key) {
+  constructor(parent, value, path16, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path15;
+    this._path = path16;
     this._key = key;
   }
   get path() {
@@ -127012,10 +128079,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path15) {
-  if (!path15)
+function getElementAtPath(obj, path16) {
+  if (!path16)
     return obj;
-  return path15.reduce((acc, key) => acc?.[key], obj);
+  return path16.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -127355,11 +128422,11 @@ function explicitlyAborted(x2, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path15, issues) {
+function prefixIssues(path16, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path15);
+    iss.path.unshift(path16);
     return iss;
   });
 }
@@ -127809,16 +128876,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path15 = []) => {
+  const processError = (error63, path16 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path16, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -127857,17 +128924,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path15 = []) => {
+  const processError = (error63, path16 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path15, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path16, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path15, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path16, ...issue2.path]);
       } else {
-        const fullpath = [...path15, ...issue2.path];
+        const fullpath = [...path16, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -127906,8 +128973,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path15 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path15) {
+  const path16 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path16) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -143422,11 +144489,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path15) {
-  if (path15.length === 0) {
+function getDotPath(path16) {
+  if (path16.length === 0) {
     return "object root";
   }
-  return path15.reduce((acc, seg, index) => {
+  return path16.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -145653,13 +146720,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path15 = ref.slice(1).split("/").filter(Boolean);
-  if (path15.length === 0) {
+  const path16 = ref.slice(1).split("/").filter(Boolean);
+  if (path16.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path15[0] === defsKey) {
-    const key = path15[1] === void 0 ? void 0 : decodeJSONPointerSegment(path15[1]);
+  if (path16[0] === defsKey) {
+    const key = path16[1] === void 0 ? void 0 : decodeJSONPointerSegment(path16[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -152464,7 +153531,7 @@ init_version();
 delete process.env.ZCODE_BEAUTIFY_DATA_DIR;
 delete process.env.WORKBUDDY_BEAUTIFY_DATA_DIR;
 var absoluteExisting = (p2) => {
-  if (!path14.isAbsolute(p2))
+  if (!path15.isAbsolute(p2))
     throw new Error(`\u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84: ${p2}`);
   if (!existsSync3(p2))
     throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${p2}`);
@@ -152472,13 +153539,13 @@ var absoluteExisting = (p2) => {
 };
 var loadSession = () => Promise.resolve().then(() => (init_session(), session_exports));
 function cliJsPath() {
-  const serverFile = path14.resolve(process.argv[1] ?? "");
-  const cliJs = path14.join(path14.dirname(serverFile), "..", "cli.js");
-  return path14.basename(serverFile) === "server.js" && existsSync3(cliJs) ? cliJs : null;
+  const serverFile = path15.resolve(process.argv[1] ?? "");
+  const cliJs = path15.join(path15.dirname(serverFile), "..", "cli.js");
+  return path15.basename(serverFile) === "server.js" && existsSync3(cliJs) ? cliJs : null;
 }
 var LAUNCHER_CHECK_INTERVAL_MS = 10 * 6e4;
 function launcherCheckStamp() {
-  return path14.join(dataDir(), "launcher-check.stamp");
+  return path15.join(dataDir(), "launcher-check.stamp");
 }
 function claimLauncherCheck() {
   const stamp = launcherCheckStamp();
@@ -152486,7 +153553,7 @@ function claimLauncherCheck() {
     const st = statSync(stamp);
     let fresh = Date.now() - st.mtimeMs < LAUNCHER_CHECK_INTERVAL_MS;
     try {
-      const [stampVersion] = fs13.readFileSync(stamp, "utf8").trim().split(/\s+/);
+      const [stampVersion] = fs14.readFileSync(stamp, "utf8").trim().split(/\s+/);
       if (stampVersion !== VERSION)
         fresh = false;
     } catch {
@@ -152497,9 +153564,9 @@ function claimLauncherCheck() {
   } catch {
   }
   try {
-    fs13.mkdirSync(dataDir(), { recursive: true });
-    fs13.rmSync(stamp, { force: true });
-    fs13.writeFileSync(stamp, `${VERSION} ${Date.now()}`, { flag: "wx" });
+    fs14.mkdirSync(dataDir(), { recursive: true });
+    fs14.rmSync(stamp, { force: true });
+    fs14.writeFileSync(stamp, `${VERSION} ${Date.now()}`, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -152507,27 +153574,37 @@ function claimLauncherCheck() {
 }
 function releaseLauncherCheck() {
   try {
-    fs13.rmSync(launcherCheckStamp(), { force: true });
+    fs14.rmSync(launcherCheckStamp(), { force: true });
   } catch {
   }
 }
 function bootstrapServe() {
+  const startedAt = performance.now();
   try {
     const cliJs = cliJsPath();
     if (!cliJs)
       return;
+    const hostAt = performance.now();
     const host = hostPluginState();
+    const hostMs = performance.now() - hostAt;
     if (host.known && !host.enabled) {
       console.error(`beautify: plugin disabled in ${target().appName}'s plugin manager \u2014 nothing started`);
       return;
     }
+    const gateAt = performance.now();
     const cfg = ensureExperimentalGate();
+    const gateMs = performance.now() - gateAt;
     if (!cfg.experimental?.enabled) {
       console.error("beautify: experimental CDP injection is disabled \u2014 nothing started (enable_experimental, or `cli.js enable`, opts in)");
       return;
     }
     const apiPort = cfg.apiPort ?? target().apiPort;
     spawnServeDetached(apiPort, cliJs);
+    Promise.resolve().then(() => (init_overlay(), overlay_exports)).then((m) => m.autoHealOverlay()).catch(() => {
+    });
+    if (process.env.BEAUTIFY_TIMING === "1") {
+      console.error(`mcp: bootstrap timing ${JSON.stringify({ hostMs: Math.round(hostMs), gateMs: Math.round(gateMs), totalMs: Math.round(performance.now() - startedAt), uptimeMs: Math.round(process.uptime() * 1e3) })}`);
+    }
     if (!claimLauncherCheck())
       return;
     Promise.resolve().then(() => (init_launchers(), launchers_exports)).then((m) => m.repairLaunchers({ port: loadConfig().port ?? target().cdpPort }).then((report) => {
@@ -152546,10 +153623,24 @@ function bootstrapServe() {
   } catch {
   }
 }
-bootstrapServe();
+var bootstrapStarted = false;
+function startBootstrapOnce() {
+  if (bootstrapStarted)
+    return;
+  bootstrapStarted = true;
+  bootstrapServe();
+}
+var handshakeSeen = false;
+try {
+  if (!experimentalEnabled(loadConfig()))
+    startBootstrapOnce();
+} catch {
+}
 function watchHostReenable() {
   const timer = setInterval(() => {
     try {
+      if (!handshakeSeen && !bootstrapStarted)
+        return;
       const host = hostPluginState();
       if (host.known && !host.enabled)
         return;
@@ -152583,6 +153674,15 @@ var server = new McpServer({
   name: "zcode-beautify",
   version: VERSION
 });
+server.server.oninitialized = () => {
+  handshakeSeen = true;
+  if (process.env.BEAUTIFY_TIMING === "1") {
+    console.error(`mcp: initialized at ${Math.round(process.uptime() * 1e3)}ms uptime`);
+  }
+  setImmediate(startBootstrapOnce);
+};
+var bootstrapFallback = setTimeout(startBootstrapOnce, 3e3);
+bootstrapFallback.unref?.();
 var APP = target().appName;
 var rawRegister = server.registerTool.bind(server);
 server.registerTool = ((name, meta3, handler) => {
