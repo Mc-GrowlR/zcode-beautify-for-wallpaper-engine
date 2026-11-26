@@ -4,8 +4,8 @@
  *     waits; WorkBuddy skeleton still waits; a missing <body> is tolerated;
  *   B waiter lifecycle: disable while parked, reload/replay idempotence, clean
  *     teardown of startupMO/pendingBootstrap/panelMO;
- *   C chat width: the 4.0 `@min-[624px]/conversation:max-w-xl` holder and the
- *     version-proof `conversation:max-w-` selector;
+ *   C chat width: timeline and composer column overrides, focused-pane grip
+ *     placement, and percentage persistence and reset;
  *   D manifest/surface protocol: ui.surfaces rules and MCP arg/env templates;
  *   E read-only session store: the 4.0 session/message/part/session_target
  *     columns still feed 会话预览 and the goal map.
@@ -164,20 +164,108 @@ const hasPanel = (w: any) => !!w.document.getElementById("zcode-beautify-panel-r
   check("B12 panel waiter disarmed", !pd.__zcodeBeautify?.panelMO && !pd.__zcodeBeautify?.pendingPanel);
 }
 
-// --- C: 4.0 chat width anchor ------------------------------------------------
+// --- C: 4.0 chat width and drag -----------------------------------------------
 {
-  const boot = buildBootstrapScript(bootPayload());
-  check("C1 4.0 width holder selector baked", boot.includes('[class*="/conversation:max-w-xl"]'));
-  check("C2 624px container tier baked", boot.includes("@container conversation (min-width:624px)"));
-  const runtimeCapNeedle = `[class*="/conversation:max-w-xl"]{max-width:' + cap + 'rem!important`;
-  check("C3 4.0 rule reads the runtime cap", boot.includes(runtimeCapNeedle));
-  check("C4 drag/JS uses the version-proof holder selector", boot.includes(`querySelector('[class*="conversation:max-w-"]')`));
+  const pane = (id: string, focused: boolean, hasMessages: boolean) => `
+    <section data-pane-id="${id}" data-focused="${focused}">
+      <div role="tabpanel" data-state="${focused ? "active" : "inactive"}">
+        <div data-session-pane-root><div class="@container/conversation" style="container:conversation / inline-size">
+          <div data-v4-timeline-scroll style="overflow-y:auto">
+            <div class="flex min-h-full flex-col">
+              ${hasMessages ? `<div data-v4-timeline-message-layer>
+                <div data-v4-timeline-content-column="true" data-v4-timeline-virtual-history class="max-w-6xl"></div>
+                <div data-v4-timeline-content-column="true" data-v4-live-tail class="max-w-6xl">
+                  <div data-v4-user-input-bubble class="@min-[624px]/conversation:max-w-xl"></div>
+                </div>
+              </div>` : ""}
+              <div data-v4-composer-dock>
+                <div data-v4-composer-dock-content class="${hasMessages ? "max-w-6xl" : "max-w-2xl"}">
+                  <div class="chat-composer-region${hasMessages ? "" : " max-w-2xl"}">
+                    <div data-composer-layout><div contenteditable="true"></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </section>`;
+  const w = makeDom(`<div id="root">${pane("hidden", false, true)}${pane("current", true, true)}</div>`);
+  const current = w.document.querySelector('[data-pane-id="current"]');
+  const hidden = w.document.querySelector('[data-pane-id="hidden"]');
+  // jsdom does not lay out CSS. Model the measurements the pointer engine
+  // reads, with narrower bubbles inside the independently sized columns.
+  function setRect(el: HTMLElement, left: number, width: number, height = 700) {
+    Object.defineProperties(el, {
+      clientWidth: { configurable: true, value: width },
+      clientHeight: { configurable: true, value: height },
+      getBoundingClientRect: { configurable: true, value: () => new w.DOMRect(left, 40, width, height) },
+    });
+  }
+  function measurePane(el: HTMLElement) {
+    for (const node of el.querySelectorAll<HTMLElement>("div")) setRect(node, 100, 1000);
+    for (const col of el.querySelectorAll<HTMLElement>("[data-v4-timeline-content-column],[data-v4-composer-dock-content]")) setRect(col, 300, 600);
+    for (const bubble of el.querySelectorAll<HTMLElement>("[data-v4-user-input-bubble]")) setRect(bubble, 600, 300);
+  }
+  for (const node of hidden.querySelectorAll("div")) setRect(node, 0, 0, 0);
+  measurePane(current);
 
-  const drag = buildBootstrapScript(bootPayload({
-    chatLook: { ...normalizeChatLook(), widthCapRem: 72, widthInsetRem: 12, dragResize: 1 },
-  }));
-  check("C5 drag tiers include the 4.0 holder", drag.includes('[class*="/conversation:max-w-xl"]{max-width:var(--zb-chat-w'));
-  check("C6 grip transition rule is generic", drag.includes('html.zb-grip-active [class*="conversation:max-w-"]{transition:none'));
+  const applyWidth = (widthCapRem: number, widthInsetRem: number, dragResize = 0) =>
+    w.eval(buildBootstrapScript(bootPayload({
+      startupClean: false,
+      chatLook: { ...normalizeChatLook(), widthCapRem, widthInsetRem, dragResize },
+    })));
+  const widthStyle = () => w.document.getElementById("zcode-beautify-chatlook-style")?.textContent ?? "";
+  applyWidth(0, 0);
+  check("C1 native mode adds no 4.0 column override", !widthStyle().includes("data-v4-timeline-content-column"));
+  applyWidth(96, 0);
+  const custom = widthStyle();
+  check("C2 custom width styles the timeline and composer columns", custom.includes("[data-v4-timeline-content-column]")
+    && custom.includes("[data-v4-composer-dock-content]") && custom.includes(".chat-composer-region") && custom.includes("96rem"));
+  check("C3 custom width keeps the zero inset and leaves bubble widths alone", /(?:-|,)\s*0rem/.test(custom)
+    && !custom.includes("/conversation:max-w-xl") && !custom.includes("[data-v4-user-input-bubble]"));
+
+  // This update exercises the normal fast path, which also supplies the
+  // pointer listeners when drag is enabled after bootstrap.
+  applyWidth(96, 0, 1);
+  let right = w.document.getElementById("zcode-beautify-grip-r");
+  check("C4 drag styles preserve the custom width before the first drag", /(?:-|,)\s*0rem/.test(widthStyle())
+    && widthStyle().includes("96rem") && !w.document.documentElement.style.getPropertyValue("--zb-chat-width-pct"));
+  check("C5 handle hugs the focused timeline column edge", right?.style.display !== "none" && right?.style.left === "895px");
+  const pointer = (type: string, clientX: number) =>
+    right?.dispatchEvent(new w.MouseEvent(type, { bubbles: true, button: 0, clientX }));
+  const draggedStyle = () => w.document.documentElement.style.getPropertyValue("--zb-chat-width-pct");
+  const dragKey = "zcode-beautify:chat-drag-pct";
+  pointer("pointerdown", 900);
+  pointer("pointermove", 964);
+  const draggedPct = parseFloat(draggedStyle());
+  check("C6 handle movement immediately applies a wider 4.0 column percentage", draggedPct > 60 && draggedPct < 100
+    && w.document.documentElement.classList.contains("zb-chat-width-dragged"));
+  pointer("pointerup", 964);
+  const saved = Number(w.localStorage.getItem(dragKey));
+  check("C7 releasing the handle persists the dragged width as a percentage", Math.abs(saved - draggedPct) < 0.1);
+  applyWidth(96, 0);
+  check("C8 disabling drag clears its style and keeps its saved width", !draggedStyle()
+    && Number(w.localStorage.getItem(dragKey)) === saved);
+  applyWidth(96, 0, 1);
+  right = w.document.getElementById("zcode-beautify-grip-r");
+  check("C9 re-enabling drag restores the saved percentage", Math.abs(parseFloat(draggedStyle()) - saved) < 0.1);
+  right?.dispatchEvent(new w.MouseEvent("dblclick", { bubbles: true }));
+  check("C10 double-click resets the persisted override and restores the custom tier", w.localStorage.getItem(dragKey) === null
+    && !draggedStyle() && !w.document.documentElement.classList.contains("zb-chat-width-dragged") && widthStyle().includes("96rem"));
+
+  current.outerHTML = pane("empty", true, false);
+  const empty = w.document.querySelector('[data-pane-id="empty"]');
+  measurePane(empty);
+  setRect(empty.querySelector("[data-v4-composer-dock-content]"), 340, 520);
+  check("C11 empty conversations anchor the handle to the composer dock", await waitFor(() => right?.style.left === "855px"));
+  setRect(empty.querySelector('[class~="@container/conversation"]'), 100, 500);
+  w.dispatchEvent(new w.Event("resize"));
+  check("C12 narrow conversations hide the handle below the width breakpoint", await waitFor(() => right?.style.display === "none"));
+  applyWidth(0, 0);
+  check("C13 disabling width and drag removes both overrides", !w.document.getElementById("zcode-beautify-grip-r")
+    && !widthStyle().includes("data-v4-composer-dock-content") && !draggedStyle());
+  w.close();
 }
 
 // --- D: manifest / ui.surfaces protocol --------------------------------------

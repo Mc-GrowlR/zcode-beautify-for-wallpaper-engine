@@ -90,7 +90,7 @@ const widthVar = (w: typeof window) => w.document.documentElement.style.getPrope
   check("no raw tier rules beside the drag tiers", !st.includes("max-width:72rem!important"));
   check("grip css mounted", st.includes("cursor:col-resize") && st.includes("zb-grip-drag"));
   check("composer floor + transition cut while dragging", st.includes("min-width:460px!important") && st.includes("transition:none!important"));
-  check("strips version-marked for stale-engine remount", gl!.getAttribute("data-zb-ver") === "4");
+  check("strips version-marked for stale-engine remount", gl!.getAttribute("data-zb-ver") === "5");
   check("strips hidden without chat layout (jsdom rects are 0)", gl!.style.display === "none" && gr!.style.display === "none");
   check("no width var written before a drag", widthVar(window) === "");
 }

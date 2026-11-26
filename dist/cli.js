@@ -437,6 +437,21 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
   var WP_IMG = ${JSON.stringify(payload.wallpaperDataUri ?? "")};
   var VOL = Math.max(0, Math.min(100, Math.round(${JSON.stringify(payload.videoVolume ?? 0)})));
   var CHAT = ${JSON.stringify(JSON.stringify(payload.chatLook ?? { chatDim: 0, maskTop: 0, maskBottom: 0, frost: 0, widthCapRem: 0, widthInsetRem: 0, perfSmooth: 0, hideElapsedDecimal: 0, dragResize: 0, composerFade: 0, sessionHover: 0, sessionHoverSide: 1, sessionHoverMax: 10, titleCites: 1 }))};
+  // Width changes can take the chat-only fast path, so its handlers need
+  // their selectors and drag constants before any early return.
+  var CHAT_LOOK_VER = '5';
+  var chatChanged = window.__zcodeBeautify.chatKey !== CHAT
+    || window.__zcodeBeautify.chatStamp !== CHAT_LOOK_VER;
+  var V4_TIMELINE = '[data-v4-timeline-scroll]';
+  var LEGACY_COLUMNS = '[class*="conversation:max-w-4xl"],[class*="conversation:max-w-6xl"]';
+  // 3.x has the same data attributes, but its populated columns use the
+  // responsive 4xl/6xl classes. Keep those columns on the legacy rules.
+  var V4_COLUMNS = ':is([data-v4-timeline-content-column],[data-v4-composer-dock-content]):not(' + LEGACY_COLUMNS + ')';
+  var V4_WIDTH_BREAKPOINT = 624;
+  var GRIP_KEY = 'zcode-beautify:chat-drag-pct';
+  var GRIP_MIN = 460;
+  var GRIP_MARGIN = 16;
+  var GRIP_STEP = 8; // pointer px per update; each step moves the width by 16px
   // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: the serve endpoint (token included) the hover card
   // fetches its prompt list from; empty = the feature stays unmounted.
   // A serve restart rotates the token while css/chat stay identical \u2014 the
@@ -510,11 +525,15 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
   // stamp the newest eval would keep that stale closure (which, e.g., knows
   // nothing about goal markers and restores plain titles). Bump whenever the
   // title engine's behavior changes.
-  var TC_VER = '3';
+  var TC_VER = '5';
   var TC_SEL = '[data-task-title-copy]';
   var TC_SRC_CLS = 'zb-tc-src';
   var TC_VIEW_CLS = 'zb-tc-view';
   var TC_LINK = /\\[((?:\\\\.|[^\\\\\\]])*)\\]\\((?:<((?:\\\\.|[^>])*?)>|((?:\\\\.|[^)])*))\\)/g;
+  // A first-input title is capped at 60 characters by ZCode itself, ellipsis
+  // included, so a mention link can lose its ")" (or its whole destination).
+  // This anchors the SAME link grammar at the end of the title.
+  var TC_LINK_CUT = /\\[((?:\\\\.|[^\\\\\\]])*)\\]\\(([^)]*)$/;
   var TC_INLINE = /(^|\\s)(\\$[a-zA-Z0-9._-]+|\\/[a-zA-Z0-9._-]+|@[a-zA-Z0-9._-]+|#(?:sess|session)_[a-zA-Z0-9._-]+)(?=$|\\s)/g;
   // Extension \u2192 material-icons/<name>.svg, ported from ZCode's
   // lib/fileDisplayHelpers.ts (aliases only where the extension and the asset
@@ -623,7 +642,7 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
       liveVid.play().catch(function() {});
     }
     window.__zcodeBeautify.vol = VOL;
-    if (window.__zcodeBeautify.chatKey !== CHAT) {
+    if (chatChanged) {
       window.__zcodeBeautify.chatKey = CHAT;
       applyChatLook();
     }
@@ -651,7 +670,7 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
   // slider drag must not replay the wallpaper transition. When ONLY the chat
   // look changed (wallpaper state identical + style element alive), apply it
   // and bail before any wallpaper work.
-  if (window.__zcodeBeautify.chatKey !== CHAT) {
+  if (chatChanged) {
     var chatOnly = window.__zcodeBeautify.cssText === ${JSON.stringify(payload.css)}
       && window.__zcodeBeautify.videoSrc === VIDEO_SRC
       && window.__zcodeBeautify.wpImg === WP_IMG
@@ -1030,6 +1049,7 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
   applyListPaging();
 
   function applyChatLook() {
+    window.__zcodeBeautify.chatStamp = CHAT_LOOK_VER;
     if (typeof CHAT_UI !== 'undefined' && !CHAT_UI) return;
     var C;
     try { C = JSON.parse(CHAT); } catch (e) { return; }
@@ -1051,6 +1071,13 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
     var perfOn = Number(C.perfSmooth) === 1;
     var decOn = Number(C.hideElapsedDecimal) === 1;
     var dragOn = Number(C.dragResize) === 1;
+    // 4.0 uses the same width for virtual history, live messages and the
+    // composer dock. Use a percentage for drag so every pane still fits its
+    // own timeline. With neither a preset nor a drag, leave native caps in place.
+    var v4Columns = V4_TIMELINE + ' ' + V4_COLUMNS;
+    var v4DragColumns = 'html.zb-chat-width-dragged ' + v4Columns;
+    var v4Preset = 'min(100%,' + cap + 'rem,max(' + GRIP_MIN + 'px,calc(100% - ' + inset + 'rem)))';
+    var v4DragWidth = 'min(100%,clamp(' + GRIP_MIN + 'px,var(--zb-chat-width-pct),calc(100% - ' + GRIP_MARGIN + 'px)))';
     // \u6807\u9898\u6587\u4EF6\u5F15\u7528: sidebar titles parse like the message bubble (default on).
     var tcOn = Number(C.titleCites) === 1;
     // \u4F1A\u8BDD\u6982\u89C8\u60AC\u505C\u5361: needs the serve endpoint; without it the toggle is a
@@ -1136,11 +1163,12 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
           + '@container conversation (min-width:864px){'
           + '[class*="conversation:max-w-4xl"]{max-width:' + cap + 'rem!important}'
           + '}'
-          // ZCode 4.0 collapsed those two tiers into one max-w-xl holder
-          // (class "@min-[624px]/conversation:max-w-xl"). Give it its own
-          // breakpoint so the width cap lands where the column appears.
-          + '@container conversation (min-width:624px){'
-          + '[class*="/conversation:max-w-xl"]{max-width:' + cap + 'rem!important;width:calc(100% - ' + inset + 'rem)!important}'
+        : '')
+      + (widthOn || dragOn
+        ? '@container conversation (min-width:' + V4_WIDTH_BREAKPOINT + 'px){'
+          + (widthOn ? v4Columns + '{width:' + v4Preset + '!important;max-width:none!important}' : '')
+          + (dragOn ? v4DragColumns + '{width:' + v4DragWidth + '!important;max-width:none!important}' : '')
+          + (widthOn ? v4Columns : v4DragColumns) + ' .chat-composer-region{max-width:none!important}'
           + '}'
         : '')
       + (dragOn
@@ -1164,10 +1192,6 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
           + '[class*="conversation:max-w-6xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 72) + 'rem)!important;'
           + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? inset : 24) + 'rem))!important}'
           + '}'
-          + '@container conversation (min-width:624px){'
-          + '[class*="/conversation:max-w-xl"]{max-width:var(--zb-chat-w,' + (widthOn ? cap : 36) + 'rem)!important;'
-          + 'width:calc(100% - var(--zb-chat-inset,' + (widthOn ? Math.max(inset, 6) : 6) + 'rem))!important}'
-          + '}'
           // The strips: fixed 9px hit zones hugging the column edges,
           // invisible until hover (a 3px accent line), col-resize cursor.
           // z-index 40 stays under Tailwind's z-50 dropdown/modals.
@@ -1182,12 +1206,12 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
           // relayouts on top of the virtualizer's re-measure). While a drag
           // is active the transition is cut and the width updates in
           // quantized 16px steps (see GRIP_STEP) instead of every pointermove.
-          + 'html.zb-grip-active [class*="conversation:max-w-"]{transition:none!important}'
+          + 'html.zb-grip-active :is(' + LEGACY_COLUMNS + ',' + v4Columns + '){transition:none!important}'
           // Composer floor (\u5B9E\u6D4B: if a width var ever goes invalid the calc
           // becomes unset \u2192 the composer holder, a flex-row child, collapses
           // to min-content (~40px strip) while block-parented message holders
           // just fill. A literal floor can never go invalid).
-          + 'html.zb-grip-active [class*="conversation:max-w-"]{min-width:460px!important}'
+          + 'html.zb-grip-active :is(' + LEGACY_COLUMNS + '){min-width:460px!important}'
         : '')
       // \u6807\u9898\u6587\u4EF6\u5F15\u7528 chips: the sidebar title is plain text, so the converted
       // parts render through these rules. Colors ride the same
@@ -1293,7 +1317,7 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
     // resizes without DOM mutations) and a window resize listener.
     window.__zcodeBeautify.dragOn = dragOn;
     if (dragOn) {
-      // GRIP_VER guards against a renderer reload re-running EVERY bootstrap
+      // The version guards against a renderer reload re-running EVERY bootstrap
       // ever registered via addScriptToEvaluateOnNewDocument (they
       // accumulate; nothing can deregister them): the OLDEST script mounts
       // first and wires its own \u2014 possibly outdated \u2014 pointer handlers, and
@@ -1302,19 +1326,13 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
       // legacy strips, and force-remounts them with live wiring. The remount
       // also disconnects whatever observers an older generation installed
       // (they share the window.__zcodeBeautify slots and would otherwise
-      // keep feeding their outdated sync forever). Bump the marker whenever
-      // the grip engine changes behavior.
-      var GRIP_VER = '4';
+      // keep feeding their outdated sync forever).
       // One-line migration: the pre-pct build stored an absolute rem width.
-      // LITERAL key on purpose \u2014 applyChatLook runs BEFORE the engine
-      // constants below get their assignments (var hoisting moves the
-      // declarations, not the values; BUB/RECIPES sit at the top of this
-      // body for exactly this reason).
       try { localStorage.removeItem('zcode-beautify:chat-drag-w'); } catch (e5) {}
       var gl = document.getElementById(MARKER + '-grip-l');
       var gr = document.getElementById(MARKER + '-grip-r');
-      if (gl && gl.getAttribute('data-zb-ver') !== GRIP_VER) gl = null;
-      if (gr && gr.getAttribute('data-zb-ver') !== GRIP_VER) gr = null;
+      if (gl && gl.getAttribute('data-zb-ver') !== CHAT_LOOK_VER) gl = null;
+      if (gr && gr.getAttribute('data-zb-ver') !== CHAT_LOOK_VER) gr = null;
       if (!gl || !gr) {
         // Full clean slate: grips, observers, resize listener, drag state,
         // position/content caches \u2014 an older generation may have left any of
@@ -1322,19 +1340,21 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
         zbGripClean();
         gl = document.createElement('div');
         gl.id = MARKER + '-grip-l';
-        gl.setAttribute('data-zb-ver', GRIP_VER);
+        gl.setAttribute('data-zb-ver', CHAT_LOOK_VER);
         gr = document.createElement('div');
         gr.id = MARKER + '-grip-r';
-        gr.setAttribute('data-zb-ver', GRIP_VER);
+        gr.setAttribute('data-zb-ver', CHAT_LOOK_VER);
         document.documentElement.appendChild(gl);
         document.documentElement.appendChild(gr);
         zbGripWire(gl, false);
         zbGripWire(gr, true);
         document.addEventListener('keydown', zbGripEsc);
+        window.__zcodeBeautify.gripKeydown = zbGripEsc;
+        window.__zcodeBeautify.gripCleanup = zbGripClean;
       }
       if (!window.__zcodeBeautify.gripObs) {
         var gObs = new MutationObserver(zbGripSched);
-        gObs.observe(document.documentElement, { childList: true, subtree: true });
+        gObs.observe(document.documentElement, { childList: true, subtree: true, attributeFilter: ['data-focused', 'hidden'] });
         window.__zcodeBeautify.gripObs = gObs;
       }
       if (!window.__zcodeBeautify.gripWinResize) {
@@ -1951,6 +1971,74 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
     }
     if (cursor < seg.length) parts.push({ t: 'text', v: seg.slice(cursor) });
   }
+  // A mention destination arrives markdown-escaped: Windows separators are
+  // doubled ("C:\\\\Users") and parentheses/brackets are backslash-escaped.
+  function zbTcHref(dest) {
+    return String(dest == null ? '' : dest).replace(/\\\\([\\\\()[\\]<>])/g, '$1');
+  }
+  // A dangling link only renders when its destination still says "local
+  // path": a plain-word tail like "[0](\u6CE8\u91CA" must stay text, not lose \u6CE8\u91CA.
+  function zbTcCutDest(dest) {
+    if (!dest) return false;
+    if (/^[a-zA-Z]:/.test(dest)) return true;
+    if (dest.indexOf('file://') === 0) return true;
+    if (dest.charAt(0) === '/' || dest.charAt(0) === '\\\\') return true;
+    if (dest.indexOf('./') === 0 || dest.indexOf('../') === 0) return true;
+    if (dest.indexOf('.\\\\') === 0 || dest.indexOf('..\\\\') === 0) return true;
+    return false;
+  }
+  // One classifier for complete and truncated links: the grammar follows the
+  // bubble's (mentionMarkdown.ts). Returns null when the link is a web URL.
+  function zbTcLinkPart(label, dest, cut) {
+    var cleanLabel = label.replace(/^@/, '');
+    if (/^#(?:sess|session)_[a-zA-Z0-9._-]+$/.test(dest)) {
+      return { t: 'session', label: label.replace(/^#/, '') };
+    }
+    if (dest.indexOf('zcode-element://') === 0) {
+      return { t: 'element', label: cleanLabel, dest: dest };
+    }
+    if (dest.indexOf('plugin://') === 0) {
+      return { t: 'plugin', label: cleanLabel, dest: dest };
+    }
+    if (label.charAt(0) === '$') {
+      return { t: 'skill', label: zbTcSkillLabel(label.slice(1)), dest: zbTcHref(dest), cut: !!cut };
+    }
+    if (cut) {
+      if (!zbTcCutDest(dest)) return null;
+      if (/[\\\\/]$/.test(dest)) {
+        return { t: 'dir', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: zbTcHref(dest), cut: true };
+      }
+      return { t: 'file', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: zbTcHref(dest), cut: true };
+    }
+    if (/[\\\\/]$/.test(dest)) {
+      return { t: 'dir', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: dest };
+    }
+    if (zbTcLocal(dest)) {
+      return { t: 'file', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: zbTcHref(dest) };
+    }
+    return null;
+  }
+  // The remainder after every complete link. ZCode's "..." is the truncation
+  // marker, not part of the path: keep it visible, hide only the partial path.
+  function zbTcTail(parts, seg) {
+    var m = TC_LINK_CUT.exec(seg);
+    if (m) {
+      var cutLabel = zbTcUnescape(m[1]);
+      var cutDest = m[2] || '';
+      var marker = '';
+      if (cutDest.slice(-3) === '...') marker = '...';
+      else if (cutDest.slice(-1) === '\u2026') marker = '\u2026';
+      if (marker) cutDest = cutDest.slice(0, cutDest.length - marker.length);
+      var part = zbTcLinkPart(cutLabel, cutDest, true);
+      if (part) {
+        if (m.index > 0) zbTcInline(parts, seg.slice(0, m.index));
+        parts.push(part);
+        if (marker) parts.push({ t: 'text', v: marker });
+        return;
+      }
+    }
+    zbTcInline(parts, seg);
+  }
   // The bubble's grammar (mentionMarkdown.ts parseMentionMarkdown), minus the
   // transport-only schemes: any markdown link becomes a colored chip; file
   // chips need a local destination, web links keep their label as plain text.
@@ -1964,28 +2052,11 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
       if (m.index > cursor) zbTcInline(parts, text.slice(cursor, m.index));
       var label = zbTcUnescape(m[1]);
       var dest = m[2] != null ? m[2] : (m[3] != null ? m[3] : '');
-      var cleanLabel = label.replace(/^@/, '');
-      if (/^#(?:sess|session)_[a-zA-Z0-9._-]+$/.test(dest)) {
-        parts.push({ t: 'session', label: label.replace(/^#/, '') });
-      } else if (dest.indexOf('zcode-element://') === 0) {
-        parts.push({ t: 'element', label: cleanLabel, dest: dest });
-      } else if (dest.indexOf('plugin://') === 0) {
-        parts.push({ t: 'plugin', label: cleanLabel, dest: dest });
-      } else if (label.charAt(0) === '$') {
-        parts.push({ t: 'skill', label: zbTcSkillLabel(label.slice(1)) });
-      } else if (/[\\\\/]$/.test(dest)) {
-        parts.push({ t: 'dir', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: dest });
-      } else if (zbTcLocal(dest)) {
-        var href = dest.replace(/\\\\([\\\\()[\\]<>])/g, '$1');
-        parts.push({ t: 'file', label: zbTcLeaf(cleanLabel) || cleanLabel, dest: href });
-      } else {
-        // Web link inside a title: show its label, never the markdown, and
-        // never a misleading file icon.
-        parts.push({ t: 'text', v: label });
-      }
+      var part = zbTcLinkPart(label, dest, false);
+      parts.push(part || { t: 'text', v: label });
       cursor = m.index + full.length;
     }
-    if (cursor < text.length) zbTcInline(parts, text.slice(cursor));
+    if (cursor < text.length) zbTcTail(parts, text.slice(cursor));
     if (!parts.length) parts.push({ t: 'text', v: text });
     return parts;
   }
@@ -2099,8 +2170,10 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
         // Injected goal marker: hover reveals the goal state the generated
         // title dropped (status + summary).
         chip.title = 'goal' + (p.goalStatus ? ' \xB7 ' + p.goalStatus : '') + (p.goalTitle ? ' \xB7 ' + p.goalTitle : '');
-      } else if (p.dest) chip.title = p.dest;
-      if (p.t === 'file') chip.appendChild(zbTcFileIcon(zbTcIconName(p.dest || p.label)));
+      } else if (p.dest) chip.title = p.dest + (p.cut ? '\u2026' : '');
+      // A cut destination can lose its extension ("PersonalActivity.l\u2026");
+      // the link label is still the complete filename, so icon from it.
+      if (p.t === 'file') chip.appendChild(zbTcFileIcon(zbTcIconName((p.cut ? p.label : p.dest) || p.label)));
       else if (p.t === 'dir') chip.appendChild(zbTcFileIcon('folder'));
       else if (p.t === 'command') chip.insertAdjacentHTML('beforeend', p.cmd === 'goal' || p.cmd === 'target' ? TC_SVG.goal : TC_SVG.command);
       else if (TC_SVG[p.t]) chip.insertAdjacentHTML('beforeend', TC_SVG[p.t]);
@@ -2400,29 +2473,24 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
   // pin full-width after a restore and dwarf on maximize. Double-clicking a
   // strip clears it back to the tier fallbacks. Outside the chat (no
   // scroller/holder \u2014 settings, route changes) the strips hide.
-  var GRIP_KEY = 'zcode-beautify:chat-drag-pct';
-  var GRIP_KEY_OLD = 'zcode-beautify:chat-drag-w'; // pre-pct absolute rem \u2014 dropped
-  var GRIP_MIN = 460;   // px \u2014 narrower than the narrowest panel tier (48rem)
-  var GRIP_MARGIN = 16; // px \u2014 minimum side breathing room at full width
-  var GRIP_STEP = 8;    // pointer px per update \u2014 the width moves 2\xD7 this.
-                        // Quantization: one relayout per step instead of one
-                        // per pointermove (the dynamic-height virtualizer
-                        // re-measures the whole conversation on every width
-                        // change; continuous 1px updates made the drag
-                        // unusably janky).
   // pct (0-100) \u2192 applied px for the CURRENT container, clamped to the drag
   // range. Zero-width layouts (jsdom, hidden) yield no usable clamp \u2014 caller
   // checks contentW first.
   function zbGripPctToPx(pct, contentW) {
     return Math.max(GRIP_MIN, Math.min(contentW - GRIP_MARGIN, pct / 100 * contentW));
   }
-  function zbGripFont() {
-    return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  function zbGripSetPct(pct) {
+    var root = document.documentElement;
+    var value = pct + '%';
+    if (root.style.getPropertyValue('--zb-chat-width-pct') !== value) {
+      root.style.setProperty('--zb-chat-width-pct', value);
+    }
+    root.classList.toggle('zb-chat-width-dragged', true);
   }
   // Width vars: --zb-chat-w is the dragged ceiling; --zb-chat-inset shrinks
   // with it (max(16px, container \u2212 W)) so the column can go nearly full
   // width. Only applied on a sane layout (jsdom measures 0 everywhere).
-  function zbGripApply(px, contentW) {
+  function zbGripApply(px, contentW, pct) {
     // Hard gate: a non-finite px would write 'NaNpx' into the vars, and an
     // invalid var turns the tiers' width calc into unset \u2192 the composer
     // (flex-row child) collapses to min-content while the message holders
@@ -2435,18 +2503,21 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
     if (isFinite(contentW) && contentW > 100) {
       var iv = Math.max(GRIP_MARGIN, Math.round(contentW - px)) + 'px';
       if (rs.getPropertyValue('--zb-chat-inset') !== iv) rs.setProperty('--zb-chat-inset', iv);
+      zbGripSetPct(pct ?? 100 * px / contentW);
     }
   }
   function zbGripClear() {
     var rs = document.documentElement.style;
     rs.removeProperty('--zb-chat-w');
     rs.removeProperty('--zb-chat-inset');
+    rs.removeProperty('--zb-chat-width-pct');
+    document.documentElement.classList.toggle('zb-chat-width-dragged', false);
   }
   function zbGripRestore() {
     var pct = parseFloat(localStorage.getItem(GRIP_KEY));
     var cw = window.__zcodeBeautify.gripContentW || 0;
     if (isFinite(pct) && pct > 0 && pct <= 100 && cw > 100) {
-      zbGripApply(zbGripPctToPx(pct, cw), cw);
+      zbGripApply(zbGripPctToPx(pct, cw), cw, pct);
     } else {
       zbGripClear();
     }
@@ -2468,6 +2539,11 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
       window.removeEventListener('resize', window.__zcodeBeautify.gripWinResize);
       window.__zcodeBeautify.gripWinResize = null;
     }
+    if (window.__zcodeBeautify.gripKeydown) {
+      document.removeEventListener('keydown', window.__zcodeBeautify.gripKeydown);
+      window.__zcodeBeautify.gripKeydown = null;
+    }
+    window.__zcodeBeautify.gripCleanup = null;
     if (window.__zcodeBeautify.gripRaf && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(window.__zcodeBeautify.gripRaf);
     }
@@ -2480,6 +2556,7 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
     zbGripClear();
     window.__zcodeBeautify.gripScroller = null;
     window.__zcodeBeautify.gripHolder = null;
+    window.__zcodeBeautify.gripContentW = 0;
     // The position cache MUST die with the strips: a fresh mount creates new
     // elements with empty inline styles, and a stale "already written" cache
     // would suppress the repositioning forever (measured live: remounted
@@ -2515,10 +2592,21 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
       }
     });
   }
+  function zbGripFindTimeline() {
+    var timelines = document.querySelectorAll(V4_TIMELINE);
+    var firstVisible = null;
+    for (var i = 0; i < timelines.length; i++) {
+      var timeline = timelines[i];
+      if (!timeline.clientWidth || !timeline.clientHeight) continue;
+      if (timeline.closest('[data-pane-id][data-focused="true"]')) return timeline;
+      if (!firstVisible) firstVisible = timeline;
+    }
+    return firstVisible;
+  }
   function zbGripSync() {
     var gl = document.getElementById(MARKER + '-grip-l');
     var gr = document.getElementById(MARKER + '-grip-r');
-    if (!gl || !gr) return;
+    if (!gl || !gr || window.__zcodeBeautify.gripDrag) return;
     // Self-heal: garbage vars left by ANY older engine generation (they all
     // shared window.__zcodeBeautify and their observers could outlive them)
     // make the tiers' width calc invalid \u2192 composer min-content collapse.
@@ -2528,9 +2616,11 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
       var vv = rs0.getPropertyValue(vn);
       if (vv && !isFinite(parseFloat(vv))) rs0.removeProperty(vn);
     }
-    var scroller = window.__zcodeBeautify.gripScroller;
-    if (!scroller || !scroller.isConnected) {
-      // Same rule as markChatCol: the composer's first TALL scroll ancestor.
+    var prevScroller = window.__zcodeBeautify.gripScroller;
+    var scroller = zbGripFindTimeline() || prevScroller;
+    if (!scroller || !scroller.isConnected || (!scroller.clientWidth && scroller.matches(V4_TIMELINE))) {
+      // Older renderers without the timeline marker use the composer's
+      // first tall scroll ancestor.
       scroller = null;
       var ed = document.querySelector('[contenteditable="true"]');
       var p = ed && ed.parentElement;
@@ -2539,6 +2629,8 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
         if ((oy === 'auto' || oy === 'scroll') && p.getBoundingClientRect().height > 300) { scroller = p; break; }
         p = p.parentElement;
       }
+    }
+    if (scroller !== prevScroller) {
       window.__zcodeBeautify.gripScroller = scroller;
       if (window.__zcodeBeautify.gripRO) {
         try { window.__zcodeBeautify.gripRO.disconnect(); } catch (e) {}
@@ -2552,8 +2644,11 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
         } catch (e2) {}
       }
     }
-    var holder = scroller ? scroller.querySelector('[class*="conversation:max-w-"]') : null;
-    if (!holder) holder = document.querySelector('[class*="conversation:max-w-"]');
+    var holder = scroller && scroller.querySelector(LEGACY_COLUMNS);
+    var legacy = !!holder;
+    if (!holder && scroller && scroller.matches(V4_TIMELINE)) holder = scroller.querySelector(V4_COLUMNS);
+    var container = holder && holder.closest('[class~="@container/conversation"]');
+    if (container && container.clientWidth < (legacy ? 864 : V4_WIDTH_BREAKPOINT)) holder = null;
     window.__zcodeBeautify.gripHolder = holder;
     // Content width the holder's percentage width resolves against (parent
     // content box) \u2014 the inset var derives from it. Cached for pointermove's
@@ -2570,13 +2665,14 @@ ${startupProbeJs(payload.startupProbe ?? "zcode-body-class")}
     // every sync so maximize/restore (and any container resize) rescale the
     // column proportionally instead of pinning an absolute px width.
     var storedPct = parseFloat(localStorage.getItem(GRIP_KEY));
-    if (isFinite(storedPct) && storedPct > 0 && storedPct <= 100 && contentW > 100) {
-      zbGripApply(zbGripPctToPx(storedPct, contentW), contentW);
-    } else if (!window.__zcodeBeautify.gripDrag && document.documentElement.style.getPropertyValue('--zb-chat-inset')) {
-      // No stored width and not mid-drag: back to the tier fallbacks. (During
-      // a drag pointermove owns the vars \u2014 a concurrent sync must not strip
-      // the inset it just derived.)
-      document.documentElement.style.removeProperty('--zb-chat-inset');
+    var hasStoredWidth = isFinite(storedPct) && storedPct > 0 && storedPct <= 100;
+    if (hasStoredWidth && contentW > 100) {
+      zbGripApply(zbGripPctToPx(storedPct, contentW), contentW, storedPct);
+    } else {
+      zbGripClear();
+      // A focused narrow pane or a hidden chat has no drag geometry, but
+      // any other wide pane can still use the saved percentage in CSS.
+      if (hasStoredWidth) zbGripSetPct(storedPct);
     }
     var sr = scroller ? scroller.getBoundingClientRect() : null;
     var hr = holder ? holder.getBoundingClientRect() : null;
@@ -3394,6 +3490,9 @@ function buildResetScript(marker = "zcode-beautify", opts = {}) {
     window.__zcodeBeautify.cssText = null; window.__zcodeBeautify.videoSrc = null;
     window.__zcodeBeautify.wpImg = null; window.__zcodeBeautify.finishFade = null;
     window.__zcodeBeautify.chatKey = null;
+    window.__zcodeBeautify.chatStamp = null;
+    window.__zcodeBeautify.dragOn = false;
+    window.__zcodeBeautify.gripCleanup?.();
     window.__zcodeBeautify.bubbleKey = null;
     window.__zcodeBeautify.spinnerKey = null;
     window.__zcodeBeautify.loadKey = null;
@@ -113398,7 +113497,7 @@ var VERSION, REPO_URL, FORK_URL, AUTHOR, LICENSE;
 var init_version = __esm({
   "dist/version.js"() {
     "use strict";
-    VERSION = "6.4.0";
+    VERSION = "6.4.1";
     REPO_URL = "https://github.com/Logocceai/zcode-beautify";
     FORK_URL = "https://github.com/Mc-GrowlR/zcode-beautify-for-wallpaper-engine";
     AUTHOR = "Mc-GrowlR";

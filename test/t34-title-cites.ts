@@ -196,6 +196,124 @@ doc.body.appendChild(sidebar);
   check("off keeps a just-landed React title", original.textContent === "[Fresh.mjs](./src/Fresh.mjs) 新标题", String(original.textContent));
 }
 
+// --- part C1b: ZCode-truncated titles keep their citation chips --------------
+// ZCode caps a first-input title at 60 characters, ellipsis included, and
+// stores Windows separators markdown-escaped. A mention link can therefore
+// arrive without its closing ")" — live example:
+//   使用 [$shentu-tool-script](C:\\Users\\Administrator\\.zcode...
+// (the DB title is exactly 60 chars). The same grammar must still classify it.
+{
+  const domT = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "http://127.0.0.1/",
+    pretendToBeVisual: true,
+    runScripts: "outside-only",
+  });
+  const wt = domT.window;
+  const dt = wt.document;
+  const sidebarT = dt.createElement("aside");
+  dt.body.appendChild(sidebarT);
+  const bootT = (on: number) =>
+    wt.eval(buildBootstrapScript({
+      css: "",
+      chatLook: normalizeChatLook({ titleCites: on }),
+      wallpaperDataUri: "",
+      videoSrc: "",
+    }));
+  const rowT = (title: string) => {
+    const li = dt.createElement("li");
+    li.setAttribute("data-testid", "task-item-sess_t34cut");
+    const span = dt.createElement("span");
+    span.setAttribute("data-task-title-copy", "original");
+    span.textContent = title;
+    li.appendChild(span);
+    sidebarT.appendChild(li);
+    return span;
+  };
+  const viewT = (span: HTMLElement) => span.querySelector<HTMLElement>(":scope > .zb-tc-view");
+  const chipsT = (span: HTMLElement) => [...(viewT(span)?.querySelectorAll(".zb-tc") ?? [])] as HTMLElement[];
+  const byKindT = (chips: HTMLElement[], k: string) => chips.filter((c) => c.getAttribute("data-k") === k);
+
+  // The repro input, escaped the way ZCode persists a mention (\\ per Windows
+  // separator), then cut by ZCode's 57-char + "..." cap.
+  const FULL = "使用 [$shentu-tool-script](C:\\\\Users\\\\Example\\\\.agents\\\\skills\\\\shentu-tool-script\\\\SKILL.md) 修改配置";
+  const TITLE = FULL.slice(0, 57) + "...";
+  check("fixture mirrors ZCode's 60-char title cap", TITLE.length === 60 && TITLE.endsWith("..."), `${TITLE.length} / ${TITLE}`);
+  const skillRow = rowT(TITLE);
+  // The exact DB/DOM title captured from the live failing row (60 chars).
+  const LIVE = "使用 [$shentu-tool-script](C:\\\\Users\\\\Administrator\\\\.zcode...";
+  check("live title fixture is the real 60-char string", LIVE.length === 60);
+  const liveRow = rowT(LIVE);
+  // Complete file link followed by a truncated skill link (mixed order).
+  const MIXED = "把 [GameSettingBasic.lua](./GUILayout/GameSettingBasic.lua) 用 [$shentu-tool-script](C:\\\\Users\\\\Example\\\\.agents\\\\skills\\\\shentu-tool-script\\\\SKILL.md";
+  const mixedRow = rowT(MIXED);
+  // A file link cut by the same cap (another live shape).
+  const CUT_FILE = "将 [GameSettingBasic.lua](./GUILayout/GameSettingBasic.lua...";
+  const fileRow = rowT(CUT_FILE);
+  // The cap can also cut the extension itself; the label keeps the icon right.
+  const CUT_EXT = "[PersonalActivity.lua](./script/system/PersonalActivity.l...";
+  const extRow = rowT(CUT_EXT);
+  // Complete skill link: the refactor must keep the original grammar.
+  const FILE_SKILL = "[$code-review](./skills/code-review/SKILL.md) 审查";
+  const fullRow = rowT(FILE_SKILL);
+  const toggleRow = rowT(TITLE);
+
+  bootT(1);
+
+  const skillChips = chipsT(skillRow);
+  check("truncated skill link renders one chip", skillChips.length === 1, String(skillChips.length));
+  check("truncated skill chip kind", skillChips[0]?.getAttribute("data-k") === "skill");
+  check("truncated skill chip label", skillChips[0]?.querySelector(".zb-tc-t")?.textContent === "Shentu Tool Script", String(skillChips[0]?.querySelector(".zb-tc-t")?.textContent));
+  check("truncated skill chip uses the skill glyph", !!skillChips[0]?.querySelector("svg") && !skillChips[0]?.querySelector("img"));
+  const cutTip = skillChips[0]?.getAttribute("title") || "";
+  check("truncated skill tooltip = unescaped partial path", cutTip.indexOf("C:\\Users\\Example\\.agents") === 0 && cutTip.endsWith("…"), cutTip);
+  const skillVis = viewT(skillRow)?.textContent || "";
+  check("truncated title keeps surrounding text + ellipsis", skillVis.startsWith("使用 ") && skillVis.endsWith("..."), skillVis);
+  check("truncated title hides markdown and the path", !skillVis.includes("](") && !skillVis.includes("C:") && !skillVis.includes("\\"), skillVis);
+  check("raw truncated title still remembered", skillRow.__zbTc?.raw === TITLE);
+
+  const liveChips = chipsT(liveRow);
+  check("live failing title renders one skill chip", liveChips.length === 1 && liveChips[0].getAttribute("data-k") === "skill", String(liveChips.length));
+  check("live failing title label", liveChips[0]?.querySelector(".zb-tc-t")?.textContent === "Shentu Tool Script");
+  check("live failing title visible text", (viewT(liveRow)?.textContent || "") === "使用 Shentu Tool Script...", String(viewT(liveRow)?.textContent));
+
+  const mixedChips = chipsT(mixedRow);
+  check("mixed title renders file + skill chips", byKindT(mixedChips, "file").length === 1 && byKindT(mixedChips, "skill").length === 1, String(mixedChips.length));
+  check("mixed file chip keeps its complete path", byKindT(mixedChips, "file")[0]?.getAttribute("title") === "./GUILayout/GameSettingBasic.lua", String(byKindT(mixedChips, "file")[0]?.getAttribute("title")));
+  check("mixed skill chip keeps the formatted label", byKindT(mixedChips, "skill")[0]?.querySelector(".zb-tc-t")?.textContent === "Shentu Tool Script");
+  const mixedVis = viewT(mixedRow)?.textContent || "";
+  check("mixed title keeps both labels, no markdown", mixedVis.includes("GameSettingBasic.lua") && mixedVis.includes("Shentu Tool Script") && !mixedVis.includes("]("), mixedVis);
+
+  const cutFileChips = chipsT(fileRow);
+  check("truncated file link renders a file chip", cutFileChips.length === 1 && cutFileChips[0].getAttribute("data-k") === "file");
+  check("truncated file chip label", cutFileChips[0]?.querySelector(".zb-tc-t")?.textContent === "GameSettingBasic.lua");
+  const cutFileTip = cutFileChips[0]?.getAttribute("title") || "";
+  check("truncated file tooltip marked partial", cutFileTip.indexOf("./GUILayout/GameSettingBasic.lua") === 0 && cutFileTip.endsWith("…"), cutFileTip);
+  check("truncated file visible ellipsis", (viewT(fileRow)?.textContent || "").endsWith("..."));
+
+  const extChips = chipsT(extRow);
+  check("cut extension keeps the label's icon", extChips.length === 1 && (extChips[0].querySelector("img")?.getAttribute("src") || "").endsWith("/material-icons/lua.svg"), String(extChips[0]?.querySelector("img")?.getAttribute("src")));
+
+  const fullChips = chipsT(fullRow);
+  check("complete skill link still renders", fullChips.length === 1 && fullChips[0].getAttribute("data-k") === "skill" && fullChips[0].querySelector(".zb-tc-t")?.textContent === "Code Review");
+  check("complete skill link exposes its path", fullChips[0]?.getAttribute("title") === "./skills/code-review/SKILL.md", String(fullChips[0]?.getAttribute("title")));
+
+  // A React-style title update (same text node) re-parses the new truncation.
+  const skillText = [...skillRow.childNodes].find((n) => n.nodeType === 3) as Text;
+  skillText.nodeValue = "改用 [$code-review](C:\\\\Skills\\\\code-review\\\\SKILL.md...";
+  await sleep(80);
+  const updated = chipsT(skillRow);
+  check("title update re-renders the truncated skill", updated.length === 1 && updated[0].querySelector(".zb-tc-t")?.textContent === "Code Review", String(updated.length));
+  check("updated tooltip is a partial path", (updated[0]?.getAttribute("title") || "").endsWith("…"));
+  check("updated node re-blanked", skillText.nodeValue === "");
+
+  // Toggle OFF: every raw title comes back exactly as ZCode stored it.
+  bootT(0);
+  check("off: truncated chip layers removed", !viewT(toggleRow) && !toggleRow.hasAttribute("data-zb-tc"));
+  check("off: original truncated title restored", toggleRow.textContent === TITLE, String(toggleRow.textContent));
+  check("off: updated title restored", skillRow.textContent === "改用 [$code-review](C:\\\\Skills\\\\code-review\\\\SKILL.md...", String(skillRow.textContent));
+  check("off: mixed title restored", mixedRow.textContent === MIXED);
+}
+
 // --- part C2: goal sessions keep a marker after the title lost /goal ---------
 {
   const dom2 = new JSDOM("<!doctype html><html><body></body></html>", {
